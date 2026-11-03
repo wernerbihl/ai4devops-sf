@@ -1,0 +1,4711 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai4devops-sf:protocol:1",
+  "title": "Factory protocol v1",
+  "$defs": {
+    "ProviderId": {
+      "type": "string",
+      "enum": [
+        "copilot",
+        "codex"
+      ]
+    },
+    "FinishPolicy": {
+      "type": "string",
+      "enum": [
+        "result",
+        "pr",
+        "merge_ci",
+        "merge_bypass"
+      ]
+    },
+    "TaskStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting_input",
+        "waiting_ci",
+        "needs_attention",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "TaskSource": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "automatic",
+        "recipe"
+      ]
+    },
+    "RequiredCapabilities": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "root": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "write"
+                ]
+              }
+            },
+            "required": [
+              "root",
+              "mode"
+            ]
+          }
+        },
+        "tools": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "networkDestinations": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "credentialRefs": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "allowedFinishPolicies": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FinishPolicy"
+          }
+        }
+      },
+      "required": [
+        "paths",
+        "tools",
+        "networkDestinations",
+        "credentialRefs",
+        "allowedFinishPolicies"
+      ]
+    },
+    "ExecutionDefaults": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providerId": {
+          "$ref": "#/$defs/ProviderId"
+        },
+        "finishPolicy": {
+          "$ref": "#/$defs/FinishPolicy"
+        }
+      },
+      "required": [
+        "ownerId",
+        "providerId",
+        "finishPolicy"
+      ]
+    },
+    "FactoryConfig": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "number"
+        },
+        "factoryDir": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "taktSeconds": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "limits": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "concurrency": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "activeMinutes": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "startsPerDay": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "transientRetries": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "concurrency",
+            "activeMinutes",
+            "startsPerDay",
+            "transientRetries"
+          ]
+        },
+        "defaultOwnerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "defaultProviderId": {
+          "$ref": "#/$defs/ProviderId"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "factoryDir",
+        "taktSeconds",
+        "limits",
+        "defaultOwnerId",
+        "defaultProviderId"
+      ]
+    },
+    "TaskSpec": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "parentId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "repositoryId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeRevision": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "tagId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/TaskSource"
+        },
+        "title": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "goal": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "acceptanceCriteria": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "skills": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "tools": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "context": {},
+        "finishPolicy": {
+          "$ref": "#/$defs/FinishPolicy"
+        },
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providerId": {
+          "$ref": "#/$defs/ProviderId"
+        },
+        "required": {
+          "$ref": "#/$defs/RequiredCapabilities"
+        }
+      },
+      "required": [
+        "id",
+        "repositoryId",
+        "recipeId",
+        "recipeRevision",
+        "tagId",
+        "source",
+        "title",
+        "description",
+        "goal",
+        "acceptanceCriteria",
+        "skills",
+        "tools",
+        "context",
+        "finishPolicy",
+        "ownerId",
+        "providerId",
+        "required"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "finishPolicy": {
+                "const": "result"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "finishPolicy": {
+                "const": "pr"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "pr"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "finishPolicy": {
+                "const": "merge_ci"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "merge_ci"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "finishPolicy": {
+                "const": "merge_bypass"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "merge_bypass"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CreateTaskRequest": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "title": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "repositoryIds": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "finishPolicy": {
+          "type": "string",
+          "enum": [
+            "result",
+            "pr",
+            "merge_ci",
+            "merge_bypass"
+          ]
+        },
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string",
+          "enum": [
+            "copilot",
+            "codex"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "recipeId",
+        "repositoryIds"
+      ]
+    },
+    "TaskTemplate": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "title": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "goal": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "acceptanceCriteria": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "skills": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "tools": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "context": {}
+      },
+      "required": [
+        "title",
+        "description",
+        "goal",
+        "acceptanceCriteria",
+        "skills",
+        "tools",
+        "context"
+      ]
+    },
+    "RecipeMetadata": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "number"
+        },
+        "recipeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "displayName": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "tagId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "inputSchema": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "taskTemplate": {
+          "$ref": "#/$defs/TaskTemplate"
+        },
+        "required": {
+          "$ref": "#/$defs/RequiredCapabilities"
+        },
+        "compatibleOwners": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "compatibleProviders": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderId"
+          }
+        },
+        "defaultFinishPolicy": {
+          "$ref": "#/$defs/FinishPolicy"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "recipeId",
+        "displayName",
+        "tagId",
+        "inputSchema",
+        "taskTemplate",
+        "required",
+        "compatibleOwners",
+        "compatibleProviders",
+        "defaultFinishPolicy"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "defaultFinishPolicy": {
+                "const": "result"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "result"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "defaultFinishPolicy": {
+                "const": "pr"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "pr"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "defaultFinishPolicy": {
+                "const": "merge_ci"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "merge_ci"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "defaultFinishPolicy": {
+                "const": "merge_bypass"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "object",
+                "properties": {
+                  "allowedFinishPolicies": {
+                    "type": "array",
+                    "contains": {
+                      "const": "merge_bypass"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "RecipeContract": {
+      "additionalProperties": true,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "namespace": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          }
+        },
+        "variables": {
+          "additionalProperties": true,
+          "type": "object",
+          "properties": {
+            "sf": {
+              "$ref": "#/$defs/RecipeMetadata"
+            }
+          },
+          "required": [
+            "sf"
+          ]
+        },
+        "tasks": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "namespace",
+        "variables",
+        "tasks"
+      ]
+    },
+    "RecipeRevision": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "hash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "tagId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "yaml": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "contract": {
+          "$ref": "#/$defs/RecipeContract"
+        },
+        "inputDefaults": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "repositoryIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "outputSchema": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "skillVersions": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          }
+        },
+        "toolVersions": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "recipeId",
+        "revision",
+        "hash",
+        "name",
+        "description",
+        "tagId",
+        "createdAt",
+        "yaml",
+        "contract",
+        "inputDefaults",
+        "repositoryIds",
+        "outputSchema",
+        "skillVersions",
+        "toolVersions"
+      ]
+    },
+    "NativeIdentity": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providerId": {
+          "$ref": "#/$defs/ProviderId"
+        },
+        "sessionId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "chatId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ownerId",
+        "providerId",
+        "sessionId"
+      ]
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "inputTokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outputTokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "estimated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "estimated"
+      ]
+    },
+    "NativeInput": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "schema": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "prompt": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "schema",
+        "prompt"
+      ]
+    },
+    "NativeSnapshot": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/NativeIdentity"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "waiting",
+            "idle",
+            "lost"
+          ]
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NativeInput"
+          }
+        },
+        "usage": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "inputTokens": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "outputTokens": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "estimated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "estimated"
+          ]
+        }
+      },
+      "required": [
+        "identity",
+        "state",
+        "inputs"
+      ]
+    },
+    "NativeStart": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "workspacePath": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "baseSha": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "fence": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "profileId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "attemptId",
+        "task",
+        "workspacePath",
+        "baseSha",
+        "fence",
+        "profileId"
+      ]
+    },
+    "CapabilityReport": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "ready": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "supportedProviders": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderId"
+          }
+        },
+        "verifiedProfileIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ready",
+        "reasons",
+        "supportedProviders",
+        "verifiedProfileIds",
+        "version"
+      ]
+    },
+    "TaskResult": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "evidence": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "createdTaskIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "result",
+            "changes",
+            "needs_input"
+          ]
+        },
+        "headSha": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attemptId",
+        "summary",
+        "evidence",
+        "createdTaskIds",
+        "outcome"
+      ]
+    },
+    "ApiError": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recovery": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "recovery",
+        "retryable"
+      ]
+    },
+    "TaskRecord": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "spec": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "controlMode": {
+          "type": "string",
+          "enum": [
+            "factory",
+            "human"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "attemptIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "childTaskIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recovery": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "result": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "attemptId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "summary": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "evidence": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "createdTaskIds": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "result",
+                "changes",
+                "needs_input"
+              ]
+            },
+            "headSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attemptId",
+            "summary",
+            "evidence",
+            "createdTaskIds",
+            "outcome"
+          ]
+        },
+        "archivedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spec",
+        "status",
+        "revision",
+        "controlMode",
+        "createdAt",
+        "updatedAt",
+        "attemptIds",
+        "childTaskIds"
+      ]
+    },
+    "WorkflowIdentity": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "executionId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "namespace": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "flowId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "executionId",
+        "namespace",
+        "flowId",
+        "revision"
+      ]
+    },
+    "WorkflowStart": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeRevision"
+        },
+        "inputs": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "scopeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "fence": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "attemptId",
+        "recipe",
+        "inputs",
+        "scopeId",
+        "fence"
+      ]
+    },
+    "WorkflowSnapshot": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/WorkflowIdentity"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "paused",
+            "completed",
+            "failed",
+            "cancelled",
+            "unknown"
+          ]
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NativeInput"
+          }
+        },
+        "result": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "attemptId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "summary": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "evidence": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "createdTaskIds": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "result",
+                "changes",
+                "needs_input"
+              ]
+            },
+            "headSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attemptId",
+            "summary",
+            "evidence",
+            "createdTaskIds",
+            "outcome"
+          ]
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "state",
+        "inputs"
+      ]
+    },
+    "Attempt": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "taskId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeRevision": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "baseSha": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "workspacePath": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "profileId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "fence": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "native": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "ownerId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "providerId": {
+              "$ref": "#/$defs/ProviderId"
+            },
+            "sessionId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "chatId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ownerId",
+            "providerId",
+            "sessionId"
+          ]
+        },
+        "workflow": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "executionId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "namespace": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "flowId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "revision": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "executionId",
+            "namespace",
+            "flowId",
+            "revision"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "startedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "endedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "activeDurationMs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "usage": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "inputTokens": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "outputTokens": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "estimated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "estimated"
+          ]
+        },
+        "result": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "attemptId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "summary": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "evidence": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "createdTaskIds": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "result",
+                "changes",
+                "needs_input"
+              ]
+            },
+            "headSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attemptId",
+            "summary",
+            "evidence",
+            "createdTaskIds",
+            "outcome"
+          ]
+        },
+        "retryOfAttemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "taskId",
+        "recipeRevision",
+        "baseSha",
+        "workspacePath",
+        "profileId",
+        "fence",
+        "status",
+        "createdAt",
+        "activeDurationMs"
+      ]
+    },
+    "AttentionRequest": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "taskId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "repositoryId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "factory",
+            "workflow",
+            "owner"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "input",
+            "approval",
+            "blocked",
+            "error"
+          ]
+        },
+        "prompt": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recovery": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "inputSchema": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "nativeInputId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "responded",
+            "resolved"
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "resolvedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "taskId",
+        "repositoryId",
+        "source",
+        "kind",
+        "prompt",
+        "recovery",
+        "inputSchema",
+        "status",
+        "createdAt",
+        "revision"
+      ]
+    },
+    "ActorScope": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "repositoryIds": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "recipeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeRevision": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "grantIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "expiresAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "fence": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attemptId",
+        "repositoryIds",
+        "recipeId",
+        "recipeRevision",
+        "grantIds",
+        "expiresAt",
+        "fence"
+      ]
+    },
+    "FindingInput": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "findingKey": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "relatedTaskId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repositoryId",
+        "recipeId",
+        "findingKey",
+        "task"
+      ]
+    },
+    "Grant": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recipeRevision": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "repositoryIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "required": {
+          "$ref": "#/$defs/RequiredCapabilities"
+        },
+        "grantedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "expiresAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "revokedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "recipeId",
+        "recipeRevision",
+        "repositoryIds",
+        "required",
+        "grantedAt"
+      ]
+    },
+    "ProbeOptions": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "scratchRepo": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "outputDir": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "endpoint": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "copilot",
+                "codex"
+              ]
+            },
+            "mode": {
+              "const": "fixture",
+              "type": "string"
+            },
+            "allowLive": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "scratchRepo",
+            "outputDir",
+            "mode",
+            "allowLive"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "scratchRepo": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "outputDir": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "endpoint": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "copilot",
+                "codex"
+              ]
+            },
+            "mode": {
+              "const": "live",
+              "type": "string"
+            },
+            "allowLive": {
+              "const": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "scratchRepo",
+            "outputDir",
+            "mode",
+            "allowLive"
+          ]
+        }
+      ]
+    },
+    "ProbeEvidence": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "fixture",
+            "live"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "blocked"
+          ]
+        },
+        "versions": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          }
+        },
+        "assertions": {
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "name": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "passed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "passed"
+            ]
+          }
+        },
+        "artifacts": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "mode",
+        "status",
+        "versions",
+        "assertions",
+        "artifacts"
+      ]
+    },
+    "VerifiedProbeEvidence": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "mode": {
+          "const": "live",
+          "type": "string"
+        },
+        "status": {
+          "const": "passed",
+          "type": "string"
+        },
+        "versions": {
+          "minProperties": 1,
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          }
+        },
+        "assertions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "name": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "passed": {
+                "const": true,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "passed"
+            ]
+          }
+        },
+        "artifacts": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "mode",
+        "status",
+        "versions",
+        "assertions",
+        "artifacts"
+      ]
+    },
+    "ProfileSpec": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providerId": {
+          "$ref": "#/$defs/ProviderId"
+        },
+        "required": {
+          "$ref": "#/$defs/RequiredCapabilities"
+        },
+        "image": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "workspaceRoot": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "providerId",
+        "required",
+        "image",
+        "workspaceRoot",
+        "version"
+      ]
+    },
+    "ProfileEvidence": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providerId": {
+          "$ref": "#/$defs/ProviderId"
+        },
+        "verifiedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "required": {
+          "$ref": "#/$defs/RequiredCapabilities"
+        },
+        "probes": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VerifiedProbeEvidence"
+          }
+        }
+      },
+      "required": [
+        "profileId",
+        "ownerId",
+        "providerId",
+        "verifiedAt",
+        "required",
+        "probes"
+      ]
+    },
+    "OwnerEvent": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "snapshot",
+              "type": "string"
+            },
+            "identity": {
+              "$ref": "#/$defs/NativeIdentity"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "snapshot": {
+              "$ref": "#/$defs/NativeSnapshot"
+            }
+          },
+          "required": [
+            "type",
+            "identity",
+            "at",
+            "snapshot"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "input",
+              "type": "string"
+            },
+            "identity": {
+              "$ref": "#/$defs/NativeIdentity"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "input": {
+              "$ref": "#/$defs/NativeInput"
+            }
+          },
+          "required": [
+            "type",
+            "identity",
+            "at",
+            "input"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "activity",
+              "type": "string"
+            },
+            "identity": {
+              "$ref": "#/$defs/NativeIdentity"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "active": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "identity",
+            "at",
+            "active"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "usage",
+              "type": "string"
+            },
+            "identity": {
+              "$ref": "#/$defs/NativeIdentity"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/$defs/Usage"
+            }
+          },
+          "required": [
+            "type",
+            "identity",
+            "at",
+            "usage"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "identity",
+              "type": "string"
+            },
+            "identity": {
+              "$ref": "#/$defs/NativeIdentity"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "identity",
+            "at"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "connection_lost",
+              "type": "string"
+            },
+            "identity": {
+              "$ref": "#/$defs/NativeIdentity"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "reason": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "identity",
+            "at",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "OwnerRpc": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "capabilities",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "required": {
+                  "$ref": "#/$defs/RequiredCapabilities"
+                }
+              },
+              "required": [
+                "required"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "ensureStarted",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "ensureSession",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "start": {
+                  "$ref": "#/$defs/NativeStart"
+                }
+              },
+              "required": [
+                "start"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "snapshot",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "identity": {
+                  "$ref": "#/$defs/NativeIdentity"
+                }
+              },
+              "required": [
+                "identity"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "send",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "identity": {
+                  "$ref": "#/$defs/NativeIdentity"
+                },
+                "input": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^(.*)$": {}
+                  }
+                },
+                "idempotencyKey": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "identity",
+                "input",
+                "idempotencyKey"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "quiesce",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "identity": {
+                  "$ref": "#/$defs/NativeIdentity"
+                }
+              },
+              "required": [
+                "identity"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "open",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "identity": {
+                  "$ref": "#/$defs/NativeIdentity"
+                }
+              },
+              "required": [
+                "identity"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "method": {
+              "const": "subscribe",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "required": [
+            "requestId",
+            "method",
+            "params"
+          ]
+        }
+      ]
+    },
+    "OwnerRpcResponse": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "capabilities",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/CapabilityReport"
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "ensureStarted",
+              "type": "string"
+            },
+            "result": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "ensureSession",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NativeIdentity"
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "snapshot",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NativeSnapshot"
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "send",
+              "type": "string"
+            },
+            "result": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "quiesce",
+              "type": "string"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "stopped",
+                "waiting",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "open",
+              "type": "string"
+            },
+            "result": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "uri": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "method": {
+              "const": "subscribe",
+              "type": "string"
+            },
+            "result": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "subscriptionId": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "subscriptionId"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "method",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": false,
+              "type": "boolean"
+            },
+            "error": {
+              "$ref": "#/$defs/ApiError"
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "error"
+          ]
+        }
+      ]
+    },
+    "Tag": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "displayName": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "archivedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "createdAt",
+        "revision"
+      ]
+    },
+    "Repository": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "controlMode": {
+          "type": "string",
+          "enum": [
+            "factory",
+            "human"
+          ]
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "lastServicedAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "weights": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          }
+        },
+        "currentTaskId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "recovery": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "url",
+        "active",
+        "controlMode",
+        "revision",
+        "createdAt",
+        "weights"
+      ]
+    },
+    "RecipeSummary": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "displayName": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "tagId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "currentRevision": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "description",
+        "tagId",
+        "currentRevision",
+        "revision",
+        "active",
+        "ready",
+        "reasons"
+      ]
+    },
+    "AuthState": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "missing",
+            "expired",
+            "denied",
+            "unavailable",
+            "identity_changed"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "gh",
+            "git_helper",
+            "github_app"
+          ]
+        },
+        "accountId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "login": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "reasons"
+      ]
+    },
+    "Health": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "number"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "ready",
+        "reasons",
+        "version"
+      ]
+    },
+    "FactorySnapshot": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "number"
+        },
+        "sequence": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cursor": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/FactoryConfig"
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "health": {
+          "$ref": "#/$defs/Health"
+        },
+        "auth": {
+          "$ref": "#/$defs/AuthState"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Tag"
+          }
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Repository"
+          }
+        },
+        "recipes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecipeSummary"
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskRecord"
+          }
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Attempt"
+          }
+        },
+        "attention": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AttentionRequest"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "sequence",
+        "cursor",
+        "at",
+        "config",
+        "paused",
+        "health",
+        "auth",
+        "tags",
+        "repositories",
+        "recipes",
+        "tasks",
+        "attempts",
+        "attention"
+      ]
+    },
+    "FactoryEvent": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "task",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/TaskRecord"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "attempt",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/Attempt"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "attention",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/AttentionRequest"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "repository",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/Repository"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "tag",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/Tag"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "recipe",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/RecipeSummary"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "settings",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/FactoryConfig"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "health",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/Health"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "auth",
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/AuthState"
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "cursor": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "at": {
+              "format": "date-time",
+              "pattern": "Z$",
+              "type": "string"
+            },
+            "type": {
+              "const": "snapshot_required",
+              "type": "string"
+            },
+            "data": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "required": [
+            "sequence",
+            "cursor",
+            "at",
+            "type",
+            "data"
+          ]
+        }
+      ]
+    },
+    "Artifact": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "mediaType": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "attemptId",
+        "name",
+        "mediaType",
+        "sizeBytes",
+        "createdAt"
+      ]
+    },
+    "WorkerRequest": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "task.create",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/TaskSpec"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "task.read",
+              "type": "string"
+            },
+            "payload": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "taskId"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "task.update",
+              "type": "string"
+            },
+            "payload": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "revision": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "title": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "description": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "goal": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "acceptanceCriteria": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "taskId",
+                "revision"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "task.cancel",
+              "type": "string"
+            },
+            "payload": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "revision": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "taskId",
+                "revision"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "finding.upsert",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/FindingInput"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "native.start",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/NativeStart"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "native.continue",
+              "type": "string"
+            },
+            "payload": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "identity": {
+                  "$ref": "#/$defs/NativeIdentity"
+                },
+                "input": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^(.*)$": {}
+                  }
+                }
+              },
+              "required": [
+                "identity",
+                "input"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "result.submit",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/TaskResult"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "artifact.register",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/Artifact"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "artifact.read",
+              "type": "string"
+            },
+            "payload": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "artifactId": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "artifactId"
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ActorScope"
+            },
+            "operation": {
+              "const": "attention.create",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/AttentionRequest"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "scope",
+            "operation",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "WorkerResponse": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TaskRecord"
+                },
+                {
+                  "$ref": "#/$defs/NativeIdentity"
+                },
+                {
+                  "$ref": "#/$defs/TaskResult"
+                },
+                {
+                  "$ref": "#/$defs/Artifact"
+                },
+                {
+                  "$ref": "#/$defs/AttentionRequest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "result"
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "ok": {
+              "const": false,
+              "type": "boolean"
+            },
+            "error": {
+              "$ref": "#/$defs/ApiError"
+            }
+          },
+          "required": [
+            "requestId",
+            "ok",
+            "error"
+          ]
+        }
+      ]
+    },
+    "SettingsPatch": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "taktSeconds": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "limits": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "concurrency": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "activeMinutes": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "startsPerDay": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "transientRetries": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "concurrency",
+            "activeMinutes",
+            "startsPerDay",
+            "transientRetries"
+          ]
+        },
+        "defaultOwnerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "defaultProviderId": {
+          "type": "string",
+          "enum": [
+            "copilot",
+            "codex"
+          ]
+        },
+        "paused": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Settings": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/FactoryConfig"
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "config",
+        "paused",
+        "revision"
+      ]
+    },
+    "RepositoryPatch": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        }
+      }
+    },
+    "WeightsPatch": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "weights": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "required": [
+        "weights"
+      ]
+    },
+    "RotationPreview": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "tagIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "nextTagIds": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repositoryId",
+        "tagIds",
+        "nextTagIds"
+      ]
+    },
+    "TagCreate": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "displayName"
+      ]
+    },
+    "TagPatch": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "reassignToTagId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      }
+    },
+    "TagArchive": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "reassignToTagId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reassignToTagId"
+      ]
+    },
+    "TaskPatch": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "title": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "goal": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "acceptanceCriteria": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "finishPolicy": {
+          "type": "string",
+          "enum": [
+            "result",
+            "pr",
+            "merge_ci",
+            "merge_bypass"
+          ]
+        },
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string",
+          "enum": [
+            "copilot",
+            "codex"
+          ]
+        },
+        "status": {
+          "const": "cancelled",
+          "type": "string"
+        }
+      }
+    },
+    "RecipeCreate": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "yaml": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "inputDefaults": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "repositoryIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "yaml"
+      ]
+    },
+    "RecipeValidation": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "contract": {
+          "additionalProperties": true,
+          "type": "object",
+          "properties": {
+            "id": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "namespace": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "description": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "inputs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "patternProperties": {
+                  "^(.*)$": {}
+                }
+              }
+            },
+            "variables": {
+              "additionalProperties": true,
+              "type": "object",
+              "properties": {
+                "sf": {
+                  "$ref": "#/$defs/RecipeMetadata"
+                }
+              },
+              "required": [
+                "sf"
+              ]
+            },
+            "tasks": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "patternProperties": {
+                  "^(.*)$": {}
+                }
+              }
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "patternProperties": {
+                  "^(.*)$": {}
+                }
+              }
+            }
+          },
+          "required": [
+            "id",
+            "namespace",
+            "variables",
+            "tasks"
+          ]
+        }
+      },
+      "required": [
+        "valid",
+        "errors"
+      ]
+    },
+    "RecipePatch": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "displayName": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      }
+    },
+    "DispatchResult": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "admitted": {
+          "type": "boolean"
+        },
+        "taskId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "admitted"
+      ]
+    },
+    "AttentionResponse": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        }
+      },
+      "required": [
+        "input"
+      ]
+    },
+    "NativeOpenResult": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "uri": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      }
+    },
+    "DeviceFlow": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "userCode": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "verificationUri": {
+          "format": "uri",
+          "type": "string"
+        },
+        "expiresAt": {
+          "format": "date-time",
+          "pattern": "Z$",
+          "type": "string"
+        },
+        "pollIntervalMs": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "authorized",
+            "expired",
+            "denied"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "userCode",
+        "verificationUri",
+        "expiresAt",
+        "pollIntervalMs",
+        "status"
+      ]
+    },
+    "Empty": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {}
+    },
+    "Acknowledgement": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accepted"
+      ]
+    }
+  }
+}

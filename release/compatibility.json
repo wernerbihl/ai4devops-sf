@@ -113,5 +113,55 @@
       "native Codex models available"
     ],
     "productionGate": "blocked; fixture corrections and old receipt booleans do not clear the live/isolation gates"
+  },
+  "bb": {
+    "probe": "bb-codex-isolated",
+    "status": "blocked",
+    "sdkVersion": "0.6.104",
+    "bbVersion": "0.48.1",
+    "pluginId": "sf-native-probe",
+    "runtimeNode": "22.21.1",
+    "fixture": "passed",
+    "nativeIdentity": "NativeIdentity.sessionId is the BB thread ID",
+    "providers": {
+      "codex": {
+        "registered": true,
+        "fixture": "passed",
+        "live": "blocked"
+      },
+      "copilot": {
+        "registered": false,
+        "advertised": false
+      }
+    },
+    "verifiedProfileIds": [],
+    "credentialForwarding": {
+      "perHostInitialDenyPolicyAvailable": false,
+      "maskedBuiltInGitStatus": "logged in",
+      "configuredGlobalVariableCount": 0,
+      "initialDeliveryTrigger": "host-connected",
+      "globalSettingsChanged": false
+    },
+    "bootstrap": {
+      "attempts": 2,
+      "enrolled": false,
+      "lastExecutorCalls": 1,
+      "lastExitCodes": [
+        1
+      ],
+      "exactSetupFailure": "unknown; raw private output was discarded",
+      "ownedHostsAndContainersCleaned": true
+    },
+    "dockerBaseline": {
+      "effectiveFilesystemAndNetworkDenialsObserved": true,
+      "nativeWorkerExercised": false,
+      "qualifiesForNativeIsolation": false
+    },
+    "blockers": [
+      "SDK 0.6.104 has no per-machine opt-out from initial server GitHub/global environment delivery; model/provider overrides do not protect daemon initial sync",
+      "No enrolled isolated Codex lifecycle/reconnect/input/navigation proof",
+      "Restricted runtime BB/model networking, native tools and approved provider credentials remain unverified"
+    ],
+    "productionDispatchAllowed": false
   }
 }

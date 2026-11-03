@@ -8756,7 +8756,7 @@
                 "type": "string"
               },
               "data": {
-                "$ref": "#/components/schemas/FactoryConfig"
+                "$ref": "#/components/schemas/Settings"
               }
             },
             "required": [

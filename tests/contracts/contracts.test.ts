@@ -128,3 +128,10 @@ test('task_and_recipe_finish_policies_cannot_exceed_their_declared_capabilities'
   };
   assert.throws(() => validateRecipeContract(contract));
 });
+
+test('settings_events_carry_pause_state_and_update_revision', () => {
+  const event = { sequence: 1, cursor: '1', at: '2026-11-03T12:00:00Z', type: 'settings',
+    data: { config: defaultConfig('/factory'), paused: true, revision: 2 } };
+  assert.deepEqual(validateContract('FactoryEvent', event), event);
+  assert.throws(() => validateContract('FactoryEvent', { ...event, data: defaultConfig('/factory') }));
+});

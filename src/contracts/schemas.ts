@@ -173,11 +173,12 @@ const FactorySnapshot = object({
   paused: T.Boolean(), health: Health, auth: AuthState, tags: T.Array(Tag), repositories: T.Array(Repository),
   recipes: T.Array(RecipeSummary), tasks: T.Array(TaskRecord), attempts: T.Array(Attempt), attention: T.Array(AttentionRequest),
 });
+const Settings = object({ config: FactoryConfig, paused: T.Boolean(), revision: integer(1) });
 const event = <S extends string, D extends TSchema>(type: S, data: D) => object({ sequence: integer(1), cursor: text(), at: timestamp(), type: T.Literal(type), data });
 const FactoryEvent = T.Union([
   event('task', TaskRecord), event('attempt', Attempt), event('attention', AttentionRequest),
   event('repository', Repository), event('tag', Tag), event('recipe', RecipeSummary),
-  event('settings', FactoryConfig), event('health', Health), event('auth', AuthState),
+  event('settings', Settings), event('health', Health), event('auth', AuthState),
   event('snapshot_required', object({ reason: text() })),
 ]);
 const Artifact = object({ id: text(), attemptId: text(), name: text(), mediaType: text(), sizeBytes: integer(), createdAt: timestamp() });
@@ -203,7 +204,6 @@ const SettingsPatch = object({
   taktSeconds: T.Optional(integer(1)), limits: T.Optional(FactoryConfig.properties.limits),
   defaultOwnerId: optionalText(), defaultProviderId: T.Optional(ProviderId), paused: T.Optional(T.Boolean()),
 });
-const Settings = object({ config: FactoryConfig, paused: T.Boolean(), revision: integer(1) });
 const RepositoryPatch = object({ active: T.Optional(T.Boolean()) });
 const WeightsPatch = object({ weights: T.Record(T.String(), T.Integer({ minimum: 0, maximum: 100 })) });
 const RotationPreview = object({ repositoryId: text(), tagIds: strings(), nextTagIds: T.Array(text()), reason: optionalText() });

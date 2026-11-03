@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "probe": "vscode-native-owner",
+  "status": "blocked",
+  "runtime": {
+    "runnerNode": "24.22.2",
+    "windowsPipeHelperNode": "24.22.1",
+    "helperRuntimeScope": "Code Insiders bundled Node, narrow pure-JavaScript IPC helper only; backend floor unchanged"
+  },
+  "packages": {
+    "@microsoft/agent-host-protocol": "1.0.0",
+    "ws": "8.21.0"
+  },
+  "host": {
+    "product": "Visual Studio Code Insiders",
+    "version": "1.145.0-insider",
+    "commit": "3c0ec3a089398503a462029e7cc2a5749df5169a",
+    "platform": "Windows x64",
+    "probeControllerPlatform": "WSL2 Linux x64 Ubuntu-22.04",
+    "transport": "editor-owned published named pipe, WebSocket framing, metadata admission token retained inside helper",
+    "negotiatedProtocol": "1.0.0",
+    "authentication": "owning native host only; no provider credential files read or copied"
+  },
+  "providers": {
+    "copilot": {
+      "nativeProviderId": "copilotcli",
+      "fixture": "passed",
+      "live": "blocked",
+      "observed": [
+        "provider schema discovery",
+        "host-owned allocation",
+        "opaque session/chat identity",
+        "built-in ask_user accepted/submitted response with fixed non-sensitive answer",
+        "pause/cancel",
+        "same-session continuation",
+        "owner restart/reconcile with unchanged identity and workspace",
+        "stopped native reconnect audit"
+      ],
+      "blockers": [
+        "native UI selected-session observation unavailable; URI launch is insufficient"
+      ]
+    },
+    "codex": {
+      "nativeProviderId": "codex",
+      "fixture": "passed",
+      "live": "blocked",
+      "observed": [
+        "provider schema discovery",
+        "host-owned allocation",
+        "opaque session/chat identity",
+        "CodexMaterializeFailed",
+        "stopped native reconnect audit"
+      ],
+      "blockers": [
+        "native CodexMaterializeFailed: Codex has no available models.",
+        "native UI selected-session observation unavailable",
+        "input, continuation and full owner restart lifecycle not proven live"
+      ]
+    }
+  },
+  "nativeOpening": {
+    "status": "blocked",
+    "sourceVerifiedCommit": "3c0ec3a089398503a462029e7cc2a5749df5169a",
+    "route": "vscode-insiders://agents/agent-host-session/ahp-session/<session-id>/chat/<double-encoded-opaque-chat-uri>",
+    "launchObserved": true,
+    "selectedNativeIdentityObserved": false,
+    "otherCommits": "blocked until source and live identity observation are verified"
+  },
+  "verifiedIsolationProfiles": [],
+  "isolationStatus": "unverified; lifecycle diagnostics do not authorize production recipe dispatch",
+  "linuxNativeInvocation": "blocked: no local native editor endpoint in this distro",
+  "liveEvidence": "logs/probes/windows-native-lifecycle/ (ignored; sanitized copy accompanies task-2-report.md)",
+  "sources": [
+    "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/LOCAL_ENDPOINT.md",
+    "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/common/agent.ts",
+    "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/common/openSessionLink.ts",
+    "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/node/agentService.ts",
+    "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/common/codexSessionConfigKeys.ts",
+    "https://microsoft.github.io/agent-host-protocol/specification/",
+    "https://www.npmjs.com/package/@microsoft/agent-host-protocol/v/1.0.0"
+  ],
+  "inputDiagnosticException": "explicit --allow-native-ask-user only; tested Copilot host commit, built-in ask_user without external contributor, input purpose=askUser; all other tools cancel",
+  "postProbeWorkspaceContinuity": "unverified after approved partial staging cleanup; do not silently recreate/relocate or resume the same identity against another workspace",
+  "ownedStagingCleanup": {
+    "path": "C:\\Users\\wbihl\\AppData\\Local\\Temp\\sf-p2-85789fc9ddca415483ffa740eab64c84",
+    "status": "partial; native process holds scratch directory open",
+    "remaining": [
+      "scratch/ (empty)",
+      "scripts/vscode-native-pipe-helper.mjs"
+    ],
+    "preservedOnControllerInstruction": true
+  },
+  "publicModelDiscovery": {
+    "copilotcli": 1,
+    "codex": 0
+  },
+  "codexRecoveryDocumentation": "https://code.visualstudio.com/docs/agents/run/agents-window-configuration"
+}

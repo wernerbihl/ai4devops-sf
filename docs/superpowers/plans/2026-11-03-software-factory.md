@@ -213,8 +213,11 @@ P1 specifies and C5 implements these authenticated version-1 operations:
 - Tags: POST /v1/tags; PATCH/DELETE /v1/tags/:id;
   POST /v1/tags/:id/archive.
 - Tasks: GET/POST /v1/tasks; GET/PATCH/DELETE /v1/tasks/:id.
-- Recipes: GET/POST /v1/recipes; POST /v1/recipes/validate;
-  POST /v1/recipes/:id/revisions; PATCH /v1/recipes/:id.
+- Recipes: GET/POST /v1/recipes; GET /v1/recipes/:id returns the full current
+  RecipeRevision (YAML, contract, input defaults, and repository assignments)
+  for reloading an existing recipe editor without a preceding mutation;
+  POST /v1/recipes/validate; POST /v1/recipes/:id/revisions;
+  PATCH /v1/recipes/:id.
 - Control: POST /v1/dispatch, /v1/attention/:id/respond,
   /v1/tasks/:id/takeover, /v1/repositories/:id/return-control,
   /v1/tasks/:id/open-native.

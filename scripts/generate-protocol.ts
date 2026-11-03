@@ -58,6 +58,7 @@ route('get', '/v1/recipes', array('RecipeSummary'));
 route('post', '/v1/recipes', 'RecipeRevision', { body: 'RecipeCreate' });
 route('post', '/v1/recipes/validate', 'RecipeValidation', { body: 'RecipeCreate', description: 'Metadata validation plus pinned upstream Kestra and restricted-subset validation. Metadata validation alone cannot claim executable readiness.' });
 route('post', '/v1/recipes/{id}/revisions', 'RecipeRevision', { body: 'RecipeCreate', versioned: true });
+route('get', '/v1/recipes/{id}', 'RecipeRevision', { description: 'Retrieve the full current recipe revision, including YAML, contract, input defaults and repository assignments, so an existing recipe can be reloaded for editing without a preceding mutation.' });
 route('patch', '/v1/recipes/{id}', 'RecipeSummary', { body: 'RecipePatch', versioned: true });
 route('post', '/v1/dispatch', 'DispatchResult', { body: 'Empty' });
 route('post', '/v1/attention/{id}/respond', 'AttentionRequest', { body: 'AttentionResponse', versioned: true });

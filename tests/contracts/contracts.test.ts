@@ -135,3 +135,43 @@ test('settings_events_carry_pause_state_and_update_revision', () => {
   assert.deepEqual(validateContract('FactoryEvent', event), event);
   assert.throws(() => validateContract('FactoryEvent', { ...event, data: defaultConfig('/factory') }));
 });
+
+test('recipe_current_revision_read_contract_restores_editor_without_mutation', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { Ajv2020 } = await import('ajv/dist/2020.js');
+  const { createRequire } = await import('node:module');
+  const addFormats = createRequire(import.meta.url)('ajv-formats');
+  const api = JSON.parse(await readFile(new URL('../../protocol/openapi.json', import.meta.url), 'utf8'));
+  const read = api.paths['/v1/recipes/{id}'].get;
+  assert.ok(read, 'A fresh editor needs GET /v1/recipes/{id} without a preceding mutation');
+  assert.deepEqual(read.security, [{ BrowserSession: [] }]);
+  assert.equal(read.requestBody, undefined);
+  assert.ok(read.parameters.some((parameter: { name: string; in: string; required?: boolean }) =>
+    parameter.name === 'id' && parameter.in === 'path' && parameter.required));
+  const responseSchema = read.responses['200'].content['application/json'].schema;
+  assert.deepEqual(responseSchema, { $ref: '#/components/schemas/RecipeRevision' });
+  const ajv = new Ajv2020({ strict: true });
+  addFormats(ajv);
+  const validateResponse = ajv.compile({
+    $defs: JSON.parse(JSON.stringify(api.components.schemas).replaceAll('#/components/schemas/', '#/$defs/')),
+    $ref: responseSchema.$ref.replace('#/components/schemas/', '#/$defs/'),
+  });
+  const revision = {
+    id: 'revision-1', recipeId: 'recipe-1', revision: '1', hash: 'sha256:revision-1', name: 'Feature',
+    description: 'Implement a feature', tagId: 'features', createdAt: '2026-11-03T12:00:00Z',
+    yaml: 'id: feature\nnamespace: factory\n', inputDefaults: { repositoryIds: ['repo-1'] },
+    repositoryIds: ['repo-1'], outputSchema: { type: 'object' }, skillVersions: {}, toolVersions: {},
+    contract: { id: 'feature', namespace: 'factory', tasks: [{ id: 'report', type: 'example' }], variables: { sf: {
+      schemaVersion: 1, recipeId: 'recipe-1', displayName: 'Feature', tagId: 'features', inputSchema: { type: 'object' },
+      taskTemplate: { title: 'Feature', description: 'Description', goal: 'Working feature',
+        acceptanceCriteria: ['Works'], skills: [], tools: [], context: {} }, required: validTask().required,
+      compatibleOwners: ['vscode'], compatibleProviders: ['copilot'], defaultFinishPolicy: 'pr',
+    } } },
+  };
+  assert.equal(validateResponse(JSON.parse(JSON.stringify(revision))), true, ajv.errorsText(validateResponse.errors));
+  for (const field of ['yaml', 'contract', 'inputDefaults', 'repositoryIds']) {
+    const incomplete = { ...revision } as Record<string, unknown>;
+    delete incomplete[field];
+    assert.equal(validateResponse(incomplete), false, `Editor response must retain ${field}`);
+  }
+});

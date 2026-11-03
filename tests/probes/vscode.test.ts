@@ -8,25 +8,37 @@ import { once } from 'node:events';
 import { InMemoryTransport, type AhpTransport } from '@microsoft/agent-host-protocol/client';
 import { chatReducer, type ActionType, type ChatInputRequest, type ChatState, type SessionState, type StateAction } from '@microsoft/agent-host-protocol';
 import { discoverEndpoint } from '../../probes/common.ts';
-import { windowsFileUri } from '../../probes/windows.ts';
+import { windowsFileUri, windowsNativeRuntime } from '../../probes/windows.ts';
 import { probeVsCode, VsCodeProbeOwner, nativeOpenUri } from '../../probes/vscode.ts';
 import type { NativeIdentity, NativeStart } from '../../src/contracts/domain.ts';
+import { runVsCodeProbeCli } from '../../scripts/probe-vscode.ts';
 import { validTask } from '../fixtures/contracts.ts';
 
 const commit = '3c0ec3a089398503a462029e7cc2a5749df5169a';
 const now = '2026-11-04T00:00:00.000Z';
 
 // Real official client on both halves; this peer deliberately drops the create reply.
-function fakeHost(options: { dropCreate?: boolean; hideCatalog?: boolean; provisional?: boolean; normalizeWindows?: boolean; toolActivity?: boolean; toolName?: string; toolContributor?: object; provider?: string; refuseCancel?: boolean; wrongWorkspace?: boolean } = {}) {
+function fakeHost(options: {
+  dropCreate?: boolean; hideCatalog?: boolean; provisional?: boolean; normalizeWindows?: boolean;
+  toolActivity?: boolean; toolName?: string; toolContributor?: object; provider?: string;
+  refuseCancel?: boolean; wrongWorkspace?: boolean; completedToolAfterInput?: boolean;
+  inputBehavior?: 'ignore' | 'reject' | 'wrong-answer' | 'draft-answer';
+} = {}) {
   const sessions = new Map<string, SessionState>();
   const chats = new Map<string, ChatState>();
+  const olderTurns = new Map<string, ChatState['turns']>();
   const createdSessionIds = new Set<string>();
   const methods: string[] = [];
   const actions: string[] = [];
   let creates = 0;
+  let completedToolHadSubscriber = false;
   let seq = 0;
   async function connect(): Promise<AhpTransport> {
     const [client, server] = InMemoryTransport.pair();
+    const subscriptions = new Set<string>();
+    const emit = async (channel: string, action: StateAction, origin?: object) => {
+      if (subscriptions.has(channel)) await server.send({ jsonrpc: '2.0', method: 'action', params: { channel, action, serverSeq: ++seq, ...(origin ? { origin } : {}) } });
+    };
     void (async () => {
       for (;;) {
         const frame = await server.recv();
@@ -37,15 +49,17 @@ function fakeHost(options: { dropCreate?: boolean; hideCatalog?: boolean; provis
         const p = message.params;
         methods.push(message.method);
         let result: unknown;
-        if (message.method === 'initialize') result = {
-          protocolVersion: '1.0.0', serverSeq: seq,
-          serverInfo: { name: 'fixture', version: '1' },
-          snapshots: [{ resource: 'ahp-root://', fromSeq: seq, state: {
-            agents: [{ provider: options.provider ?? 'copilotcli', displayName: 'Fixture', description: 'fixture', models: [] }],
-            _meta: { hostBuild: { version: '1.145.0-insider', commit } },
-          } }],
-        };
-        else if (message.method === 'resolveSessionConfig') result = {
+        if (message.method === 'initialize') {
+          for (const channel of p.initialSubscriptions ?? []) subscriptions.add(channel);
+          result = {
+            protocolVersion: '1.0.0', serverSeq: seq,
+            serverInfo: { name: 'fixture', version: '1' },
+            snapshots: [{ resource: 'ahp-root://', fromSeq: seq, state: {
+              agents: [{ provider: options.provider ?? 'copilotcli', displayName: 'Fixture', description: 'fixture', models: [] }],
+              _meta: { hostBuild: { version: '1.145.0-insider', commit } },
+            } }],
+          };
+        } else if (message.method === 'resolveSessionConfig') result = {
           schema: { type: 'object', properties: { isolation: { type: 'string', enum: ['none'] } } }, values: {},
         };
         else if (message.method === 'listSessions') result = { items: (options.hideCatalog ? [] : [...sessions]).map(([resource, s]) => ({ ...s, resource, createdAt: now, modifiedAt: now })) };
@@ -60,33 +74,58 @@ function fakeHost(options: { dropCreate?: boolean; hideCatalog?: boolean; provis
           if (options.dropCreate && creates === 1) continue;
           result = null;
         } else if (message.method === 'subscribe') {
+          subscriptions.add(p.channel);
           const state = sessions.get(p.channel) ?? chats.get(p.channel);
           if (!state) { await server.send({ jsonrpc: '2.0', id: message.id, error: { code: -32001, message: 'missing' } }); continue; }
           result = { snapshot: { resource: p.channel, fromSeq: seq, state } };
+        } else if (message.method === 'fetchTurns') {
+          const loaded = { type: 'chat/turnsLoaded', turns: olderTurns.get(p.channel) ?? [] } as StateAction;
+          chats.set(p.channel, chatReducer(chats.get(p.channel)!, loaded as Parameters<typeof chatReducer>[1]));
+          await emit(p.channel, loaded);
+          result = {};
         } else if (message.method === 'dispatchAction') {
-          const action = p.action as StateAction;
+          let action = p.action as StateAction;
           actions.push(action.type);
+          if (action.type === 'chat/inputCompleted') {
+            const requestedAnswers = action.answers ?? {};
+            if (options.inputBehavior === 'ignore') continue;
+            if (options.inputBehavior === 'reject') action = { ...action, response: 'cancel' } as StateAction;
+            if (options.inputBehavior === 'wrong-answer') action = { ...action, answers: { response: { state: 'submitted', value: { kind: 'text', value: 'Wrong native answer' } } } } as StateAction;
+            if (options.inputBehavior === 'draft-answer') action = { ...action, answers: Object.fromEntries(Object.entries(requestedAnswers).map(([id, answer]) => [id, { ...answer, state: 'draft' }])) } as StateAction;
+          }
           if (action.type === 'chat/turnStarted') for (const session of sessions.values()) session.lifecycle = 'ready' as SessionState['lifecycle'];
           const state = chats.get(p.channel)!;
           if (action.type === 'chat/turnCancelled' && options.refuseCancel) continue;
           const next = chatReducer(state, action as Parameters<typeof chatReducer>[1]);
           chats.set(p.channel, next);
           if (action.type === 'chat/turnStarted' && options.toolActivity) {
-            await server.send({ jsonrpc: '2.0', method: 'action', params: { channel: p.channel, serverSeq: ++seq, action: { type: 'chat/toolCallStart', turnId: action.turnId, toolCallId: 'unexpected-1', toolName: options.toolName ?? 'probe_unexpected_tool', displayName: 'Unexpected', ...(options.toolContributor ? { contributor: options.toolContributor } : {}) } } });
+            const tool = { type: 'chat/toolCallStart', turnId: action.turnId, toolCallId: 'unexpected-1', toolName: options.toolName ?? 'probe_unexpected_tool', displayName: 'Unexpected', ...(options.toolContributor ? { contributor: options.toolContributor } : {}) } as StateAction;
+            chats.set(p.channel, chatReducer(chats.get(p.channel)!, tool as Parameters<typeof chatReducer>[1]));
+            await emit(p.channel, tool);
           }
           if (action.type === 'chat/turnStarted' && actions.filter(a => a === 'chat/turnStarted').length === 1) {
-            chats.set(p.channel, chatReducer(next, { type: 'chat/inputRequested' as ActionType.ChatInputRequested, request: { id: 'question-1', message: 'Ready?', questions: [], _meta: { purpose: 'askUser' } } as ChatInputRequest }));
+            chats.set(p.channel, chatReducer(chats.get(p.channel)!, { type: 'chat/inputRequested' as ActionType.ChatInputRequested, request: { id: 'question-1', message: 'Ready?', questions: options.inputBehavior?.endsWith('answer') ? [{ kind: 'text', id: 'response', message: 'Continue?', required: true }] : [], _meta: { purpose: 'askUser' } } as ChatInputRequest }));
           }
-          await server.send({ jsonrpc: '2.0', method: 'action', params: { channel: p.channel, action, serverSeq: ++seq, origin: { clientId: 'probe', clientSeq: p.clientSeq } } });
+          await emit(p.channel, action, { clientId: 'probe', clientSeq: p.clientSeq });
+          if (action.type === 'chat/inputCompleted' && options.completedToolAfterInput) {
+            completedToolHadSubscriber = subscriptions.has(p.channel);
+            const turnId = chats.get(p.channel)!.activeTurn!.id;
+            const tool = { type: 'chat/toolCallStart', turnId, toolCallId: 'late-shell', toolName: 'shell', displayName: 'Shell' } as StateAction;
+            const complete = { type: 'chat/turnComplete', turnId, duration: 1 } as StateAction;
+            chats.set(p.channel, chatReducer(chats.get(p.channel)!, tool as Parameters<typeof chatReducer>[1]));
+            await emit(p.channel, tool);
+            chats.set(p.channel, chatReducer(chats.get(p.channel)!, complete as Parameters<typeof chatReducer>[1]));
+            await emit(p.channel, complete);
+          }
           continue;
-        } else if (message.method === 'unsubscribe') continue;
+        } else if (message.method === 'unsubscribe') { subscriptions.delete(p.channel); continue; }
         else throw new Error(`Unexpected method: ${message.method}`);
         await server.send({ jsonrpc: '2.0', id: message.id, result });
       }
     })();
     return client;
   }
-  return { connect, sessions, chats, createdSessionIds, methods, actions, get creates() { return creates; } };
+  return { connect, sessions, chats, olderTurns, createdSessionIds, methods, actions, get creates() { return creates; }, get completedToolHadSubscriber() { return completedToolHadSubscriber; } };
 }
 
 async function fixture() {
@@ -309,3 +348,100 @@ for (const [name, contributor] of [['read_file', undefined], ['shell', undefined
     assert.equal(report.assertions.find(a => a.name === 'send-input')?.passed, false);
   });
 }
+
+for (const flags of [['--windows-helper'], ['--windows-helper-root', 'C:\\owned-stage']]) {
+  test(`CLI requires explicit live permission before constructing a native runtime: ${flags[0]}`, async () => {
+    const options = await fixture();
+    let nativeRuntimeConstructions = 0;
+    await assert.rejects(runVsCodeProbeCli(['--scratch-repo', options.scratchRepo, '--output-dir', options.outputDir, ...flags], () => {
+      nativeRuntimeConstructions++;
+      throw new Error('Native runtime factory reached without permission');
+    }), /--live/);
+    assert.equal(nativeRuntimeConstructions, 0);
+  });
+}
+
+test('a subscription-aware host cannot hide a forbidden tool completed immediately after input', async () => {
+  const options = await fixture();
+  const host = fakeHost({ completedToolAfterInput: true });
+  const report = await probeVsCode(options, { connect: host.connect, timeoutMs: 80,
+    navigation: { hostCommit: commit, open: async (_uri, identity) => identity } });
+  assert.equal(report.status, 'blocked');
+  assert.equal(host.completedToolHadSubscriber, true);
+  assert.equal(report.assertions.find(a => a.name === 'quiescence')?.passed, true);
+  const details = JSON.parse(await readFile(report.artifacts[1]!, 'utf8'));
+  assert.ok(details.diagnostics.toolNames.includes('shell'));
+});
+
+test('owner restart audits forbidden tools in completed owned turns before sending again', async () => {
+  const options = await fixture();
+  const host = fakeHost();
+  let owner = new VsCodeProbeOwner(options, { connect: host.connect });
+  try {
+    const identity = await owner.ensureSession(start(options.scratchRepo));
+    await owner.send(identity, { text: 'Owned first turn' }, 'history-turn');
+    const state = await owner.chat(identity);
+    await owner.close();
+    const turnId = state.activeTurn!.id;
+    const tool = { type: 'chat/toolCallStart', turnId, toolCallId: 'offline-shell', toolName: 'shell', displayName: 'Shell' } as StateAction;
+    const complete = { type: 'chat/turnComplete', turnId, duration: 1 } as StateAction;
+    host.chats.set(identity.chatId!, chatReducer(chatReducer(state, tool as Parameters<typeof chatReducer>[1]), complete as Parameters<typeof chatReducer>[1]));
+    owner = new VsCodeProbeOwner(options, { connect: host.connect });
+    assert.deepEqual(await owner.ensureSession(start(options.scratchRepo)), identity);
+    await assert.rejects(owner.snapshot(identity), /Unexpected native tool/);
+    await assert.rejects(owner.send(identity, { text: 'Must not run' }, 'unsafe-next-turn'), /Unexpected native tool/);
+    assert.equal(host.actions.filter(a => a === 'chat/turnStarted').length, 1);
+    assert.equal(await owner.quiesce(identity), 'stopped');
+    assert.equal(host.creates, 1);
+  } finally { await owner.close(); }
+});
+
+for (const inputBehavior of ['ignore', 'reject', 'wrong-answer', 'draft-answer'] as const) {
+  test(`native input ${inputBehavior} cannot earn a send-input pass`, async () => {
+    const options = await fixture();
+    const host = fakeHost({ inputBehavior });
+    const report = await probeVsCode(options, { connect: host.connect, timeoutMs: 40,
+      allowNativeAskUser: inputBehavior.endsWith('answer'),
+      navigation: { hostCommit: commit, open: async (_uri, identity) => identity } });
+    assert.equal(report.status, 'blocked');
+    assert.equal(report.assertions.find(a => a.name === 'send-input')?.passed, false);
+    assert.equal(report.assertions.find(a => a.name === 'quiescence')?.passed, true);
+    assert.equal(host.actions.filter(a => a === 'chat/inputCompleted').length, 1);
+    assert.equal(host.creates, 1);
+  });
+}
+
+test('restart audits completed owned turns behind the native history cursor', async () => {
+  const options = await fixture();
+  const host = fakeHost();
+  let owner = new VsCodeProbeOwner(options, { connect: host.connect, timeoutMs: 80 });
+  try {
+    const identity = await owner.ensureSession(start(options.scratchRepo));
+    await owner.send(identity, { text: 'Owned history turn' }, 'older-history-turn');
+    const state = await owner.chat(identity);
+    await owner.close();
+    const turnId = state.activeTurn!.id;
+    const tool = { type: 'chat/toolCallStart', turnId, toolCallId: 'older-shell', toolName: 'shell', displayName: 'Shell' } as StateAction;
+    const complete = { type: 'chat/turnComplete', turnId, duration: 1 } as StateAction;
+    const finished = chatReducer(chatReducer(state, tool as Parameters<typeof chatReducer>[1]), complete as Parameters<typeof chatReducer>[1]);
+    host.olderTurns.set(identity.chatId!, finished.turns);
+    host.chats.set(identity.chatId!, { ...finished, turns: [], turnsNextCursor: 'older-page' });
+    owner = new VsCodeProbeOwner(options, { connect: host.connect, timeoutMs: 80 });
+    assert.deepEqual(await owner.ensureSession(start(options.scratchRepo)), identity);
+    await assert.rejects(owner.snapshot(identity), /Unexpected native tool/);
+    assert.ok(host.methods.includes('fetchTurns'));
+    assert.equal(await owner.quiesce(identity), 'stopped');
+  } finally { await owner.close(); }
+});
+
+test('programmatic native Windows runtime requires live consent before its connector is invoked', async () => {
+  const options = await fixture();
+  const host = fakeHost();
+  let nativeConnections = 0;
+  const report = await probeVsCode(options, { ...windowsNativeRuntime('C:\\owned-stage'),
+    connect: async () => { nativeConnections++; return host.connect(); },
+    navigation: { hostCommit: commit, open: async (_uri, identity) => identity } });
+  assert.equal(report.status, 'blocked');
+  assert.equal(nativeConnections, 0);
+  assert.equal(host.creates, 0);
+});

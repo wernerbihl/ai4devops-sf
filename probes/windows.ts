@@ -17,6 +17,7 @@ export function windowsFileUri(path: string): string {
 /** Environment-specific, approved diagnostic helper; not a production Windows launcher. */
 export function windowsNativeRuntime(stagingRoot?: string): ProbeRuntime {
   return {
+    requiresLivePermission: true,
     async workspaceUri(path) {
       if (stagingRoot) return windowsFileUri(`${stagingRoot}\\scratch`);
       const { stdout } = await exec('wslpath', ['-w', path]);

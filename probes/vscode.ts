@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AhpClient, RpcError, RpcTimeoutError, TransportError, type AhpTransport } from '@microsoft/agent-host-protocol/client';
@@ -21,6 +22,7 @@ function workspaceKey(uri: string): string {
 
 const testedCommit = '3c0ec3a089398503a462029e7cc2a5749df5169a';
 export interface ProbeRuntime {
+  requiresLivePermission?: boolean;
   connect?: () => Promise<AhpTransport>;
   timeoutMs?: number;
   allowNativeAskUser?: boolean;
@@ -49,6 +51,7 @@ export function nativeOpenUri(identity: NativeIdentity, hostCommit: string): str
 export class VsCodeProbeOwner implements NativeOwner {
   private client: AhpClient | undefined;
   private root: RootState | undefined;
+  private readonly ownedChatChannels = new Set<string>();
   private readonly listeners = new Set<(event: OwnerEvent) => void>();
   readonly versions: Record<string, string> = { node: process.version, ahpPackage: '1.0.0' };
   unexpectedToolActivity = false;
@@ -62,6 +65,7 @@ export class VsCodeProbeOwner implements NativeOwner {
   }
 
   async ensureStarted(): Promise<void> {
+    if (this.runtime.requiresLivePermission && (this.options.mode !== 'live' || !this.options.allowLive)) throw new ProbeBlocked('Native transport requires explicit live permission');
     if (this.client) return;
     if (this.options.mode === 'fixture' && !this.runtime.connect) throw new ProbeBlocked('Fixture mode requires an injected fixture transport');
     const transport = this.runtime.connect ? await this.runtime.connect() : await connectEndpoint(this.options.endpoint ?? await discoverEndpoint());
@@ -74,12 +78,9 @@ export class VsCodeProbeOwner implements NativeOwner {
         if (event.event.type === 'action') {
           const action = event.event.params.action;
           this.actionTypes.add(action.type);
-          if (action.type === 'chat/toolCallStart' && this.permittedInputTool(action.toolName, action.contributor)) {
-            this.diagnostics.permittedInputTools = ['ask_user'];
-          } else if (action.type === 'chat/toolCallStart') {
-            this.unexpectedToolActivity = true;
-            this.diagnostics.toolNames = [...new Set([...(this.diagnostics.toolNames as string[] | undefined ?? []), action.toolName])];
-            client.dispatch(event.channel, { type: 'chat/turnCancelled' as ActionType.ChatTurnCancelled, turnId: action.turnId, duration: 0 });
+          if (action.type === 'chat/toolCallStart' && this.ownedChatChannels.has(event.channel)) {
+            this.observeTool(action.toolName, action.contributor);
+            if (this.unexpectedToolActivity) client.dispatch(event.channel, { type: 'chat/turnCancelled' as ActionType.ChatTurnCancelled, turnId: action.turnId, duration: 0 });
           }
         }
       }
@@ -101,7 +102,7 @@ export class VsCodeProbeOwner implements NativeOwner {
     return { ready: providers.includes(this.options.provider ?? 'copilot'), supportedProviders: providers,
       reasons: ['Lifecycle-only diagnostic; no isolation profile has been verified'], verifiedProfileIds: [], version: this.versions.protocol! };
   }
-  async close(): Promise<void> { await this.client?.shutdown(); this.client = undefined; this.root = undefined; }
+  async close(): Promise<void> { await this.client?.shutdown(); this.client = undefined; this.root = undefined; this.ownedChatChannels.clear(); }
   private async rpc() { await this.ensureStarted(); return this.client!; }
   private async session(channel: string): Promise<SessionState> {
     const client = await this.rpc();
@@ -110,16 +111,47 @@ export class VsCodeProbeOwner implements NativeOwner {
     if (!result.snapshot) throw new ProbeBlocked('No native session snapshot');
     return result.snapshot.state as SessionState;
   }
+  private async readChat(client: AhpClient, channel: string): Promise<ChatState> {
+    const { result, subscription } = await client.subscribe(channel);
+    // Release only this snapshot reader; the wire subscription remains until owner shutdown.
+    await subscription.close();
+    if (!result.snapshot) throw new ProbeBlocked('No native chat snapshot');
+    const state = result.snapshot.state as ChatState;
+    if (result.snapshot.resource !== channel || state.resource !== channel) throw new Error('Native chat identity changed');
+    return state;
+  }
   async chat(identity: NativeIdentity): Promise<ChatState> {
     this.checkIdentity(identity);
     const client = await this.rpc();
-    const { result } = await client.subscribe(identity.chatId!);
-    await client.unsubscribe(identity.chatId!);
-    if (!result.snapshot) throw new ProbeBlocked('No native chat snapshot');
-    const state = result.snapshot.state as ChatState;
-    if (state.activeTurn?.responseParts.some(p => p.kind === 'toolCall' && !this.permittedInputTool(p.toolCall.toolName, p.toolCall.contributor))) this.unexpectedToolActivity = true;
-    if (state.resource !== identity.chatId) throw new Error('Native chat identity changed');
+    this.ownedChatChannels.add(identity.chatId!);
+    let state = await this.readChat(client, identity.chatId!);
+    this.auditChatTools(state);
+    const cursors = new Set<string>();
+    const until = Date.now() + this.timeoutMs;
+    while (state.turnsNextCursor && !this.unexpectedToolActivity) {
+      const cursor = state.turnsNextCursor;
+      if (cursors.has(cursor) || Date.now() >= until) throw new ProbeBlocked('Completed native turn history audit is incomplete');
+      cursors.add(cursor);
+      await client.request('fetchTurns', { channel: identity.chatId!, cursor });
+      state = await this.readChat(client, identity.chatId!);
+      this.auditChatTools(state);
+    }
     return state;
+  }
+  private auditChatTools(state: ChatState): void {
+    for (const part of [...(state.activeTurn?.responseParts ?? []), ...state.turns.flatMap(t => t.responseParts)]) {
+      if (part.kind === 'toolCall') this.observeTool(part.toolCall.toolName, part.toolCall.contributor);
+    }
+  }
+  private observeTool(name: string, contributor: unknown): void {
+    if (this.permittedInputTool(name, contributor)) this.diagnostics.permittedInputTools = ['ask_user'];
+    else {
+      this.unexpectedToolActivity = true;
+      this.diagnostics.toolNames = [...new Set([...(this.diagnostics.toolNames as string[] | undefined ?? []), name])];
+    }
+  }
+  private assertNoForbiddenTools(): void {
+    if (this.unexpectedToolActivity) throw new ProbeBlocked('Unexpected native tool activity; diagnostic cancelled');
   }
   private permittedInputTool(name: string, contributor: unknown): boolean {
     return this.runtime.allowNativeAskUser === true && (this.options.provider ?? 'copilot') === 'copilot'
@@ -206,7 +238,7 @@ export class VsCodeProbeOwner implements NativeOwner {
   }
   async snapshot(identity: NativeIdentity): Promise<NativeSnapshot> {
     const state = await this.chat(identity);
-    if (this.unexpectedToolActivity) throw new ProbeBlocked('Unexpected native tool activity; diagnostic cancelled');
+    this.assertNoForbiddenTools();
     const inputs = state.activeTurn?.responseParts.flatMap(p => p.kind === 'inputRequest' && !p.response
       ? [{ id: p.request.id, schema: { questions: p.request.questions ?? [], purpose: (p.request as { _meta?: { purpose?: string } })._meta?.purpose }, prompt: p.request.message ?? 'Native input' }] : []) ?? [];
     const snapshot: NativeSnapshot = { identity, state: inputs.length ? 'waiting' : state.activeTurn ? 'active' : 'idle', inputs };
@@ -219,18 +251,35 @@ export class VsCodeProbeOwner implements NativeOwner {
     const payload = input as { text?: string; requestId?: string; response?: string; answers?: Record<string, ChatInputAnswer> };
     if (payload.requestId) {
       const current = await this.chat(identity);
+      this.assertNoForbiddenTools();
       const parts = [...(current.activeTurn?.responseParts ?? []), ...current.turns.flatMap(t => t.responseParts)];
       const part = parts.find(p => p.kind === 'inputRequest' && p.request.id === payload.requestId);
       if (part?.kind !== 'inputRequest') throw new ProbeBlocked('Native input request not found');
-      if (part.response) return;
       const response = payload.response ?? 'accept';
       if (!['accept', 'decline', 'cancel'].includes(response)) throw new Error('Unsupported native input response');
-      client.dispatch(identity.chatId!, { type: 'chat/inputCompleted' as ActionType.ChatInputCompleted, requestId: payload.requestId,
+      for (const answer of Object.values(payload.answers ?? {})) {
+        if (answer.state !== 'submitted') throw new ProbeBlocked('Native input completion requires submitted answers');
+      }
+      if (!part.response) client.dispatch(identity.chatId!, { type: 'chat/inputCompleted' as ActionType.ChatInputCompleted, requestId: payload.requestId,
         response: response as ChatInputResponseKind, ...(payload.answers ? { answers: payload.answers } : {}) });
+      const until = Date.now() + this.timeoutMs;
+      do {
+        const observed = await this.chat(identity);
+        this.assertNoForbiddenTools();
+        const observedParts = [...(observed.activeTurn?.responseParts ?? []), ...observed.turns.flatMap(t => t.responseParts)];
+        const completion = observedParts.find(p => p.kind === 'inputRequest' && p.request.id === payload.requestId);
+        if (completion?.kind === 'inputRequest' && completion.response) {
+          if (completion.response !== response) throw new ProbeBlocked('Native input response differs from the requested completion');
+          if (Object.entries(payload.answers ?? {}).every(([id, answer]) => isDeepStrictEqual(completion.request.answers?.[id], answer))) return;
+        }
+        await delay(10);
+      } while (Date.now() < until);
+      throw new ProbeBlocked('Native input completion with exact submitted answers was not observed');
     } else {
       if (!payload.text) throw new Error('Probe text is required');
       const turnId = createHash('sha256').update(idempotencyKey).digest('hex');
       const current = await this.chat(identity);
+      this.assertNoForbiddenTools();
       if (current.activeTurn?.id === turnId || current.turns.some(t => t.id === turnId)) return;
       client.dispatch(identity.chatId!, { type: 'chat/turnStarted' as ActionType.ChatTurnStarted, turnId, startedAt: new Date().toISOString(),
         message: { text: payload.text, origin: { kind: MessageKind.User } } });
@@ -314,6 +363,7 @@ export async function probeVsCode(options: ProbeOptions, runtime: ProbeRuntime =
     await owner.send(identity, { text: 'Continue the trusted no-tool diagnostic in this exact chat. Do not use tools. Reply only READY.' }, 'probe-continuation');
     record('resume', (await owner.chat(identity)).activeTurn !== undefined);
     if (await owner.quiesce(identity) !== 'stopped') throw new ProbeBlocked('Continuation did not stop');
+    if (owner.unexpectedToolActivity) throw new ProbeBlocked('Unexpected native tool activity; diagnostic cancelled');
     Object.assign(details.diagnostics, owner.diagnostics);
     Object.assign(report.versions, owner.versions);
     details.observedActions.push(...owner.actionTypes);
@@ -347,7 +397,11 @@ export async function probeVsCode(options: ProbeOptions, runtime: ProbeRuntime =
     Object.assign(details.diagnostics, owner.diagnostics);
     Object.assign(report.versions, owner.versions);
     details.observedActions.push(...owner.actionTypes);
-    if (owner.unexpectedToolActivity) details.observedActions.push('UNEXPECTED_TOOL_ACTIVITY');
+    if (owner.unexpectedToolActivity) {
+      details.observedActions.push('UNEXPECTED_TOOL_ACTIVITY');
+      details.blockers.push('Unexpected native tool activity observed during the owned lifecycle');
+      report.status = 'blocked';
+    }
     await owner.close();
   }
   return writeEvidence(options.outputDir, report, details);

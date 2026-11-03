@@ -37,7 +37,8 @@
         "stopped native reconnect audit"
       ],
       "blockers": [
-        "native UI selected-session observation unavailable; URI launch is insufficient"
+        "native UI selected-session observation unavailable; URI launch is insufficient",
+        "pre-fix lifecycle receipts require a future live rerun with retained subscriptions, full completed-turn audit and exact native input-answer verification"
       ]
     },
     "codex": {
@@ -94,5 +95,23 @@
     "copilotcli": 1,
     "codex": 0
   },
-  "codexRecoveryDocumentation": "https://code.visualstudio.com/docs/agents/run/agents-window-configuration"
+  "codexRecoveryDocumentation": "https://code.visualstudio.com/docs/agents/run/agents-window-configuration",
+  "liveEvidenceQualification": {
+    "fixRound": 1,
+    "status": "blocked",
+    "originalReceiptCommit": "97a438e3fbbf7dd91bdcd746c5efd10b6905b46d",
+    "rawHistoricalReceiptsPreserved": true,
+    "supersededClaims": [
+      "continuous forbidden-tool absence during the pre-fix lifecycle",
+      "send-input success based on notification transmission without exact native answer equality"
+    ],
+    "historicalCorroboration": "Saved Copilot post-run audit shows an accepted input response with submitted answer state, exact registered identities, and stopped snapshots; it does not retrospectively prove the amended observation requirements.",
+    "newLiveRerunPerformed": false,
+    "requiredBeforeRerun": [
+      "explicit workspace continuity recovery decision after partial cleanup",
+      "native UI identity observation",
+      "native Codex models available"
+    ],
+    "productionGate": "blocked; fixture corrections and old receipt booleans do not clear the live/isolation gates"
+  }
 }

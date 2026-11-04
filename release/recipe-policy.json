@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "status": "probe-only; production import and broker are not implemented",
+  "flowKeys": ["id", "namespace", "description", "variables", "tasks", "outputs"],
+  "taskProperties": {
+    "io.kestra.plugin.core.flow.Pause": ["id", "type", "onResume"],
+    "io.kestra.plugin.core.debug.Return": ["id", "type", "format"]
+  },
+  "resumeTypes": ["BOOL", "INT", "STRING"],
+  "expressions": ["{{ outputs.approval.onResume.approved }}", "{{ outputs.approval.onResume.count }}"],
+  "runtimeOverrides": "none; only trusted probe code selects images, mounts, network and privileges",
+  "credentials": "declared model credentials may be readable in an approved native boundary; no use-only secrecy claim",
+  "nativeProfiles": [],
+  "externalClientTools": "blocked until the actual executor shares a verified native boundary"
+}

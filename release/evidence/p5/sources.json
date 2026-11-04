@@ -1,0 +1,44 @@
+{
+  "checkedAt": "2026-11-04",
+  "canvasSdk": {
+    "sourceCommit": "90f11bf1401b48721f4d4e6354e95aefcc3c7943",
+    "urls": [
+      "https://github.com/github/copilot-sdk/blob/90f11bf1401b48721f4d4e6354e95aefcc3c7943/nodejs/src/canvas.ts",
+      "https://github.com/github/copilot-sdk/blob/90f11bf1401b48721f4d4e6354e95aefcc3c7943/nodejs/src/extension.ts",
+      "https://github.com/github/copilot-sdk/blob/90f11bf1401b48721f4d4e6354e95aefcc3c7943/nodejs/src/generated/rpc.ts"
+    ],
+    "contract": "createCanvas/open returning URL, onClose, joinSession({canvases}); CanvasHostContext only canvases capability; no invented host globals",
+    "publishedVersionLookup": "1.0.28; npm lookup only, not installed-host attestation"
+  },
+  "vscode": {
+    "lastVerifiedBuild": "1.145.0-insider",
+    "lastVerifiedCommit": "3c0ec3a089398503a462029e7cc2a5749df5169a",
+    "urls": [
+      "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/test/node/copilotSdkCanvas.integrationTest.ts",
+      "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/common/agentHostStarter.config.contribution.ts",
+      "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/platform/agentHost/node/copilot/copilotAgent.ts",
+      "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/sessions/contrib/canvases/electron-browser/sessionCanvasActions.ts",
+      "https://github.com/microsoft/vscode/blob/3c0ec3a089398503a462029e7cc2a5749df5169a/src/vs/workbench/contrib/chat/common/aiCustomizationWorkspaceService.ts"
+    ],
+    "publicActivation": "aiCustomization.openManagementEditor with canvases; no-input Canvas rows Enter/double-click; source public registered Agents Window commands workbench.action.agentSessions.openCanvas/reopenCanvas",
+    "activationResult": "Owned dev host blocked by updater before extension activation; no effective feature/auth state observed; no model turn requested"
+  },
+  "copilotApp": {
+    "documentation": "https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-canvas-extensions",
+    "actualTargetVersion": null,
+    "targetStatus": "Pending installed app/other-machine answer; no platform-wide absence claim"
+  },
+  "bb": {
+    "version": "0.48.1",
+    "sdk": "0.6.104",
+    "runtimeNode": "22.21.1",
+    "publicPackage": "https://www.npmjs.com/package/@get-bb/plugin-sdk/v/0.6.104",
+    "declarationSha256": {
+      "bb-plugin-sdk-app.d.ts": "097a5e02c629ccf179c3d99eda0b42e952b93df04100c80e2775406c908ac61f",
+      "bb-plugin-sdk-testing-app.d.ts": "79b4bc412adb90093c2693d2da263889f58275366b4fe9c0c97ea3bf580c2ef2",
+      "bb-plugin-sdk.d.ts": "5168780021ce7858ca0c9b3963a15f2229478e4f1ba2651ff71aa152fe0cdc8d"
+    },
+    "contract": "definePluginApp navPanel, experimental_appOverlay, useRpc, useBbNavigate.toThread, useBbContext.threadId, experimental_useCodeTheme; public SDK only"
+  },
+  "scope": "Source contract verification does not replace any native live gate."
+}

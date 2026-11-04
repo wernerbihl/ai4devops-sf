@@ -1,0 +1,36 @@
+✖ only public SDK imports (21.803292ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 275.357328
+
+✖ failing tests:
+
+test at tests/bb.test.ts:83:1
+✖ only public SDK imports (21.803292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + [
+  +   {
+  +     file: 'tests/probes/canvas-wrapper.test.ts',
+  +     reason: 'dynamic-specifier',
+  +     specifier: 'entry'
+  +   }
+  + ]
+  - []
+
+      at TestContext.<anonymous> (file:///home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory/tests/bb.test.ts:85:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { file: 'tests/probes/canvas-wrapper.test.ts', specifier: 'entry', reason: 'dynamic-specifier' } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

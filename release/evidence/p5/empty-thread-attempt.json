@@ -1,0 +1,12 @@
+{
+  "bb": "0.48.1",
+  "sdk": "0.6.104",
+  "request": "threads.spawn input:[] in existing authorized environment; P3 plugin-origin hook rejects dispatch",
+  "status": "rejected",
+  "httpStatus": 400,
+  "message": "input must contain at least one entry",
+  "threadIdReturned": false,
+  "modelTurnSubstituted": false,
+  "fallback": "explicitly authorized read-only existing thread target through public toThread and useBbContext observer",
+  "pendingMarkerCleanup": "dashboardCleanupDiagnostic verified no matching owned marked active/archived thread and cleared its own marker; returned removed:false; no thread delete"
+}

@@ -1,0 +1,12 @@
+
+> bb-plugin-sf-native-probe@0.1.0 test
+> node scripts/test.ts tests/probes/transport.test.ts
+
+
+ RUN  v5.1.0 /home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  03:03:07
+   Duration  279ms (tests 56%, import 23%, transform 18%, worker 3%)

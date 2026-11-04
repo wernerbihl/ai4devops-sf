@@ -1,0 +1,59 @@
+{
+  "name": "dashboard-bb",
+  "mode": "live",
+  "status": "passed",
+  "versions": {
+    "bb": "0.48.1",
+    "sdk": "0.6.104",
+    "svelte": "5.57.3",
+    "browser": "152.0.0.0",
+    "bbNode": "22.21.1"
+  },
+  "assertions": [
+    {
+      "name": "dom-mounted",
+      "passed": true
+    },
+    {
+      "name": "unmount-clean",
+      "passed": true
+    },
+    {
+      "name": "theme-light",
+      "passed": true
+    },
+    {
+      "name": "theme-dark",
+      "passed": true
+    },
+    {
+      "name": "portal-contained",
+      "passed": true
+    },
+    {
+      "name": "csp-behavior-observed",
+      "passed": true
+    },
+    {
+      "name": "resources-loaded",
+      "passed": true
+    },
+    {
+      "name": "authenticated-health",
+      "passed": true
+    },
+    {
+      "name": "credentials-absent-from-ui",
+      "passed": true
+    },
+    {
+      "name": "native-selection-observed",
+      "passed": true
+    }
+  ],
+  "artifacts": [
+    "bb-browser.json",
+    "bb-runtime.json",
+    "build-assets.json"
+  ]
+}

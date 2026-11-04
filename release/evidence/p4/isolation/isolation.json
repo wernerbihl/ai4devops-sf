@@ -1,0 +1,75 @@
+{
+  "name": "isolation",
+  "mode": "live",
+  "status": "blocked",
+  "versions": {
+    "docker": "29.7.2",
+    "worker": "node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c"
+  },
+  "assertions": [
+    {
+      "name": "owned-host-canary-positive-control",
+      "passed": true
+    },
+    {
+      "name": "effective-worker-settings-inspected",
+      "passed": true
+    },
+    {
+      "name": "workspace-write-positive-control",
+      "passed": true
+    },
+    {
+      "name": "rootfs-write-denied",
+      "passed": true
+    },
+    {
+      "name": "ungranted-host-canary-denied",
+      "passed": true
+    },
+    {
+      "name": "symlink-escape-denied",
+      "passed": true
+    },
+    {
+      "name": "docker-socket-denied",
+      "passed": true
+    },
+    {
+      "name": "ungranted-credential-environment-absent",
+      "passed": true
+    },
+    {
+      "name": "declared-model-canary-readable-within-boundary",
+      "passed": true
+    },
+    {
+      "name": "nonroot-no-capabilities-no-new-privileges",
+      "passed": true
+    },
+    {
+      "name": "ipv4-egress-denied",
+      "passed": true
+    },
+    {
+      "name": "ipv6-egress-denied",
+      "passed": true
+    },
+    {
+      "name": "ipv4-mapped-ipv6-egress-denied",
+      "passed": true
+    },
+    {
+      "name": "alternate-dns-tcp-denied",
+      "passed": true
+    },
+    {
+      "name": "alternate-dns-udp-denied",
+      "passed": true
+    }
+  ],
+  "artifacts": [
+    "release/evidence/p4/isolation/isolation.json",
+    "release/evidence/p4/isolation/isolation-details.json"
+  ]
+}

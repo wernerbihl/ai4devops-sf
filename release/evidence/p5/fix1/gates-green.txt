@@ -1,0 +1,40 @@
+
+> ai4devops-sf@0.1.0 test
+> node --test tests/probes/gates.test.ts
+
+✔ missing gates block readiness and missing Copilot App is explicit (4.305401ms)
+✔ gate refuses blocked evidence (93.85341ms)
+✔ gate refuses failed evidence (4.21786ms)
+✔ gate refuses fixture evidence (3.734868ms)
+✔ gate refuses version evidence (3.409177ms)
+✔ gate refuses incomplete evidence (3.668043ms)
+✔ gate refuses duplicate-assertion evidence (3.643477ms)
+✔ gate refuses artifact evidence (6.313727ms)
+✔ gate refuses directory-artifact evidence (3.84221ms)
+✔ gate refuses traversal evidence (3.832035ms)
+✔ gate refuses malformed evidence (2.922793ms)
+✔ gate refuses ambiguous evidence (3.172126ms)
+✔ empty advertised profile list cannot pass both provider coverage or mandatory BB isolation (2.724518ms)
+✔ malformed manifest blocks instead of throwing or allowing vacuous pass (1.758351ms)
+✔ valid pinned evidence passes known gates; unresolved Copilot App version stays blocked (2.592517ms)
+✔ actual valid profile proofs supply provider coverage and mandatory BB profile (30.938611ms)
+✔ advertised profiles reject missing native restrictions and unsupported owner/provider combinations (3.907018ms)
+✔ duplicate advertised profile remains blocked rather than simultaneously passed (5.599277ms)
+✔ receipt changes without refreshed provenance digest block the selected gate (2.302117ms)
+✔ profile capability object key ordering does not change its meaning (3.936351ms)
+✔ multiple uniquely named compatible native probes can jointly prove a profile restriction set (5.045702ms)
+✔ containment rejects parent and other-drive Windows relative results (0.250158ms)
+✔ containment rejects an existing outside manifest-receipt through parent reference (4.370944ms)
+✔ containment rejects an existing outside manifest-receipt through directory symlink or Windows junction (6.27211ms)
+✔ containment rejects an existing outside profile-spec through parent reference (4.509451ms)
+✔ containment rejects an existing outside profile-spec through directory symlink or Windows junction (4.421818ms)
+✔ containment rejects an existing outside artifact through parent reference (4.182843ms)
+✔ containment rejects an existing outside artifact through directory symlink or Windows junction (4.68206ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 500.857411

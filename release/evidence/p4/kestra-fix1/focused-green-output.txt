@@ -1,0 +1,23 @@
+
+> ai4devops-sf@0.1.0 test
+> node --test tests/probes/kestra.test.ts
+
+✔ RF3 reconciles a lost start reply without issuing a duplicate execution and preserves typed resume/revision after restart (fixture) (73.024261ms)
+✔ lifecycle gate refuses lost-h2 instead of reporting passed (2.516984ms)
+✔ lifecycle gate refuses mutable-revision instead of reporting passed (0.631676ms)
+✔ lifecycle gate refuses untyped-resume instead of reporting passed (0.80795ms)
+✔ lifecycle gate rejects changed-resumed-id before accepting SUCCESS despite later matching identities (0.89155ms)
+✔ lifecycle gate rejects missing-resumed-id before accepting SUCCESS despite later matching identities (0.643867ms)
+✔ an ambiguous/missing RF3 lookup never authorizes another start (0.4785ms)
+✔ metadata stays under standard variables.sf and the restricted probe flow passes policy (0.246584ms)
+✔ fixture mode cannot create live connectors or satisfy the release gate (24.224851ms)
+✔ explicit live permission is required before any connector (0.820051ms)
+✔ RF3 verifies the returned namespace/flow/attempt label instead of trusting a search match (0.552109ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 387.623278

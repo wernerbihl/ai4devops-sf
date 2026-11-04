@@ -1,0 +1,63 @@
+{
+  "fixtureTests": {
+    "focused": 17,
+    "fullSuite": 63,
+    "failed": 0,
+    "command": "npm test"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "build": "passed",
+    "protocol:check": "passed",
+    "gitDiffCheck": "passed",
+    "headlessScriptConsentGuards": "2/2 passed without live connections",
+    "headlessScriptSyntax": "passed"
+  },
+  "live": {
+    "kestraOssH2": {
+      "passedAssertions": 8,
+      "status": "passed"
+    },
+    "workerProcess": {
+      "passedAssertions": 15,
+      "nativeGate": "blocked"
+    },
+    "headlessStartup": {
+      "passedAssertions": 19,
+      "sessions": 0,
+      "modelTurns": 0,
+      "nativeProfileVerified": false
+    }
+  },
+  "qualification": "Fixture tests and headless startup do not establish actual authenticated native execution or external client tool containment.",
+  "baselineCommit": "f4171884d1ce04afdcd01575b29348f356699702",
+  "baselineQualification": "Top-level fixtureTests/checks/live and full-test-output.txt record pre-fix validation. No full-suite, worker, headless or native rerun was performed for fix round 1.",
+  "fixRound1": {
+    "coveringCommand": "npm test -- tests/probes/kestra.test.ts",
+    "red": {
+      "tests": 11,
+      "passed": 9,
+      "failed": 2,
+      "reason": "Both new identity regressions reported Missing expected rejection."
+    },
+    "green": {
+      "tests": 11,
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    "checks": {
+      "typecheck": "passed",
+      "build": "passed",
+      "gitDiffCheck": "passed"
+    },
+    "liveKestra": {
+      "passedAssertions": 8,
+      "status": "passed",
+      "receipt": "kestra-fix1/kestra-oss-h2-details.json",
+      "originalExecutionId": "m13C2fFNDVEkEBHUCWbZu",
+      "resumedExecutionId": "m13C2fFNDVEkEBHUCWbZu"
+    },
+    "nativeGate": "blocked"
+  }
+}

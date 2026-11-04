@@ -1,0 +1,28 @@
+{
+  "name": "vscode-codex",
+  "mode": "live",
+  "status": "blocked",
+  "versions": {
+    "host": "1.145.0-insider",
+    "hostCommit": "3c0ec3a089398503a462029e7cc2a5749df5169a",
+    "ahpPackage": "1.0.0",
+    "protocol": "1.0.0"
+  },
+  "assertions": [
+    {
+      "name": "native-open",
+      "passed": false
+    },
+    {
+      "name": "continuous-tool-audit",
+      "passed": false
+    },
+    {
+      "name": "exact-input-answer",
+      "passed": false
+    }
+  ],
+  "artifacts": [
+    "native-prerequisites.json"
+  ]
+}

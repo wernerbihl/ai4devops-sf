@@ -1,0 +1,56 @@
+
+> bb-plugin-sf-native-probe@0.1.0 test
+> node scripts/test.ts tests/probes/canvas-wrapper.test.ts
+
+
+ RUN  v5.1.0 /home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory
+
+ ❯ tests/probes/canvas-wrapper.test.ts (2 tests | 2 failed) 115ms
+   × actual Canvas wrapper delegates an explicitly configured approved route through its paired server without claiming selected UI 89ms
+   × actual Canvas wrapper stays unavailable without an approved target and rejects executable or credential-bearing configuration 25ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/probes/canvas-wrapper.test.ts > actual Canvas wrapper delegates an explicitly configured approved route through its paired server without claiming selected UI
+AssertionError: expected 409 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 409
+
+ ❯ tests/probes/canvas-wrapper.test.ts:34:70
+     32|   const uri = 'https://native.example/explicitly-approved-existing-vie…
+     33|   const wrapper = await openWrapper(uri);
+     34|   const response = await wrapper.navigate(); expect(response.status).t…
+       |                                                                      ^
+     35|   expect(await response.json()).toEqual({ selected: false, uri });
+     36|   expect(await wrapper.canvas.open(wrapper.input)).toEqual(wrapper.ope…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/probes/canvas-wrapper.test.ts > actual Canvas wrapper stays unavailable without an approved target and rejects executable or credential-bearing configuration
+AssertionError: expected 409 to be 503 // Object.is equality
+
+- Expected
++ Received
+
+- 503
++ 409
+
+ ❯ tests/probes/canvas-wrapper.test.ts:41:29
+     39|   for (const uri of [undefined, 'javascript:alert(1)', 'https://user:p…
+     40|     const wrapper = await openWrapper(uri); const response = await wra…
+     41|     expect(response.status).toBe(uri === undefined ? 409 : 503);
+       |                             ^
+     42|     expect(await response.json()).not.toHaveProperty('uri');
+     43|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  03:24:09
+   Duration  284ms (tests 68%, transform 22%, import 7%, worker 2%)

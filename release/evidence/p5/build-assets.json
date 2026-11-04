@@ -1,0 +1,30 @@
+{
+  "source": "canvas npm run build:probe; current final build",
+  "versions": {
+    "buildNode": "24.22.2",
+    "bbRuntimeNode": "22.21.1",
+    "svelte": "5.57.3",
+    "vite": "8.3.5",
+    "vitest": "5.1.0",
+    "sveltePlugin": "7.3.1",
+    "jsdom": "30.1.3",
+    "bbSdk": "0.6.104"
+  },
+  "assets": {
+    "dist/shared/probe.js": "e3bcc0f47fe57047cae64402130112615f3e0bd0ae5e87233d543d44a517df1c",
+    "dist/shared/probe.css": "1037f3eb2a73943a874def0c4d3d5c43626372c6a739a6620ac379d91c57e4dd",
+    "dist/app.js": "8473826fc1fc86b26a0cf056176252611c904d3a3e81dec86992efbb67c396d9",
+    "dist/app.css": "f326f26f67b4a958fd6ec1a225153851e31421cd8869b308f13eb9682c7c0f52",
+    "dist/app.meta.json": "61ff75761e7ffccf26de4bf3913154d211b87b64765a6cc1c6994a2dd3ff7c4a",
+    "dist/server.js": "de590b1b6f12db51b756156247509d775213edf37a4730521be4e9ba947211fb",
+    "dist/server.meta.json": "649a76f0b866a621aa88f6cd0a8378bdf36be5b5ae2f55d5802d469f92b60e06"
+  },
+  "frontendHasBackendBearerHeaderLiteral": false,
+  "frontendImportsNodeCrypto": false,
+  "frontendImportsHealthServer": false,
+  "frontendImportsRunnerCode": false,
+  "frontendSourceImportsSharedCompiledBundle": true,
+  "frontendSourceImportsSharedStyles": true,
+  "frontendHasPairingCookieImplementation": false,
+  "buildNote": "BB imports and rebundles the same generated Svelte artifact; runtime React and public SDK are host-shimmed. No independent UI implementation."
+}

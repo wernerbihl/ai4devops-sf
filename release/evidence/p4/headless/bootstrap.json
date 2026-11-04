@@ -1,0 +1,161 @@
+{
+  "mode": "live",
+  "status": "blocked",
+  "observedAt": "2026-11-04T00:11:36.074Z",
+  "nativeProfileVerified": false,
+  "modelTurnsStarted": 0,
+  "loginStarted": false,
+  "resourceOwner": "sf-p4-5405b0ad-a170-4e15-b458-c64e8d6817b7",
+  "assertions": [
+    {
+      "name": "headless-startup-and-ahp-discovery-only",
+      "passed": true
+    },
+    {
+      "name": "private-token-required",
+      "passed": true
+    },
+    {
+      "name": "github-mcp-and-connectors-disabled",
+      "passed": true
+    },
+    {
+      "name": "claude-disabled",
+      "passed": true
+    },
+    {
+      "name": "zero-native-sessions",
+      "passed": true
+    },
+    {
+      "name": "diagnostic-client-contained-no-contributions",
+      "passed": true
+    },
+    {
+      "name": "workspace-write-positive-control",
+      "passed": true
+    },
+    {
+      "name": "rootfs-write-denied",
+      "passed": true
+    },
+    {
+      "name": "ungranted-host-canary-denied",
+      "passed": true
+    },
+    {
+      "name": "symlink-escape-denied",
+      "passed": true
+    },
+    {
+      "name": "docker-socket-denied",
+      "passed": true
+    },
+    {
+      "name": "ungranted-credential-environment-absent",
+      "passed": true
+    },
+    {
+      "name": "declared-model-canary-readable-within-boundary",
+      "passed": true
+    },
+    {
+      "name": "nonroot-no-capabilities-no-new-privileges",
+      "passed": true
+    },
+    {
+      "name": "ipv4-egress-denied",
+      "passed": true
+    },
+    {
+      "name": "ipv6-egress-denied",
+      "passed": true
+    },
+    {
+      "name": "ipv4-mapped-ipv6-egress-denied",
+      "passed": true
+    },
+    {
+      "name": "alternate-dns-tcp-denied",
+      "passed": true
+    },
+    {
+      "name": "alternate-dns-udp-denied",
+      "passed": true
+    }
+  ],
+  "sdk": {
+    "url": "https://main.vscode-cdn.net/agent-sdk/codex/0.163.0/linux-x64.tgz",
+    "version": "0.163.0",
+    "sha256": "201b83598aaa2764468788cff3ad450e81e5d1e2f00662be668f94d85e8de294",
+    "bytes": 162068382
+  },
+  "effectiveSettings": {
+    "image": "node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c",
+    "user": "1000:1000",
+    "readOnly": true,
+    "network": "none",
+    "capDrop": [
+      "ALL"
+    ],
+    "securityOpt": [
+      "no-new-privileges"
+    ],
+    "mounts": [
+      {
+        "type": "volume",
+        "name": "sf-p4-5405b0ad-a170-4e15-b458-c64e8d6817b7-native-state",
+        "destination": "/state",
+        "readWrite": true
+      },
+      {
+        "type": "volume",
+        "name": "sf-p4-5405b0ad-a170-4e15-b458-c64e8d6817b7-native-config",
+        "destination": "/config",
+        "readWrite": false
+      },
+      {
+        "type": "volume",
+        "name": "sf-p4-5405b0ad-a170-4e15-b458-c64e8d6817b7-native-assets",
+        "destination": "/assets",
+        "readWrite": false
+      }
+    ]
+  },
+  "discovery": {
+    "protocol": "1.0.0",
+    "hostBuild": {
+      "version": "1.145.0-insider",
+      "commit": "3c0ec3a089398503a462029e7cc2a5749df5169a",
+      "date": "2026-11-03T05:56:12Z",
+      "quality": "insider"
+    },
+    "providers": [
+      {
+        "id": "copilotcli",
+        "modelCount": 0
+      },
+      {
+        "id": "codex",
+        "modelCount": 0
+      }
+    ],
+    "config": {
+      "githubMcpServerEnabled": false,
+      "mcpConnectorsEnabled": false,
+      "systemProxyEnabled": false,
+      "computerUseEnabled": false
+    },
+    "sessionCount": 0,
+    "invalidTokenRejected": true,
+    "sentMethods": [
+      "initialize",
+      "listSessions"
+    ],
+    "clientExecution": "docker exec within native container",
+    "clientContributions": []
+  },
+  "runtimeNode": "v24.22.1",
+  "reason": "No native model/task/tool execution verified. Next: approved provider authentication and restricted service-egress binding, then lifecycle and all-client-tool execution proof; no host credential fallback.",
+  "cleanup": "complete"
+}

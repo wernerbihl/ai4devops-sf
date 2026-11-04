@@ -1,0 +1,59 @@
+{
+  "name": "dashboard-vscode",
+  "mode": "live",
+  "status": "blocked",
+  "versions": {
+    "host": "1.145.0-insider",
+    "hostCommit": "3c0ec3a089398503a462029e7cc2a5749df5169a",
+    "ahpPackage": "1.0.0",
+    "protocol": "1.0.0",
+    "svelte": "5.57.3"
+  },
+  "assertions": [
+    {
+      "name": "dom-mounted",
+      "passed": false
+    },
+    {
+      "name": "unmount-clean",
+      "passed": false
+    },
+    {
+      "name": "theme-light",
+      "passed": false
+    },
+    {
+      "name": "theme-dark",
+      "passed": false
+    },
+    {
+      "name": "portal-contained",
+      "passed": false
+    },
+    {
+      "name": "csp-behavior-observed",
+      "passed": false
+    },
+    {
+      "name": "resources-loaded",
+      "passed": false
+    },
+    {
+      "name": "authenticated-health",
+      "passed": false
+    },
+    {
+      "name": "credentials-absent-from-ui",
+      "passed": false
+    },
+    {
+      "name": "native-selection-observed",
+      "passed": false
+    }
+  ],
+  "artifacts": [
+    "vscode-owned-stage.json",
+    "vscode-launch-error.txt",
+    "vscode-uia.json"
+  ]
+}

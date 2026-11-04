@@ -1,0 +1,54 @@
+{
+  "name": "dashboard-copilot-app",
+  "mode": "live",
+  "status": "blocked",
+  "versions": {
+    "copilotApp": "UNRESOLVED",
+    "svelte": "5.57.3"
+  },
+  "assertions": [
+    {
+      "name": "dom-mounted",
+      "passed": false
+    },
+    {
+      "name": "unmount-clean",
+      "passed": false
+    },
+    {
+      "name": "theme-light",
+      "passed": false
+    },
+    {
+      "name": "theme-dark",
+      "passed": false
+    },
+    {
+      "name": "portal-contained",
+      "passed": false
+    },
+    {
+      "name": "csp-behavior-observed",
+      "passed": false
+    },
+    {
+      "name": "resources-loaded",
+      "passed": false
+    },
+    {
+      "name": "authenticated-health",
+      "passed": false
+    },
+    {
+      "name": "credentials-absent-from-ui",
+      "passed": false
+    },
+    {
+      "name": "native-selection-observed",
+      "passed": false
+    }
+  ],
+  "artifacts": [
+    "remaining-prerequisites.json"
+  ]
+}

@@ -1,0 +1,27 @@
+
+> bb-plugin-sf-native-probe@0.1.0 build:probe
+> node scripts/build-probe.ts
+
+
+> bb-plugin-sf-native-probe@0.1.0 build:dashboard
+> vite build --config probes/standalone/vite.config.ts && node scripts/dashboard-types.ts
+
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 109 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/shared/probe.css   0.54 kB │ gzip:  0.31 kB
+dist/shared/probe.js   47.43 kB │ gzip: 15.12 kB
+
+✓ built in 178ms
+
+> bb-plugin-sf-native-probe@0.1.0 typecheck
+> tsc --noEmit
+
+dist/server.js
+dist/server.js.map
+dist/server.meta.json
+dist/app.js
+dist/app.css
+dist/app.meta.json

@@ -1,0 +1,45 @@
+{
+  "standalone": [
+    {
+      "origin": "http://127.0.0.1:43763",
+      "reachableAfterStop": false
+    },
+    {
+      "origin": "http://127.0.0.1:45527",
+      "reachableAfterStop": false
+    },
+    {
+      "origin": "http://127.0.0.1:33623",
+      "reachableAfterStop": false
+    },
+    {
+      "origin": "http://127.0.0.1:33127",
+      "reachableAfterStop": false
+    }
+  ],
+  "browser": {
+    "id": "ce9cb1f4-cdf2-4f4e-9342-7e3cfff76a35",
+    "threadId": "thr_wb7fw2kusb",
+    "hostId": "host_zykzzzxjj7",
+    "backend": "local",
+    "state": "closed",
+    "createdAt": 1793752678094,
+    "expiresAt": 1793756068494
+  },
+  "windows": {
+    "scope": "owned P5 root only",
+    "ownedProcessCount": 0,
+    "updaterTouched": false,
+    "rootRemoved": true
+  },
+  "readOnlyPairing": {
+    "removed": true
+  },
+  "nativeThreadsCreated": 0,
+  "nativeInputsSent": 0,
+  "newContainersOrMachines": 0,
+  "bbPlugin": "Existing sf-native-probe remains installed/running with P5 frontend; P3 settings/hooks/public SDK build preserved. Health listeners are per-RPC and closed in finally.",
+  "retainedSharedTools": "/tmp/sf-p1-runtime official Node24 and private npm cache pre-existed P5 and were not removed.",
+  "retainedP2": "Historical native chats/workspace and partial staging unchanged.",
+  "updaterChanged": false
+}

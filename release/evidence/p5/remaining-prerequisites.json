@@ -1,0 +1,41 @@
+{
+  "vscode-copilot": [
+    "Corrected live rerun with continuous tool audit and exact native input answer; native UI identity observation; preserve or explicitly recover original retained workspace continuity. Historical receipts are qualified, not a corrected live pass."
+  ],
+  "vscode-codex": [
+    "Native Codex model catalog must expose a usable model; then corrected owned live lifecycle and exact selected UI observation."
+  ],
+  "bb-codex-isolated": [
+    "Supported denial of initial server GitHub/global environment delivery or a credential-free BB instance; actual enrolled restricted native worker with filesystem/tool/network/credential denial and reconnect proofs. UI navigation is not lifecycle/isolation."
+  ],
+  "dashboard-vscode": [
+    "Installed Code Insiders updater must finish naturally and editor reopen; owned profile launch failed at vscodeinsiders-updating mutex. Reverify installed version/source after update before reusing old pinned baseline. Then read effective Canvas feature/auth and initialize a new owned local Copilot chat through supported UI/API without touching retained P2 sessions. Open repository Canvas, observe real DOM/theme/resource/CSP/auth/native selection and native close."
+  ],
+  "dashboard-copilot-app": [
+    "User must identify an installed supported Copilot desktop app/other-machine target and exact version. No installed target confirmed on enrolled Windows/WSL host; public current download page shows macOS Silicon, which is not proof that every other distribution is absent. Run the same staged extension in that actual host and collect every mount assertion."
+  ],
+  "provider-copilot": [
+    "Advertise and verify an actually usable restricted Copilot execution profile with matching ProfileSpec and ProfileEvidence. Empty profile inventory cannot pass."
+  ],
+  "provider-codex": [
+    "Advertise and verify an actually usable restricted Codex execution profile; component worker/headless receipts do not qualify."
+  ],
+  "profile-bb-codex": [
+    "Mandatory BB isolated native gate plus actual BB/Codex ProfileEvidence remain required even if another Codex route works."
+  ],
+  "scope": [
+    "P5 health is an ephemeral protected integration fixture; C5 product API/security and U6 release transports must be retested. BB local host CSP header is absent; observed policy is recorded, not a security-enforcement claim."
+  ],
+  "userResourcesPending": [
+    "Copilot native UI confirmation; VSCode Codex models; installed Copilot App/other machine target; credential-free BB instance. No user answer assumed."
+  ],
+  "controllerUpdaterObservation": {
+    "processes": [
+      "CodeSetup-insider-e2ce8e1b6b05d4522d3a1d4d863665c9cc8e8f02",
+      "matching .tmp process"
+    ],
+    "observedRuntimeSeconds": 17699,
+    "source": "Controller read-only Windows process check, 2026-11-04",
+    "changedOrStopped": false
+  }
+}

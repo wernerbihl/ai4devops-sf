@@ -10,6 +10,10 @@
 
 **Spec:** [Approved design](../specs/2026-11-03-local-software-factory-design.md).
 
+## Session checkpoint — 2026-11-04
+
+The user closed testing for this session, deferred all remaining live gates to manual testing on other machines/apps, and authorized merging the current work into `main` in both repositories. Those testing gates do not block this checkpoint merge. Contracts/probes and fixtures are delivered; C1–C8, E1–E8 and U1–U6 remain unimplemented. See the [closeout and manual-test handoff](../reports/2026-11-04-session-closeout.md). Historical receipts and runtime restrictions keep their actual status.
+
 ## Global Constraints
 
 - Exactly three public commands: setup, next, and uninstall.
@@ -213,8 +217,11 @@ P1 specifies and C5 implements these authenticated version-1 operations:
 - Tags: POST /v1/tags; PATCH/DELETE /v1/tags/:id;
   POST /v1/tags/:id/archive.
 - Tasks: GET/POST /v1/tasks; GET/PATCH/DELETE /v1/tasks/:id.
-- Recipes: GET/POST /v1/recipes; POST /v1/recipes/validate;
-  POST /v1/recipes/:id/revisions; PATCH /v1/recipes/:id.
+- Recipes: GET/POST /v1/recipes; GET /v1/recipes/:id returns the full current
+  RecipeRevision (YAML, contract, input defaults, and repository assignments)
+  for reloading an existing recipe editor without a preceding mutation;
+  POST /v1/recipes/validate; POST /v1/recipes/:id/revisions;
+  PATCH /v1/recipes/:id.
 - Control: POST /v1/dispatch, /v1/attention/:id/respond,
   /v1/tasks/:id/takeover, /v1/repositories/:id/return-control,
   /v1/tasks/:id/open-native.

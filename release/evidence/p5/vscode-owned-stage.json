@@ -1,0 +1,31 @@
+{
+  "root": "C:\\Users\\wbihl\\AppData\\Local\\Temp\\sf-p5-20261104-7bd29a",
+  "scope": "owned-uncredentialed-P5",
+  "launcherPid": 7852,
+  "settings": {
+    "window.title": "SF P5 owned probe",
+    "chat.canvases.enabled": true,
+    "telemetry.telemetryLevel": "off",
+    "update.mode": "none",
+    "extensions.autoUpdate": false,
+    "workbench.startupEditor": "none"
+  },
+  "sharedSettingsChanged": false,
+  "credentialsCopied": false,
+  "modelTurns": 0,
+  "extensionResultCreated": false,
+  "stageFiles": [
+    "repo/.github/extensions/sf-p5-dashboard/extension.mjs",
+    "repo/.github/extensions/sf-p5-dashboard/package.json",
+    "repo/.github/extensions/sf-p5-dashboard/probes/canvas/extension.mjs",
+    "repo/.github/extensions/sf-p5-dashboard/probes/standalone/server.mjs",
+    "repo/.github/extensions/sf-p5-dashboard/probes/standalone/index.html",
+    "repo/.github/extensions/sf-p5-dashboard/probes/standalone/boot.js",
+    "repo/.github/extensions/sf-p5-dashboard/dist/shared/probe.js",
+    "repo/.github/extensions/sf-p5-dashboard/dist/shared/probe.css",
+    "dev-extension/package.json",
+    "dev-extension/probe.cjs",
+    "profile/User/settings.json",
+    "repo/README.md"
+  ]
+}

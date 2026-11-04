@@ -1,0 +1,63 @@
+
+> ai4devops-sf@0.1.0 test
+> node --test tests/probes/gates.test.ts
+
+✔ missing gates block readiness and missing Copilot App is explicit (13.042889ms)
+✔ gate refuses blocked evidence (87.312349ms)
+✔ gate refuses failed evidence (3.011801ms)
+✔ gate refuses fixture evidence (2.550626ms)
+✔ gate refuses version evidence (2.475093ms)
+✔ gate refuses incomplete evidence (2.573634ms)
+✔ gate refuses duplicate-assertion evidence (2.589493ms)
+✔ gate refuses artifact evidence (2.772001ms)
+✔ gate refuses directory-artifact evidence (4.93506ms)
+✔ gate refuses traversal evidence (3.138301ms)
+✔ gate refuses malformed evidence (2.666401ms)
+✔ gate refuses ambiguous evidence (2.849551ms)
+✔ empty advertised profile list cannot pass both provider coverage or mandatory BB isolation (2.08606ms)
+✔ malformed manifest blocks instead of throwing or allowing vacuous pass (1.547793ms)
+✔ valid pinned evidence passes known gates; unresolved Copilot App version stays blocked (2.313117ms)
+✔ actual valid profile proofs supply provider coverage and mandatory BB profile (25.612409ms)
+✔ advertised profiles reject missing native restrictions and unsupported owner/provider combinations (3.499285ms)
+✔ duplicate advertised profile remains blocked rather than simultaneously passed (5.382027ms)
+✔ receipt changes without refreshed provenance digest block the selected gate (2.147292ms)
+✔ profile capability object key ordering does not change its meaning (3.159018ms)
+✔ multiple uniquely named compatible native probes can jointly prove a profile restriction set (4.989327ms)
+✖ containment rejects parent and other-drive Windows relative results (1.038859ms)
+✔ containment rejects an existing outside manifest-receipt through parent reference (4.246918ms)
+✔ containment rejects an existing outside manifest-receipt through directory symlink or Windows junction (3.583709ms)
+✔ containment rejects an existing outside profile-spec through parent reference (4.723035ms)
+✔ containment rejects an existing outside profile-spec through directory symlink or Windows junction (4.468843ms)
+✔ containment rejects an existing outside artifact through parent reference (4.399544ms)
+✔ containment rejects an existing outside artifact through directory symlink or Windows junction (4.027744ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 27
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 487.071657
+
+✖ failing tests:
+
+test at tests/probes/gates.test.ts:91:1
+✖ containment rejects parent and other-drive Windows relative results (1.038859ms)
+  AssertionError [ERR_ASSERTION]: ..\outside.json
+
+  true !== false
+
+      at TestContext.<anonymous> (file:///home/wbihl/workspace/software-factory/ai4devops-sf/.worktrees/factory/tests/probes/gates.test.ts:94:51)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

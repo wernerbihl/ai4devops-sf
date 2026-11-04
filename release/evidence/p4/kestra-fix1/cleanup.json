@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-11-04T00:27:15.610567+00:00",
+  "owner": "sf-p4-b7692d85-0acd-45b8-bdf3-a4d532b3daa6",
+  "manifest": "sf-p4-b7692d85-0acd-45b8-bdf3-a4d532b3daa6-resources.json",
+  "checkpointedResources": 5,
+  "allCheckpointedResourcesRemoved": true,
+  "remainingContainers": 0,
+  "remainingVolumes": 0,
+  "verification": "docker ps -a and docker volume ls filtered by the exact sf.p4.owner label both exited 0 with empty output",
+  "status": "complete"
+}

@@ -15,7 +15,8 @@
     "probe:vscode": "node scripts/probe-vscode.ts",
     "probe:bb": "node scripts/probe-bb.ts",
     "probe:kestra": "node probes/kestra.ts",
-    "probe:isolation": "node probes/isolation.ts"
+    "probe:isolation": "node probes/isolation.ts",
+    "gates:check": "node scripts/check-gates.ts"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",

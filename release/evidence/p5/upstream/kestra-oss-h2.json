@@ -1,0 +1,48 @@
+{
+  "name": "kestra-oss-h2",
+  "mode": "live",
+  "status": "passed",
+  "versions": {
+    "docker": "29.7.2",
+    "kestra": "kestra/kestra@sha256:d7bb1af55f4b5730247e5c8c852e2c912ccd36a58c7846ac96d2d749295ba365",
+    "worker": "node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c"
+  },
+  "assertions": [
+    {
+      "name": "variables.sf-accepted-unchanged",
+      "passed": true
+    },
+    {
+      "name": "immutable-revision-lookup",
+      "passed": true
+    },
+    {
+      "name": "rf3-lost-start-reply-single-execution",
+      "passed": true
+    },
+    {
+      "name": "h2-pause-survives-restart",
+      "passed": true
+    },
+    {
+      "name": "invalid-typed-resume-rejected",
+      "passed": true
+    },
+    {
+      "name": "typed-resume-output-exact",
+      "passed": true
+    },
+    {
+      "name": "same-execution-after-resume",
+      "passed": true
+    },
+    {
+      "name": "h2-success-survives-second-restart",
+      "passed": true
+    }
+  ],
+  "artifacts": [
+    "release/evidence/p4/kestra-fix1/kestra-oss-h2.json",
+    "release/evidence/p4/kestra-fix1/kestra-oss-h2-details.json"
+  ]
+}

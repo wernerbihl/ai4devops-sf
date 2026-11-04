@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "evidence": [
+    {
+      "id": "vscode-copilot",
+      "file": "vscode-copilot.json",
+      "source": "release/compatibility.json at P2 corrected qualification; no amended live rerun; historical native receipts not promoted",
+      "observedAt": "2026-11-04T01:05:25.580Z",
+      "sha256": "66625d8f9cb1ba556ae7f0ce8329c6764bc154ce43954b5e238d8f61e625dd78"
+    },
+    {
+      "id": "vscode-codex",
+      "file": "vscode-codex.json",
+      "source": "release/compatibility.json at P2 corrected qualification; model catalog unavailable and native selection unobserved",
+      "observedAt": "2026-11-04T01:05:25.581Z",
+      "sha256": "9328f7821b7fb50a055e5d4585ce1bd3a9efaec9aff35ba99ef8654361fa736e"
+    },
+    {
+      "id": "bb-codex-isolated",
+      "file": "bb-codex-isolated.json",
+      "source": "release/compatibility.json P3 public SDK 0.6.104; corrected P3 implementation remains native-isolation blocked",
+      "observedAt": "2026-11-04T01:05:25.581Z",
+      "sha256": "ebd1494ae555138ca05bbcbefe37d868e645ec9115e4c282b7fed598d1f9bcc7"
+    },
+    {
+      "id": "kestra-oss-h2",
+      "file": "kestra-current.json",
+      "source": "release/evidence/p4/kestra-fix1/kestra-oss-h2.json; exact receipt preserved under upstream, selected copy changes artifact paths only",
+      "observedAt": "2026-11-04T01:05:25.581Z",
+      "sha256": "e68808903a75f761b03e8852ff13498c915e6c3e7f32c512f283ad051a89faff"
+    },
+    {
+      "id": "dashboard-standalone",
+      "file": "dashboard-standalone.json",
+      "source": "P5 owned real Chrome browser; built shared Svelte, protected health, CSP and read-only navigation observed",
+      "observedAt": "2026-11-04T01:05:25.581Z",
+      "sha256": "e8a6d64045fb18f5100d3670d6e16a57e45dfb96755a3b84646108682f83f29c"
+    },
+    {
+      "id": "dashboard-vscode",
+      "file": "dashboard-vscode.json",
+      "source": "P5 owned Windows development-host launch; updater mutex prevented window/extension activation; no real mount",
+      "observedAt": "2026-11-04T01:05:25.581Z",
+      "sha256": "38b1bea1a9107f43a3a63ba2588df044ecab0b5b1547920a052eb5c4880347b9"
+    },
+    {
+      "id": "dashboard-copilot-app",
+      "file": "dashboard-copilot-app.json",
+      "source": "No confirmed installed supported target; pending user resource answer; no substitute host execution",
+      "observedAt": "2026-11-04T01:05:25.581Z",
+      "sha256": "4b6fccb9659d7894cd3cf8d8d287586e36a34c32d7cb3ac99e9ab4797f122319"
+    },
+    {
+      "id": "dashboard-bb",
+      "file": "dashboard-bb.json",
+      "source": "P5 installed public BB SDK navPanel and selected-context overlay in actual BB 0.48.1; host CSP header absent, observed explicitly",
+      "observedAt": "2026-11-04T01:05:25.581Z",
+      "sha256": "a35f581a9e4e6a5dcfd6ab8d718a9734ae1d9953dd5702e4e705b4c1b632921e"
+    }
+  ],
+  "profiles": [],
+  "profileInventorySource": "P2/P3 compatibility reports have zero verified/advertised executable profiles. Empty inventory still blocks both requested providers and mandatory BB isolated profile. P4 worker/headless receipts are component evidence only."
+}

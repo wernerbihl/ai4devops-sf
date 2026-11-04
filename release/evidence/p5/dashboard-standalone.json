@@ -1,0 +1,63 @@
+{
+  "name": "dashboard-standalone",
+  "mode": "live",
+  "status": "passed",
+  "versions": {
+    "node": "24.22.2",
+    "svelte": "5.57.3",
+    "vite": "8.3.5",
+    "browser": "152.0.0.0"
+  },
+  "assertions": [
+    {
+      "name": "dom-mounted",
+      "passed": true
+    },
+    {
+      "name": "unmount-clean",
+      "passed": true
+    },
+    {
+      "name": "theme-light",
+      "passed": true
+    },
+    {
+      "name": "theme-dark",
+      "passed": true
+    },
+    {
+      "name": "portal-contained",
+      "passed": true
+    },
+    {
+      "name": "csp-behavior-observed",
+      "passed": true
+    },
+    {
+      "name": "resources-loaded",
+      "passed": true
+    },
+    {
+      "name": "authenticated-health",
+      "passed": true
+    },
+    {
+      "name": "credentials-absent-from-ui",
+      "passed": true
+    },
+    {
+      "name": "native-selection-observed",
+      "passed": true
+    },
+    {
+      "name": "csp-inline-refused",
+      "passed": true
+    }
+  ],
+  "artifacts": [
+    "standalone-browser.json",
+    "standalone-native.json",
+    "standalone-dark.jpg",
+    "build-assets.json"
+  ]
+}

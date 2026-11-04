@@ -1,0 +1,30 @@
+
+> bb-plugin-sf-native-probe@0.1.0 test
+> node scripts/test.ts tests/dashboard.test.ts
+
+✖ explicit read-only target pairing never creates, dispatches or deletes a native thread (18.315686ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 308.847534
+
+✖ failing tests:
+
+test at tests/dashboard.test.ts:5:1
+✖ explicit read-only target pairing never creates, dispatches or deletes a native thread (18.315686ms)
+  Error [experimental_PluginRpcCallError]: plugin "sf-native-probe" has no rpc method "dashboardPairReadOnlyTarget"
+      at throwRpcError (file:///home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory/node_modules/@get-bb/plugin-sdk/dist/testing/index.js:3105:9)
+      at Object.callRpc (file:///home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory/node_modules/@get-bb/plugin-sdk/dist/testing/index.js:4163:16)
+      at TestContext.<anonymous> (file:///home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory/tests/dashboard.test.ts:10:28)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    code: 'unknown_method',
+    issues: undefined,
+    status: undefined,
+    serverCode: undefined
+  }

@@ -1,0 +1,29 @@
+
+> bb-plugin-sf-native-probe@0.1.0 test
+> node scripts/test.ts tests/probes/transport.test.ts
+
+
+ RUN  v5.1.0 /home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory
+
+ ❯ tests/probes/transport.test.ts (3 tests | 1 failed) 82ms
+   × two real mounted surfaces can pair concurrently without overwriting each other on the same loopback host 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/probes/transport.test.ts > two real mounted surfaces can pair concurrently without overwriting each other on the same loopback host
+AssertionError: expected 'sf_p5_pair' not to be 'sf_p5_pair' // Object.is equality
+ ❯ tests/probes/transport.test.ts:35:37
+     33|     const first=(await fetch(one.origin)).headers.get('set-cookie')!.s…
+     34|     const second=(await fetch(two.origin)).headers.get('set-cookie')!.…
+     35|     expect(first.split('=')[0]).not.toBe(second.split('=')[0]);
+       |                                     ^
+     36|     for(const server of [one,two]) expect((await fetch(`${server.origi…
+     37|   } finally {await one.close();await two.close();}
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  03:02:45
+   Duration  277ms (tests 52%, import 24%, transform 21%, worker 3%)

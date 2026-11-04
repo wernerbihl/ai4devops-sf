@@ -1,0 +1,33 @@
+
+> ai4devops-sf@0.1.0 test
+> node --test tests/probes/gates.test.ts
+
+✔ missing gates block readiness and missing Copilot App is explicit (11.001746ms)
+✔ gate refuses blocked evidence (72.031602ms)
+✔ gate refuses failed evidence (3.799677ms)
+✔ gate refuses fixture evidence (4.261951ms)
+✔ gate refuses version evidence (3.22621ms)
+✔ gate refuses incomplete evidence (4.426952ms)
+✔ gate refuses duplicate-assertion evidence (4.822493ms)
+✔ gate refuses artifact evidence (5.312269ms)
+✔ gate refuses directory-artifact evidence (7.878753ms)
+✔ gate refuses traversal evidence (4.916085ms)
+✔ gate refuses malformed evidence (3.193118ms)
+✔ gate refuses ambiguous evidence (2.515426ms)
+✔ empty advertised profile list cannot pass both provider coverage or mandatory BB isolation (2.211826ms)
+✔ malformed manifest blocks instead of throwing or allowing vacuous pass (2.507359ms)
+✔ valid pinned evidence passes known gates; unresolved Copilot App version stays blocked (3.188259ms)
+✔ actual valid profile proofs supply provider coverage and mandatory BB profile (31.63537ms)
+✔ advertised profiles reject missing native restrictions and unsupported owner/provider combinations (3.553735ms)
+✔ duplicate advertised profile remains blocked rather than simultaneously passed (5.859885ms)
+✔ receipt changes without refreshed provenance digest block the selected gate (2.13455ms)
+✔ profile capability object key ordering does not change its meaning (3.591685ms)
+✔ multiple uniquely named compatible native probes can jointly prove a profile restriction set (5.402285ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 455.145428

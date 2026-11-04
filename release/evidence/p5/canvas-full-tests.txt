@@ -1,0 +1,53 @@
+
+> bb-plugin-sf-native-probe@0.1.0 test
+> node scripts/test.ts
+
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 109 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/shared/probe.css   0.54 kB │ gzip:  0.31 kB
+dist/shared/probe.js   47.43 kB │ gzip: 15.12 kB
+
+✓ built in 213ms
+✔ public SDK lifecycle keeps BB native identity through send/input/retry/stop/navigation (12.879722ms)
+✔ RF3 spawn applied with no reply reconciles after owner restart without creating another thread (3.330068ms)
+✔ lost spawn with no matching row stays uncertain and never respawns (3.983926ms)
+✔ dispatch hook refuses missing/stale lease before dispatch, leaves unrelated thread alone (2.864217ms)
+✔ only public SDK imports (61.080914ms)
+✔ continuation refuses a changed workspace and never starts a replacement (2.464642ms)
+✔ machine provider checkpoints opaque ownership before private bootstrap and removes only that resource (78.73418ms)
+✔ current live machine policy refuses enrollment before allocation/bootstrap (2.137759ms)
+✔ unverified probe-machine dispatch is refused while unrelated host/thread proceeds (2.383884ms)
+✔ idempotency uses start values regardless of JSON key ordering (1.987701ms)
+✔ plugin RPC emits only masked capability facts and registers no public command or provider alias (13.564747ms)
+✔ fix1 default plugin rejects null-origin follow-up/steer/retry on its persistent threads only (1.625708ms)
+✔ fix1 persistent thread provenance retains lease checks with null submission origin (1.378118ms)
+✔ fix2 direct send/respond/retry refuse a changed path while exact stop remains available (1.67475ms)
+✔ fix2 direct send/respond/retry refuse a changed host while exact stop remains available (2.573635ms)
+✔ fix2 direct send/respond/retry refuse a changed project while exact stop remains available (1.924267ms)
+✔ fix2 direct continuation resolves the persisted start after owner restart and permits an unchanged workspace (1.594817ms)
+✔ fix2 writer continuation refuses an identity without its original journal record (1.514242ms)
+✔ fix3 concurrent same-key conflicting workspace is rejected before coalescing (0.856808ms)
+✔ fix3 concurrent same-key conflicting fence is rejected before coalescing (0.592717ms)
+✔ fix3 matching concurrent start values coalesce to one native spawn (0.610684ms)
+✔ fix3 pending start snapshots caller values before async work and preserves the journal request (0.631217ms)
+✔ explicit read-only target pairing never creates, dispatches or deletes a native thread (19.179882ms)
+✔ pairing rejects a mismatched project and preserves the previous target (3.063959ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 870.329308
+
+ RUN  v5.1.0 /home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory
+
+
+ Test Files  3 passed (3)
+      Tests  6 passed (6)
+   Start at  03:03:10
+   Duration  1.88s (environment 55%, import 18%, tests 14%, transform 12%, worker 1%)

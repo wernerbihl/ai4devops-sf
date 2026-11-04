@@ -1,0 +1,77 @@
+
+> ai4devops-sf@0.1.0 test
+> node --test tests/probes/gates.test.ts
+
+✔ missing gates block readiness and missing Copilot App is explicit (11.864971ms)
+✔ gate refuses blocked evidence (60.317789ms)
+✔ gate refuses failed evidence (3.020052ms)
+✔ gate refuses fixture evidence (2.826084ms)
+✔ gate refuses version evidence (2.548059ms)
+✔ gate refuses incomplete evidence (2.886492ms)
+✔ gate refuses duplicate-assertion evidence (4.496252ms)
+✔ gate refuses artifact evidence (2.881085ms)
+✔ gate refuses directory-artifact evidence (3.149209ms)
+✔ gate refuses traversal evidence (3.754027ms)
+✔ gate refuses malformed evidence (2.571801ms)
+✔ gate refuses ambiguous evidence (2.503967ms)
+✔ empty advertised profile list cannot pass both provider coverage or mandatory BB isolation (1.832143ms)
+✔ malformed manifest blocks instead of throwing or allowing vacuous pass (1.448792ms)
+✔ valid pinned evidence passes known gates; unresolved Copilot App version stays blocked (2.222918ms)
+✔ actual valid profile proofs supply provider coverage and mandatory BB profile (25.113926ms)
+✔ advertised profiles reject missing native restrictions and unsupported owner/provider combinations (5.168536ms)
+✔ duplicate advertised profile remains blocked rather than simultaneously passed (3.872643ms)
+✔ receipt changes without refreshed provenance digest block the selected gate (2.186617ms)
+✖ profile capability object key ordering does not change its meaning (9.336162ms)
+✖ multiple uniquely named compatible native probes can jointly prove a profile restriction set (3.663643ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 19
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 419.014081
+
+✖ failing tests:
+
+test at tests/probes/gates.test.ts:80:1
+✖ profile capability object key ordering does not change its meaning (9.336162ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(checkGates(f.dir).passed.includes('provider-copilot'))
+
+      at TestContext.<anonymous> (file:///home/wbihl/workspace/software-factory/ai4devops-sf/.worktrees/factory/tests/probes/gates.test.ts:82:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/probes/gates.test.ts:84:1
+✖ multiple uniquely named compatible native probes can jointly prove a profile restriction set (3.663643ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(checkGates(f.dir).passed.includes('provider-codex'))
+
+      at TestContext.<anonymous> (file:///home/wbihl/workspace/software-factory/ai4devops-sf/.worktrees/factory/tests/probes/gates.test.ts:87:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

@@ -1,0 +1,2 @@
+[main 2026-11-04T00:56:20.953Z] checkInnoSetupMutex: vscodeinsiders-updating still held after 30867ms, giving up
+[main 2026-11-04T00:56:20.963Z] Error: Code - Insiders is currently being updated. Please wait for the update to complete before launching.

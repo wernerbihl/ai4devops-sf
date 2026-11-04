@@ -1,0 +1,28 @@
+
+> bb-plugin-sf-native-probe@0.1.0 test
+> node scripts/test.ts tests/probes/transport.test.ts
+
+
+ RUN  v5.1.0 /home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory
+
+ ❯ tests/probes/transport.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/probes/transport.test.ts [ tests/probes/transport.test.ts ]
+Error: Cannot find module '../../probes/standalone/server.mjs' imported from /home/wbihl/workspace/software-factory/ai4devops-sf-canvas/.worktrees/factory/tests/probes/transport.test.ts
+ ❯ tests/probes/transport.test.ts:3:1
+      1| // @vitest-environment node
+      2| import { test, expect } from 'vitest';
+      3| import { createProbeServer } from '../../probes/standalone/server.mjs';
+       | ^
+      4| test('real paired transport rejects missing auth, wrong origin and non…
+      5|   const server = await createProbeServer();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  02:36:04
+   Duration  176ms (worker 96%, environment 4%)

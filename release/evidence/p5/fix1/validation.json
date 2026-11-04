@@ -1,0 +1,51 @@
+{
+  "fixRound": 1,
+  "scope": [
+    "Important I1 Windows containment",
+    "Important I2 actual Canvas native adapter wiring"
+  ],
+  "fixBases": {
+    "runner": "b57f138a74cffb3f3456be06e6a5ba6632b48620",
+    "canvas": "22dcc7b2d7a0b222448e7d427802fbbdd949edce"
+  },
+  "red": {
+    "containment": "production predicate returned true for node:path.win32 relative ..\\outside.json;27/28 passing",
+    "canvas": "actual imported extension with SDK stub and real paired server returned409 rather than200 for configured target;0/2 passing"
+  },
+  "green": {
+    "gateTests": 28,
+    "canvasWrapperAndTransportTests": 5,
+    "publicSdkScan": 1,
+    "runnerTypecheckAndBuild": "passed",
+    "canvasBuildProbeAndTypecheck": "passed"
+  },
+  "windowsTestScope": "Production predicate exercised with node:path.win32 parent/sibling/different-drive/inside cases. Actual existing outside manifest/profile/artifact files and directory symlink/junction references exercised on Linux. Portable junction test is not a claim of native Windows filesystem execution.",
+  "nativeAdapter": "Actual Canvas extension supplies SF_P5_NATIVE_URL from trusted probe-process configuration as onNavigate, using the same validated backend route mechanism as standalone; selected:false. Missing target409, rejected schemes/embedded credentials503. Actual host selection still unverified.",
+  "gatesCommandExitCode": 1,
+  "gateSummary": {
+    "ready": false,
+    "blocked": [
+      "vscode-copilot",
+      "vscode-codex",
+      "bb-codex-isolated",
+      "dashboard-vscode",
+      "dashboard-copilot-app",
+      "provider-copilot",
+      "provider-codex",
+      "profile-bb-codex"
+    ],
+    "passed": [
+      "kestra-oss-h2",
+      "dashboard-standalone",
+      "dashboard-bb"
+    ]
+  },
+  "liveReruns": false,
+  "historicalQualification": "Original86-runner/24+6-canvas full suites and standalone/BB live receipts remain historical FIX_BASE evidence. No full suite/native/editor/browser/model rerun in this fix. Canonical eight receipts, digests, profile inventory and real-host blockers unchanged.",
+  "deferred": [
+    "M1 pairing-preservation test",
+    "M2 dependency advisory follow-up"
+  ],
+  "resources": "Only focused-test loopback listeners and fixture signal listeners; closed/removed in test cleanup. No new native thread, model, browser/editor, installed/reloaded plugin, container or machine.",
+  "canvasFixCommit": "c9b30039ed55d388cd0b92a9878f25226fe8358b"
+}

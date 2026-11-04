@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { checkGates, requirements, isolationAssertions } from '../../scripts/check-gates.ts';
+import { join, relative, win32 } from 'node:path';
+import { checkGates, requirements, isolationAssertions, isContainedRelativePath } from '../../scripts/check-gates.ts';
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'sf-p5-gates-'));
@@ -87,3 +87,31 @@ test('multiple uniquely named compatible native probes can jointly prove a profi
  assert.ok(checkGates(f.dir).passed.includes('provider-codex'));
  proof.probes[1]!.name=proof.probes[0]!.name;writeFileSync(join(f.dir,'bb-codex-proof.json'),JSON.stringify(proof));f.save();assert.ok(checkGates(f.dir).blocked.includes('provider-codex'));
 }finally{f.cleanup();} });
+
+test('containment rejects parent and other-drive Windows relative results', () => {
+ const root='C:\\release\\evidence';
+ for(const candidate of ['C:\\release\\outside.json','C:\\release\\evidence-other\\receipt.json','D:\\other\\receipt.json']) {
+  const rel=win32.relative(root,candidate);assert.equal(isContainedRelativePath(rel,win32.isAbsolute),false,rel);
+ }
+ assert.equal(isContainedRelativePath(win32.relative(root,'C:\\release\\evidence\\nested\\receipt.json'),win32.isAbsolute),true);
+});
+for(const kind of ['manifest-receipt','profile-spec','artifact'] as const) for(const link of [false,true]) {
+ test(`containment rejects an existing outside ${kind} through ${link?'directory symlink or Windows junction':'parent reference'}`,()=>{
+  const f=fixture(),outside=mkdtempSync(join(tmpdir(),'sf-p5-existing-outside-'));
+  try {
+   if(kind==='profile-spec') {addProfile(f,'bb','codex');assert.ok(checkGates(f.dir).passed.includes('provider-codex'));}
+   else assert.ok(checkGates(f.dir).passed.includes('dashboard-bb'));
+   const entry=f.manifest.evidence.find(entry=>entry.id==='dashboard-bb')!;
+   const profile=f.manifest.profiles[0] as {specFile:string}|undefined;
+   const source=kind==='manifest-receipt'?entry.file:kind==='profile-spec'?profile!.specFile:'observed.txt';
+   const destination=join(outside,'existing-file');writeFileSync(destination,requireRead(join(f.dir,source)));
+   if(link) symlinkSync(outside,join(f.dir,'escaped'),'junction');
+   const reference=link?'escaped/existing-file':relative(f.dir,destination);
+   if(kind==='manifest-receipt') entry.file=reference;
+   else if(kind==='profile-spec') profile!.specFile=reference;
+   else {const file=join(f.dir,entry.file);const data=JSON.parse(requireRead(file,'utf8'));data.artifacts=[reference];writeFileSync(file,JSON.stringify(data));}
+   f.save();const summary=checkGates(f.dir);
+   assert.ok(summary.blocked.includes(kind==='profile-spec'?'provider-codex':'dashboard-bb'));
+  } finally {f.cleanup();rmSync(outside,{recursive:true,force:true});}
+ });
+}

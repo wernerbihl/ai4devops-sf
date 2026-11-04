@@ -1,0 +1,22 @@
+
+> ai4devops-sf@0.1.0 gates:check
+> node scripts/check-gates.ts
+
+{
+  "ready": false,
+  "blocked": [
+    "vscode-copilot",
+    "vscode-codex",
+    "bb-codex-isolated",
+    "dashboard-vscode",
+    "dashboard-copilot-app",
+    "provider-copilot",
+    "provider-codex",
+    "profile-bb-codex"
+  ],
+  "passed": [
+    "kestra-oss-h2",
+    "dashboard-standalone",
+    "dashboard-bb"
+  ]
+}

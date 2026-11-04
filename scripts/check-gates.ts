@@ -26,11 +26,15 @@ interface Entry { id: string; file: string; source: string; observedAt: string; 
 interface Manifest { schemaVersion: 1; evidence: Entry[]; profiles: { specFile: string; evidenceFile: string; source: string; specSha256: string; evidenceSha256: string }[] }
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value); }
 function string(value: unknown): value is string { return typeof value === 'string' && value.trim().length > 0; }
+// Keep this predicate shared by filesystem containment and platform-semantics tests.
+export function isContainedRelativePath(rel: string, pathIsAbsolute = isAbsolute): boolean {
+  return rel.split(/[\\/]/)[0] !== '..' && !pathIsAbsolute(rel);
+}
 function contained(root: string, path: string): string {
   if (!string(path) || isAbsolute(path)) throw Error('Expected relative evidence path');
   const candidate = realpathSync(resolve(root, path));
   const rel = relative(realpathSync(root), candidate);
-  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) throw Error('Evidence escapes selected directory');
+  if (!isContainedRelativePath(rel)) throw Error('Evidence escapes selected directory');
   return candidate;
 }
 function digest(root: string, file: string): string { return createHash('sha256').update(readFileSync(contained(root, file))).digest('hex'); }

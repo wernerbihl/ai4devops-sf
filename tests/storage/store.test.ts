@@ -268,3 +268,35 @@ test('archive_compare_and_swap_rejects_a_stale_tag_revision', () => {
     assert.equal(f.store.snapshot().tags.find(item => item.id === tag.id)!.archivedAt, undefined);
   } finally { f.close(); }
 });
+
+test('repository_creation_requires_explicit_autonomous_activation', () => {
+  const f = createFixture();
+  try {
+    assert.equal(f.store.getRepository('repo-1')!.active, false);
+    const explicitlyInactive = f.store.createRepository({ id: 'repo-off', name: 'Off', url: 'https://example.test/off.git', active: false });
+    assert.equal(explicitlyInactive.active, false);
+    const explicitlyActive = f.store.createRepository({ id: 'repo-on', name: 'On', url: 'https://example.test/on.git', active: true });
+    assert.equal(explicitlyActive.active, true);
+    const activated = f.store.patchRepository('repo-1', { active: true }, 1);
+    assert.equal(activated.active, true);
+    f.reopen();
+    assert.equal(f.store.getRepository('repo-off')!.active, false);
+    assert.equal(f.store.getRepository('repo-on')!.active, true);
+    assert.equal(f.store.getRepository('repo-1')!.active, true);
+  } finally { f.close(); }
+});
+
+test('manual_submission_to_inactive_repository_does_not_enable_autonomous_work', () => {
+  const f = createFixture();
+  try {
+    f.store.patchRepository('repo-1', { active: false }, 1);
+    const task = f.store.createManualTasks(f.request, 'manual-while-inactive')[0]!;
+    assert.equal(task.repositoryId, 'repo-1');
+    assert.equal(task.source, 'manual');
+    assert.equal(f.store.getTask(task.id)!.status, 'queued');
+    assert.equal(f.store.getRepository('repo-1')!.active, false);
+    f.reopen();
+    assert.equal(f.store.getRepository('repo-1')!.active, false);
+    assert.equal(f.store.getTask(task.id)!.status, 'queued');
+  } finally { f.close(); }
+});

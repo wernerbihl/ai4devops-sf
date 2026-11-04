@@ -71,7 +71,7 @@ export class FactoryStore {
   }
   createRepository(input: RepositoryCreate): Repository {
     return this.db.transaction(() => {
-      const value = validateContract('Repository', { ...input, active: input.active ?? true, controlMode: 'factory', revision: 1, createdAt: this.db.now(), weights: input.weights ?? {} });
+      const value = validateContract('Repository', { ...input, active: input.active ?? false, controlMode: 'factory', revision: 1, createdAt: this.db.now(), weights: input.weights ?? {} });
       ensure(!this.db.read('repositories', value.id), 'duplicate_repository', 'Repository already exists');
       this.validateWeights(value.weights);
       this.db.sql.prepare('INSERT INTO repositories(id, payload) VALUES (?, ?)').run(value.id, JSON.stringify(value));

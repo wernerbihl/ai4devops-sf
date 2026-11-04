@@ -9,7 +9,7 @@
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/storage/migrations', 'dist/storage/migrations', { recursive: true })\"",
     "protocol:generate": "node scripts/generate-protocol.ts",
     "protocol:check": "node scripts/generate-protocol.ts --check",
     "probe:vscode": "node scripts/probe-vscode.ts",

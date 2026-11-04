@@ -10,6 +10,10 @@
 
 **Spec:** [Approved design](../specs/2026-11-03-local-software-factory-design.md).
 
+## Session checkpoint — 2026-11-04
+
+The user closed testing for this session, deferred all remaining live gates to manual testing on other machines/apps, and authorized merging the current work into `main` in both repositories. Those testing gates do not block this checkpoint merge. Contracts/probes and fixtures are delivered; C1–C8, E1–E8 and U1–U6 remain unimplemented. See the [closeout and manual-test handoff](../reports/2026-11-04-session-closeout.md). Historical receipts and runtime restrictions keep their actual status.
+
 ## Global Constraints
 
 - Exactly three public commands: setup, next, and uninstall.

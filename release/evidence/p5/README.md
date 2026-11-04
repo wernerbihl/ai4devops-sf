@@ -1,18 +1,26 @@
 # P5 consolidated feasibility gate report — 2026-11-04
 
-**BLOCKED. Product C/E/U work must not begin.** `npm run gates:check` exits **1** and returns `ready:false`. Three gates pass; eight required gate/coverage IDs remain blocked. Unit/DOM fixtures never count as native passes.
+**Checkpoint approved for merge by the user; remaining live tests deferred to manual testing.** The last automated `npm run gates:check` result is exit **1**, `ready:false`: three gates pass and eight required gate/coverage IDs remain blocked in the historical evidence. These testing gaps do not block the requested checkpoint merge. Unit/DOM fixtures never count as native passes. See the [session closeout](../../../docs/superpowers/reports/2026-11-04-session-closeout.md).
 
 | Required evidence | Current result | Evidence / exact remaining prerequisite |
 | --- | --- | --- |
 | `vscode-copilot` | blocked | Corrected P2 native lifecycle rerun, full continuous tool audit, exact native input answer and selected UI identity; retained historical receipts are qualified. |
-| `vscode-codex` | blocked | Last verified native model catalog had no available Codex models; usable models plus corrected lifecycle/selection proof are required. |
-| `bb-codex-isolated` | blocked | Current SDK cannot deny initial inherited server GitHub/global credentials per machine; no verified isolated enrolled Codex lifecycle. |
+| `vscode-codex` | automated evidence blocked; local setup closed by user | User will manually review on another machine; see disposition below. No local passing lifecycle/selection receipt is claimed. |
+| `bb-codex-isolated` | blocked; forwarding prerequisite resolved | User approved disabling server-wide automatic Git credential forwarding; readback is false and masked status is disabled, with no custom global/project variables. A dynamic setup guard remains a follow-up proposal; actual isolated enrolled Codex lifecycle remains unverified. |
 | `kestra-oss-h2` | passed, imported current P4 proof | Original corrected `release/evidence/p4/kestra-fix1/` receipt and details are preserved under `upstream/`; only artifact paths change in `kestra-current.json`. This was not rerun in P5. |
 | `dashboard-standalone` | passed | Real Chrome mount, resources, protected paired health, light/dark, contained overlay, enforced inline-script refusal, disposal and actual read-only native selection. |
-| `dashboard-vscode` | blocked | Owned development host could not start: `vscodeinsiders-updating` mutex was still held after 30,867ms. No extension activation or Canvas DOM observed. Finish update naturally, reopen, reverify installed build/source, then feature/auth/initialized owned chat and full actual Canvas observations. |
-| `dashboard-copilot-app` | blocked | No confirmed installed supported app/other-machine target or exact app version. User resource question remains pending; no substitute browser/VS Code pass. |
+| `dashboard-vscode` | blocked; startup and feature prerequisites recovered | User finished update. Current build 1.146.0-insider/e576c7b launches; exact native-owner `canvasesEnabled:true` verified. Actual initialized owned chat, Canvas mount and full host observations remain pending. Historical failed-launch receipts are preserved. |
+| `dashboard-copilot-app` | blocked; installation confirmed | Copilot App 1.1.34 is installed on the connected Windows host. Supported interface, authentication and actual Canvas mount remain under investigation; no substitute host pass. |
 | `dashboard-bb` | passed | Installed public SDK nav panel mounted the same Svelte build; real RPC health, SDK theme mode, contained overlay, disposal and `useBbContext().threadId` plus actual route after public `toThread`. Local host has **no CSP header**; this is observed policy, not enforced-CSP/security proof. |
 | `provider-copilot`, `provider-codex`, `profile-bb-codex` | blocked | Actual verified restricted native profiles for both providers and mandatory BB/Codex isolation are required. Empty profiles cannot pass. P4 worker/headless startup receipts are component proof only. |
+
+## User disposition — 2026-11-04
+
+- [x] **Blocker 3: local native Codex model setup — closed at the user's direction.** The user will manually review Codex on another machine. Do not request local Codex sign-in or keep retrying this prerequisite. That external review has not been observed here; the historical automated gate result and native test receipts are unchanged.
+
+- [x] **Blocker 4: automatic BB Git credential forwarding — disabled with user approval.** Public readback confirms `machineGitCredentialsEnabled:false`, built-in Git forwarding status `disabled`, and no custom global/project environment variables. The setting remains disabled; native worker boundary/lifecycle verification is still required.
+
+- [x] **All remaining testing blockers — deferred to user manual testing for this merge.** The user reports that Copilot App installation accepts GitHub URLs; the staged local extension was not installed. Actual native/App/profile verification remains unmeasured where stated.
 
 The protected P1-shaped health fixture is temporary integration infrastructure. It does **not** complete C5 product API/auth/security. Release U6 must retest the actual production transports and deployed host policies.
 
@@ -66,7 +74,7 @@ Self-review fixed a reload-only CJS/top-level-await issue by splitting the serve
 
 [resources.json](resources.json), [browser-cleanup.json](browser-cleanup.json), [bb-unpair.json](bb-unpair.json), [vscode-cleanup.json](vscode-cleanup.json) record cleanup. All four owned standalone origins are unreachable after stop. The owned browser session is closed. The Windows owned profile/repository/extension root was removed after observing zero matching processes. BB read-only pairing was removed; zero native threads were created, zero inputs sent, and no new containers/machines were made. BB protected health listeners now close after each RPC. Existing `sf-native-probe` remains installed/running with the new frontend; P3 settings/hooks and existing tooling/cache remain intact. Retained P2 histories/partly removed scratch, prior contracts and prior receipts are unchanged. Earlier implementations remain preserved; P3 registration/tooling is extended for P5 as listed in the file inventory.
 
-Canvas implementation commit: `22dcc7b2d7a0b222448e7d427802fbbdd949edce` (`test: verify all factory dashboard surfaces`). The full implementer report is also at runner `.superpowers/sdd/2026-11-03-software-factory/task-5-report.md`. The durable evidence here survives disposable SDD cleanup. Proceed only with independent review or prerequisite recovery; do not start dependent product work while readiness is false.
+Canvas implementation commit: `22dcc7b2d7a0b222448e7d427802fbbdd949edce` (`test: verify all factory dashboard surfaces`). The full implementer report is also at runner `.superpowers/sdd/2026-11-03-software-factory/task-5-report.md`. The durable evidence here survives disposable SDD cleanup. The user subsequently authorized merging this checkpoint and deferred remaining live testing; the session closeout records that disposition and the pending product work.
 
 ## Review fix round1: I1 / I2
 

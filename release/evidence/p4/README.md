@@ -10,6 +10,12 @@ This is a pre-production gate, not a production orchestrator or verified native 
 | Actual native task/tool lifecycle | Blocked | No provider authentication or approved model service egress was supplied. No native execution, input, pause, continuation, restart, UI identity or external client-tool execution is claimed. |
 | BB native | Blocked | Earlier P3 initial GitHub/global environment forwarding limitation remains. No BB enrollment was attempted. |
 
+## Review fix 1: exact resumed identity
+
+`waitState` now requires every observed execution ID to equal the requested ID before accepting its state. Changed-ID and missing-ID SUCCESS fixtures each failed against the old gate and pass with this correction; the focused suite passes 11/11. Typecheck and build pass. A fresh [corrected Kestra run](kestra-fix1/kestra-oss-h2-details.json) passes 8/8 with original/resumed ID `m13C2fFNDVEkEBHUCWbZu`; its [cleanup audit](kestra-fix1/cleanup.json) found zero owned containers/volumes. RED/GREEN output is preserved beside the receipt.
+
+The saved `full-test-output.txt` (63/63) and original worker/headless results belong to pre-fix commit `f417188`; they were not rerun for this narrow correction. Historical matching live IDs corroborate that earlier run but do not cover the regression. All native gates remain blocked on the prerequisites below. The separate minor headless consumed-manifest replay issue is deferred; no headless manifest was replayed in this fix.
+
 ## Reproduce component probes
 
 From the runner root, Node 24.22.2 and the pinned images in `release/images.json` are required. Pull those exact digest references explicitly during trusted setup. This Windows Docker Desktop host uses:

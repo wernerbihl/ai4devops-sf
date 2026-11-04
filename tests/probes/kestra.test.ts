@@ -10,6 +10,7 @@ import type { KestraApi } from '../../probes/kestra.ts';
 function fixtureApi(breakage = ''): KestraApi {
   const revisions: Record<string, unknown>[] = [];
   let execution: any;
+  let corruptedSuccessResponse = false;
   return {
     async request(method, path, body) {
       if (path === '/flows' && method === 'POST' || path === '/flows/sf.p4/restricted' && method === 'PUT') {
@@ -28,7 +29,16 @@ function fixtureApi(breakage = ''): KestraApi {
         return execution;
       }
       if (path.endsWith('/actions/eval')) return { result: JSON.stringify(execution.outputs) };
-      if (path === '/executions/execution-original') return execution;
+      if (path === '/executions/execution-original') {
+        if (execution?.state.current === 'SUCCESS' && !corruptedSuccessResponse && ['changed-resumed-id', 'missing-resumed-id'].includes(breakage)) {
+          corruptedSuccessResponse = true;
+          const response = { ...execution };
+          if (breakage === 'changed-resumed-id') response.id = 'different-after-resume';
+          else delete response.id;
+          return response;
+        }
+        return execution;
+      }
       throw new Error(`unexpected fixture request: ${method} ${path}`);
     },
     async restart() { if (breakage === 'lost-h2') execution = undefined; },
@@ -45,6 +55,11 @@ test('RF3 reconciles a lost start reply without issuing a duplicate execution an
 for (const breakage of ['lost-h2', 'mutable-revision', 'untyped-resume']) {
   test(`lifecycle gate refuses ${breakage} instead of reporting passed`, async () => {
     await assert.rejects(checkKestraLifecycle(fixtureApi(breakage), 'p4-attempt', 1));
+  });
+}
+for (const breakage of ['changed-resumed-id', 'missing-resumed-id']) {
+  test(`lifecycle gate rejects ${breakage} before accepting SUCCESS despite later matching identities`, async () => {
+    await assert.rejects(checkKestraLifecycle(fixtureApi(breakage), 'p4-attempt', 1), /Execution identity mismatch/);
   });
 }
 test('an ambiguous/missing RF3 lookup never authorizes another start', async () => {

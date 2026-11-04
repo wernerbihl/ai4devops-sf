@@ -74,6 +74,7 @@ export async function recoverExecution(api: KestraApi, key: string, attempts = 4
 async function waitState(api: KestraApi, id: string, state: string, attempts: number): Promise<any> {
   for (let n = 0; n < attempts; n++) {
     const execution = await api.request('GET', `/executions/${id}`);
+    assert.equal(execution?.id, id, 'Execution identity mismatch while observing state');
     if (execution?.state?.current === state) return execution;
     if (['FAILED', 'KILLED', 'CANCELLED'].includes(execution?.state?.current)) throw new Error('Execution reached failure state');
     if (n + 1 < attempts) await delay(250);

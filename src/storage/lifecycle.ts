@@ -42,14 +42,17 @@ export class LifecycleStorage {
     if (patch.release) ensure(patch.release !== 'unknown', 'quiescence_unknown', 'Only proven stopped or waiting execution releases a lease');
     r.attempt = validateContract('Attempt', { ...r.attempt,
       ...(patch.status ? { status: patch.status } : {}), ...(patch.usage ? { usage: patch.usage } : {}),
-      ...(patch.activeDurationMs !== undefined ? { activeDurationMs: patch.activeDurationMs } : {}),
+      ...(patch.activeDurationMs !== undefined ? { activeDurationMs: Math.max(r.attempt.activeDurationMs, patch.activeDurationMs) } : {}),
       ...(patch.status && ['failed', 'cancelled', 'completed'].includes(patch.status) ? { endedAt: this.db.now() } : {}),
     });
     if (patch.status || patch.human !== undefined) r.task = this.tasks.write({ ...old, status: patch.status ?? old.status,
       controlMode: patch.human ? 'human' : old.controlMode, revision: old.revision + 1, updatedAt: this.db.now() });
     if (patch.release) { r.lease.active = false; this.db.sql.prepare('DELETE FROM actor_scopes WHERE attempt_id = ?').run(attemptId); }
-    if (patch.state) record.state = patch.state;
-    if (patch.release) record.state.quiescent = true;
+    if (patch.state) record.state = { ...patch.state,
+      ...(record.state.effect ? { effect: record.state.effect } : {}),
+      stopRequested: !!record.state.stopRequested || !!patch.state.stopRequested,
+    };
+    if (patch.release) { record.state.quiescent = true; record.state.stopRequested = false; delete record.state.effect; }
     this.db.sql.prepare('INSERT INTO lifecycle_state(attempt_id, payload) VALUES (?, ?) ON CONFLICT(attempt_id) DO UPDATE SET payload = excluded.payload').run(attemptId, JSON.stringify(record.state));
     this.write(r); this.db.emit('attempt', r.attempt);
     if (patch.attention) {
@@ -104,16 +107,11 @@ export class LifecycleStorage {
     }
     this.db.emit('attempt', r.attempt); return r;
   }
-  finishAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number): void {
+  finishAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number, effectToken: string): void {
     const record = this.get(attemptId); const r = record.reservation;
-    ensure(r.lease.active && r.lease.fence === fence, 'stale_fence', 'Action belongs to an obsolete lease');
-    if (r.status === 'pending') {
-      // Retry reuses external history; its successful idempotent native send is a new charged attempt.
-      const quota = this.admission.quota(); r.status = 'confirmed'; r.quota.confirmedDayKey = quota.dayKey;
-      this.db.sql.prepare('INSERT INTO admission_starts(reservation_id, repository_id, recipe_id, day_key) VALUES (?, ?, ?, ?)').run(r.id, r.task.spec.repositoryId, r.task.spec.recipeId, quota.dayKey);
-      this.db.sql.prepare('INSERT INTO admission_clock(id, high_water_day) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET high_water_day = MAX(high_water_day, excluded.high_water_day)').run(quota.dayKey);
-      r.attempt.startedAt = this.db.now(); this.write(r);
-    }
+    this.authority(attemptId, fence);
+    ensure(record.state.effect?.token === effectToken && record.state.effect.phase === 'accepted' && !record.state.stopRequested, 'effect_interrupted', 'Late external completion cannot finalize interrupted work');
+    this.accountAccepted(r);
     this.update(attemptId, fence, { status: 'running', state, activeDurationMs });
     const action = this.outbox.find(actionId); ensure(action, 'not_found', 'Action not found');
     if (action.payload.requestId) {
@@ -123,12 +121,44 @@ export class LifecycleStorage {
     }
     this.outbox.complete(actionId);
   }
-  beginAction(attemptId: string, fence: number, epoch: string): void {
+  private accountAccepted(r: Reservation): void {
+    if (r.status === 'pending') {
+      // Retry reuses external history; its successful idempotent native send is a new charged attempt.
+      const quota = this.admission.quota(); r.status = 'confirmed'; r.quota.confirmedDayKey = quota.dayKey;
+      this.db.sql.prepare('INSERT INTO admission_starts(reservation_id, repository_id, recipe_id, day_key) VALUES (?, ?, ?, ?)').run(r.id, r.task.spec.repositoryId, r.task.spec.recipeId, quota.dayKey);
+      this.db.sql.prepare('INSERT INTO admission_clock(id, high_water_day) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET high_water_day = MAX(high_water_day, excluded.high_water_day)').run(quota.dayKey);
+      r.attempt.startedAt = this.db.now(); this.write(r);
+    }
+    this.db.emit('attempt', r.attempt);
+  }
+  authority(attemptId: string, fence: number): string {
     const record = this.get(attemptId); this.fence(record, fence);
+    const task = this.tasks.get(record.reservation.attempt.taskId)!; const state = this.admission.state();
+    ensure(task.attemptIds.at(-1) === attemptId && task.controlMode === 'factory' && !task.archivedAt
+      && !['completed', 'failed', 'cancelled'].includes(task.status), 'stale_attempt', 'Action requires the current factory-owned attempt');
+    const pending = record.reservation.status === 'pending';
+    continuationAllowed(task.spec, state, this.db.clock, pending, { attemptId, pending });
+    if (pending) ensure(this.admission.records().attempts.filter(a => a.taskId === task.spec.id && a.retryOfAttemptId).length <= state.settings.config.limits.transientRetries, 'retry_limit', 'Automatic retry limit reached');
+    return state.token;
+  }
+  beginAction(attemptId: string, fence: number, epoch: string, actionId: string): string {
+    const record = this.get(attemptId); this.authority(attemptId, fence);
+    ensure(!record.state.stopRequested, 'effect_interrupted', 'Execution was interrupted before this effect');
+    ensure(!record.state.effect || record.state.effect.phase !== 'inflight', 'effect_inflight', 'An external effect is still in flight');
     ensure(!record.state.uncertain && (!record.state.active || record.state.active.epoch === epoch), 'active_time_uncertain', 'Inspect interrupted native send before replay');
     record.state.active ??= { epoch, started: this.db.clock.monotonicMs() };
     record.state.quiescent = false;
+    const token = randomUUID(); record.state.effect = { actionId, token, phase: 'inflight' };
     this.db.sql.prepare('INSERT INTO lifecycle_state(attempt_id, payload) VALUES (?, ?) ON CONFLICT(attempt_id) DO UPDATE SET payload = excluded.payload').run(attemptId, JSON.stringify(record.state));
+    return token;
+  }
+  settleEffect(attemptId: string, fence: number, token: string, phase: 'unknown' | 'accepted'): void {
+    const record = this.get(attemptId); this.fence(record, fence);
+    ensure(record.state.effect?.token === token, 'stale_effect', 'External completion belongs to an obsolete effect');
+    ensure(phase === 'accepted' || record.state.effect.phase !== 'accepted', 'stale_effect', 'Known acceptance cannot become unknown');
+    record.state.effect.phase = phase;
+    if (phase === 'accepted') this.accountAccepted(record.reservation);
+    this.db.sql.prepare('UPDATE lifecycle_state SET payload = ? WHERE attempt_id = ?').run(JSON.stringify(record.state), attemptId);
   }
   bindAction(actionId: string, attemptId: string, fence: number): void {
     const row = this.outbox.find(actionId); ensure(row, 'not_found', 'Action not found');

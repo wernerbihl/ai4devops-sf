@@ -335,3 +335,152 @@ test('lost_or_unproven_waiting_writers_keep_accruing_until_quiescence_is_proven'
     } finally { x.f.close(); }
   }
 });
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+test('I1_pending_uncertain_retry_accrues_and_cannot_replay_after_its_deadline', async () => {
+  for (const tickBeforeReplay of [true, false]) {
+    const x = await fixture(); const { f } = x;
+    try {
+      const deps = x.deps(); const owner = deps.owner(x.native); let sends = 0; let quiesces = 0;
+      const quiesce = owner.quiesce;
+      owner.quiesce = async identity => { quiesces++; return quiesce(identity); };
+      owner.send = async () => { sends++; throw new Error('uncertain send outcome'); };
+      const lifecycle = createLifecycle(deps);
+      await assert.rejects(lifecycle.retryTransient(x.attempt.id, { transient: true, reason: 'temporary' }));
+      const retry = f.store.getReservations().find(r => r.attempt.retryOfAttemptId)!;
+      const before = quiesces; x.clock.advance(31 * 60000);
+      if (tickBeforeReplay) await lifecycle.checkBudgets();
+      owner.send = async () => { sends++; };
+      await lifecycle.dispatchPending();
+      const after = f.store.getLifecycle(retry.attempt.id).reservation;
+      assert.ok(after.attempt.activeDurationMs >= 1800000);
+      assert.ok(quiesces > before);
+      assert.equal(sends, 1);
+      assert.equal(after.status, 'pending'); assert.equal(after.lease.active, true);
+      assert.equal(after.lease.fence, retry.lease.fence);
+      assert.equal(f.store.getQuotaState().confirmed, 1); assert.equal(f.store.getQuotaState().pending, 1);
+    } finally { f.close(); }
+  }
+});
+
+test('I2_bound_replay_rechecks_persisted_readiness_recipe_activation_and_tag_archival', async () => {
+  for (const policy of ['readiness', 'recipe', 'tag'] as const) {
+    const x = await fixture(); const { f } = x;
+    try {
+      await x.event({ type: 'input', input });
+      const request = f.store.snapshot().attention.find(a => a.nativeInputId)!;
+      const deps = x.deps();
+      deps.workflow.resume = async () => {
+        const recipe = f.store.snapshot().recipes[0]!;
+        if (policy === 'readiness') f.store.setRecipeReadiness(recipe.id, recipe.currentRevision, { hash: f.recipe.hash, ready: false, reasons: ['Revoked'] }, recipe.revision);
+        if (policy === 'recipe') f.store.patchRecipe(recipe.id, { active: false }, recipe.revision);
+        if (policy === 'tag') { const replacement = f.store.createTag({ displayName: 'Replacement' }); f.store.archiveTag(f.recipe.tagId, replacement.id); }
+      };
+      const lifecycle = createLifecycle(deps);
+      await lifecycle.resumeInput(request.id, { name: 'chosen' }, `bound-${policy}`);
+      assert.equal(x.sent.length, 0);
+      deps.workflow.resume = async () => {};
+      await lifecycle.dispatchPending();
+      assert.equal(x.sent.length, 0, policy);
+      assert.equal(f.store.pendingActions().filter(a => a.kind === 'lifecycle.send').length, 1);
+      assert.equal(f.store.getAdmissionState().activeLeases.length, 1);
+    } finally { f.close(); }
+  }
+});
+
+test('I3_deferred_send_allows_deadline_quiescence_and_takeover_without_releasing_its_fence', async () => {
+  const x = await fixture(); const { f } = x;
+  const accepted = deferred<void>(); const entered = deferred<void>(); const quietRequested = deferred<void>();
+  let pending: Promise<void> | undefined;
+  try {
+    await x.event({ type: 'input', input });
+    const request = f.store.snapshot().attention.find(a => a.nativeInputId)!;
+    const deps = x.deps(); const owner = deps.owner(x.native); const quiesce = owner.quiesce;
+    owner.send = async () => { entered.resolve(); await accepted.promise; };
+    owner.quiesce = async identity => { quietRequested.resolve(); return quiesce(identity); };
+    const lifecycle = createLifecycle(deps);
+    pending = lifecycle.resumeInput(request.id, { name: 'chosen' }, 'deferred'); await entered.promise;
+    x.clock.advance(31 * 60000);
+    const tick = lifecycle.checkBudgets();
+    const requested = await Promise.race([quietRequested.promise.then(() => true), new Promise<boolean>(resolve => setTimeout(() => resolve(false), 100))]);
+    assert.equal(requested, true, 'deadline must request quiescence before native send resolves');
+    await tick;
+    await assert.rejects(lifecycle.requestTakeover(f.task.id), { code: 'effect_unresolved' });
+    assert.equal(f.store.getRepository('repo-1')!.controlMode, 'human');
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 1); assert.equal(x.opened.length, 0);
+    assert.equal(f.store.pendingActions().filter(a => a.kind === 'lifecycle.send').length, 1);
+    accepted.resolve(); await pending;
+    assert.equal(f.store.getTask(f.task.id)!.status, 'needs_attention');
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 1);
+    assert.equal(f.store.pendingActions().filter(a => a.kind === 'lifecycle.send').length, 1);
+  } finally { accepted.resolve(); await pending?.catch(() => {}); f.close(); }
+});
+
+test('I3_late_retry_acceptance_is_charged_once_and_requires_fresh_post_acceptance_quiescence', async () => {
+  const x = await fixture(); const { f } = x;
+  const accepted = deferred<void>(); const entered = deferred<void>();
+  let pending: Promise<unknown> | undefined;
+  try {
+    const deps = x.deps(); const owner = deps.owner(x.native); const quietKeys: string[] = [];
+    owner.send = async () => { entered.resolve(); await accepted.promise; };
+    deps.workflow.quiesce = async (_attempt, key) => { quietKeys.push(key); return 'waiting'; };
+    const lifecycle = createLifecycle(deps);
+    pending = lifecycle.retryTransient(x.attempt.id, { transient: true, reason: 'temporary' }); await entered.promise;
+    const retry = f.store.getReservations().find(r => r.attempt.retryOfAttemptId)!;
+    x.clock.advance(31 * 60000); await lifecycle.checkBudgets();
+    assert.equal(f.store.getQuotaState().confirmed, 1); assert.equal(f.store.getQuotaState().pending, 1);
+    assert.equal(f.store.getLifecycle(retry.attempt.id).reservation.lease.active, true);
+    const beforeAcceptKey = quietKeys.at(-1)!;
+    accepted.resolve(); await pending;
+    const after = f.store.getLifecycle(retry.attempt.id).reservation;
+    assert.equal(after.status, 'confirmed'); assert.equal(after.lease.active, true);
+    assert.equal(f.store.getQuotaState().confirmed, 2); assert.equal(f.store.getQuotaState().pending, 0);
+    assert.equal(f.store.getTask(f.task.id)!.status, 'needs_attention');
+    await lifecycle.checkBudgets();
+    assert.equal(f.store.getQuotaState().confirmed, 2);
+    assert.equal(f.store.getLifecycle(retry.attempt.id).reservation.lease.active, false);
+    assert.notEqual(quietKeys.at(-1), beforeAcceptKey);
+    assert.equal(f.store.pendingActions().filter(a => a.kind === 'lifecycle.retry').length, 1);
+  } finally { accepted.resolve(); await pending?.catch(() => {}); f.close(); }
+});
+
+test('I3_late_workflow_resume_cannot_send_after_budget_interruption', async () => {
+  const x = await fixture(); const { f } = x;
+  const resumed = deferred<void>(); const entered = deferred<void>(); let pending: Promise<void> | undefined;
+  try {
+    await x.event({ type: 'input', input });
+    const request = f.store.snapshot().attention.find(a => a.nativeInputId)!;
+    const deps = x.deps(); deps.workflow.resume = async () => { entered.resolve(); await resumed.promise; };
+    const lifecycle = createLifecycle(deps);
+    pending = lifecycle.resumeInput(request.id, { name: 'chosen' }, 'deferred-workflow'); await entered.promise;
+    x.clock.advance(31 * 60000); await lifecycle.checkBudgets();
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 1);
+    resumed.resolve(); await pending;
+    assert.equal(x.sent.length, 0);
+    assert.equal(f.store.getTask(f.task.id)!.status, 'needs_attention');
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 1);
+  } finally { resumed.resolve(); await pending?.catch(() => {}); f.close(); }
+});
+
+test('I3_durable_effect_guard_blocks_a_second_controller_while_send_is_inflight', async () => {
+  const x = await fixture(); const { f } = x;
+  const accepted = deferred<void>(); const entered = deferred<void>(); let pending: Promise<void> | undefined;
+  try {
+    await x.event({ type: 'input', input });
+    const request = f.store.snapshot().attention.find(a => a.nativeInputId)!;
+    const deps = x.deps(); let sends = 0;
+    deps.owner(x.native).send = async () => { sends++; entered.resolve(); await accepted.promise; };
+    pending = createLifecycle(deps).resumeInput(request.id, { name: 'chosen' }, 'same-key'); await entered.promise;
+    await createLifecycle(deps).resumeInput(request.id, { name: 'chosen' }, 'same-key');
+    assert.equal(sends, 1);
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 1);
+    accepted.resolve(); await pending;
+    assert.equal(f.store.pendingActions().filter(a => a.kind === 'lifecycle.send').length, 0);
+    assert.equal(f.store.getQuotaState().confirmed, 1);
+  } finally { accepted.resolve(); await pending?.catch(() => {}); f.close(); }
+});

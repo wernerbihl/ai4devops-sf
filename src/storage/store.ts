@@ -190,10 +190,12 @@ export class FactoryStore {
   validateLifecycleIdentity(attemptId: string, identity: import('../contracts/domain.ts').NativeIdentity): void { this.lifecycle.validateIdentity(attemptId, identity); }
   queueLifecycleReply(requestId: string, value: unknown, key: string) { return this.db.transaction(() => this.lifecycle.queueReply(requestId, value, key)); }
   acquireLifecycle(attemptId: string, token: string, retry: boolean, actionId: string): Reservation { return this.db.transaction(() => { const reservation = this.lifecycle.acquire(attemptId, token, retry); this.lifecycle.bindAction(actionId, reservation.attempt.id, reservation.lease.fence); return reservation; }); }
-  beginLifecycleAction(attemptId: string, fence: number, epoch: string): void { this.db.transaction(() => this.lifecycle.beginAction(attemptId, fence, epoch)); }
+  assertLifecycleAuthority(attemptId: string, fence: number): string { return this.db.transaction(() => this.lifecycle.authority(attemptId, fence)); }
+  beginLifecycleAction(attemptId: string, fence: number, epoch: string, actionId: string): string { return this.db.transaction(() => this.lifecycle.beginAction(attemptId, fence, epoch, actionId)); }
+  settleLifecycleEffect(attemptId: string, fence: number, token: string, phase: 'unknown' | 'accepted'): void { this.db.transaction(() => this.lifecycle.settleEffect(attemptId, fence, token, phase)); }
   bindLifecycleAction(actionId: string, attemptId: string, fence: number): void { this.db.transaction(() => this.lifecycle.bindAction(actionId, attemptId, fence)); }
   getLifecycleActionBinding(actionId: string) { return this.lifecycle.actionBinding(actionId); }
-  finishLifecycleAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number): void { this.db.transaction(() => this.lifecycle.finishAction(actionId, attemptId, fence, state, activeDurationMs)); }
+  finishLifecycleAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number, effectToken: string): void { this.db.transaction(() => this.lifecycle.finishAction(actionId, attemptId, fence, state, activeDurationMs, effectToken)); }
   enqueueAction(input: ActionInput) { return this.db.transaction(() => this.outbox.enqueue(input)); }
   pendingActions() { return this.outbox.pending(); }
   completeAction(id: string): void { this.db.transaction(() => this.outbox.complete(id)); }

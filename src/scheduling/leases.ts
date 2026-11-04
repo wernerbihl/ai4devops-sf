@@ -10,13 +10,16 @@ export interface LifecycleState {
   active?: { epoch: string; started: number };
   uncertain?: boolean;
   quiescent?: boolean;
+  stopRequested?: boolean;
+  effect?: { actionId: string; token: string; phase: 'inflight' | 'unknown' | 'accepted' };
 }
-export function continuationAllowed(task: TaskSpec, state: AdmissionState, clock: Clock, retry: boolean): void {
+export function continuationAllowed(task: TaskSpec, state: AdmissionState, clock: Clock, retry: boolean, held?: { attemptId: string; pending: boolean }): void {
   const repository = state.repositories.find(repo => repo.id === task.repositoryId);
   ensure(repository?.controlMode === 'factory' && !state.settings.paused, 'paused', 'Return repository and factory to automatic control');
-  ensure(!state.activeLeases.some(lease => lease.repositoryId === task.repositoryId), 'repository_busy', 'Wait for the repository writer to quiesce');
-  ensure(state.activeLeases.length < state.settings.config.limits.concurrency, 'capacity', 'Wait for active capacity');
-  ensure(!retry || state.quota.confirmed + state.quota.pending < state.settings.config.limits.startsPerDay, 'day_limit', 'Wait for the next local day');
+  const otherLeases = state.activeLeases.filter(lease => lease.attemptId !== held?.attemptId);
+  ensure(!otherLeases.some(lease => lease.repositoryId === task.repositoryId), 'repository_busy', 'Wait for the repository writer to quiesce');
+  ensure(otherLeases.length < state.settings.config.limits.concurrency, 'capacity', 'Wait for active capacity');
+  ensure(!retry || state.quota.confirmed + state.quota.pending - (held?.pending ? 1 : 0) < state.settings.config.limits.startsPerDay, 'day_limit', 'Wait for the next local day');
   ensure(state.recipes.some(recipe => recipe.id === task.recipeId && recipe.active)
     && state.recipeReadiness.some(r => r.recipeId === task.recipeId && r.recipeRevision === task.recipeRevision && r.ready)
     && state.tags.some(tag => tag.id === task.tagId && !tag.archivedAt)

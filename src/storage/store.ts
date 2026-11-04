@@ -3,6 +3,8 @@ import type { ActorScope, Clock, CreateTaskRequest, FactorySnapshot, FindingInpu
 import { defaultConfig } from '../contracts/defaults.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { StoreDatabase, ensure, systemClock } from './database.ts';
+import { AdmissionStorage } from './admission.ts';
+import type { AdmissionCandidate, ExternalStartIdentity, Reservation } from '../scheduling/admission-types.ts';
 import { Outbox } from './outbox.ts';
 import type { ActionInput } from './outbox.ts';
 import { RecipeStorage } from './recipes.ts';
@@ -23,6 +25,7 @@ export class FactoryStore {
   private recipes: RecipeStorage;
   private tasks: TaskStorage;
   private outbox: Outbox;
+  private admission: AdmissionStorage;
   private closed = false;
   constructor(path: string, options: OpenStoreOptions = {}) {
     this.db = new StoreDatabase(path, options.clock ?? systemClock);
@@ -30,6 +33,7 @@ export class FactoryStore {
     this.recipes = new RecipeStorage(this.db);
     this.tasks = new TaskStorage(this.db, this.recipes, options.materialize);
     this.outbox = new Outbox(this.db);
+    this.admission = new AdmissionStorage(this.db, this.recipes, this.tasks);
     try {
       this.db.transaction(() => {
         if (this.db.read('settings', 1)) return;
@@ -38,6 +42,7 @@ export class FactoryStore {
         this.db.emit('settings', settings);
         this.tags.seed();
       });
+      this.db.transaction(() => this.admission.syncRotations());
     } catch (error) { this.close(); throw error; }
   }
   close(): void { if (!this.closed) { this.db.sql.close(); this.closed = true; } }
@@ -52,7 +57,7 @@ export class FactoryStore {
         health: { schemaVersion: 1, ready: false, reasons: ['Runtime readiness has not been evaluated'], version: '0.1.0' },
         auth: { status: 'unavailable', reasons: ['GitHub authentication has not been evaluated'] },
         tags: this.db.all('tags'), repositories: this.db.all('repositories'), recipes: this.db.all('recipes'), tasks: this.db.all('tasks'),
-        attempts: [], attention: [],
+        ...this.admission.records(),
       });
       this.db.sql.exec('COMMIT'); return value;
     } catch (error) { this.db.sql.exec('ROLLBACK'); throw error; }
@@ -76,6 +81,7 @@ export class FactoryStore {
       this.validateWeights(value.weights);
       this.db.sql.prepare('INSERT INTO repositories(id, payload) VALUES (?, ?)').run(value.id, JSON.stringify(value));
       for (const [tagId, weight] of Object.entries(value.weights)) this.db.sql.prepare('INSERT INTO repository_weights(repository_id, tag_id, value) VALUES (?, ?, ?)').run(value.id, tagId, weight);
+      this.admission.syncRotations();
       this.db.emit('repository', value); return value;
     });
   }
@@ -93,7 +99,8 @@ export class FactoryStore {
       const old = this.repositoryAtRevision(id, expectedRevision);
       this.validateWeights(patch.weights);
       for (const [tagId, value] of Object.entries(patch.weights)) this.db.sql.prepare('INSERT INTO repository_weights(repository_id, tag_id, value) VALUES (?, ?, ?) ON CONFLICT(repository_id, tag_id) DO UPDATE SET value = excluded.value').run(id, tagId, value);
-      return this.writeRepository({ ...old, weights: { ...old.weights, ...patch.weights }, revision: old.revision + 1 });
+      const updated = this.writeRepository({ ...old, weights: { ...old.weights, ...patch.weights }, revision: old.revision + 1 });
+      this.admission.syncRotations(); return updated;
     });
   }
   private validateWeights(weights: Record<string, number>): void {
@@ -109,10 +116,10 @@ export class FactoryStore {
     this.db.sql.prepare('UPDATE repositories SET payload = ? WHERE id = ?').run(JSON.stringify(value), value.id);
     this.db.emit('repository', value); return value;
   }
-  createTag(input: TagCreate) { return this.db.transaction(() => this.tags.create(input)); }
+  createTag(input: TagCreate) { return this.db.transaction(() => this.withRotationSync(() => this.tags.create(input))); }
   patchTag(id: string, input: TagPatch, expectedRevision: number) { return this.db.transaction(() => this.tags.patch(id, input, expectedRevision)); }
-  deleteTag(id: string, expectedRevision: number): void { this.db.transaction(() => this.tags.delete(id, expectedRevision)); }
-  archiveTag(id: string, replacementId: string, expectedRevision?: number): void { this.db.transaction(() => this.tags.archive(id, replacementId, this.recipes, value => this.tasks.write(value), expectedRevision)); }
+  deleteTag(id: string, expectedRevision: number): void { this.db.transaction(() => this.withRotationSync(() => this.tags.delete(id, expectedRevision))); }
+  archiveTag(id: string, replacementId: string, expectedRevision?: number): void { this.db.transaction(() => this.withRotationSync(() => this.tags.archive(id, replacementId, this.recipes, value => this.tasks.write(value), expectedRevision))); }
   saveRecipeRevision(input: RecipeRevision, expectedRevision?: number) { return this.db.transaction(() => this.recipes.save(input, expectedRevision)); }
   getRecipe(id: string) { return this.recipes.current(id); }
   getRecipeRevision(id: string, revision: string) { return this.recipes.revision(id, revision); }
@@ -146,6 +153,30 @@ export class FactoryStore {
   /** Trusted persistence seam only: C4 owns legal transitions and quiescence checks. */
   setTaskStatus(id: string, status: TaskStatus, expectedRevision: number) { return this.db.transaction(() => this.tasks.status(id, status, expectedRevision)); }
   archiveTask(id: string, expectedRevision: number) { return this.db.transaction(() => this.tasks.archive(id, expectedRevision)); }
+  private withRotationSync<T>(fn: () => T): T { const value = fn(); this.admission.syncRotations(); return value; }
+  /** Trusted backend seam. C4 owns takeover/return-control legality and external quiescence. */
+  setRepositoryControl(id: string, controlMode: Repository['controlMode'], expectedRevision: number): Repository {
+    return this.db.transaction(() => { const old = this.repositoryAtRevision(id, expectedRevision); return this.writeRepository({ ...old, controlMode, revision: old.revision + 1 }); });
+  }
+  /** E1 supplies trusted, exact-revision/hash capability validation. This object must never be mounted as a worker/browser route. */
+  setRecipeReadiness(recipeId: string, revision: string, readiness: { hash: string; ready: boolean; reasons: string[] }, expectedRevision: number) {
+    return this.db.transaction(() => this.admission.setReadiness(recipeId, revision, readiness, expectedRevision));
+  }
+  getAdmissionState() { return this.db.transaction(() => this.admission.state()); }
+  getRotationState(repositoryId: string) { return this.db.transaction(() => this.admission.rotation(repositoryId)); }
+  getQuotaState() { return this.db.transaction(() => this.admission.quota()); }
+  getReservations(): Reservation[] { return this.db.transaction(() => this.admission.reservations()); }
+  reserveStart(candidate: AdmissionCandidate, dayKey: string) { return this.db.transaction(() => this.admission.reserve(candidate, dayKey)); }
+  confirmStart(id: string, identity: ExternalStartIdentity): void {
+    // Persist immutable proof first, so accounting can resume after an interrupted confirmation.
+    this.db.transaction(() => this.admission.rememberExternal(id, identity));
+    this.db.transaction(() => this.admission.confirm(id, identity));
+  }
+  releaseUnstarted(id: string): void { this.db.transaction(() => this.admission.releaseUnstarted(id)); }
+  releaseAdmissionLease(id: string, fence: number): void { this.db.transaction(() => this.admission.releaseLease(id, fence)); }
+  markAdmissionAttention(taskId: string, expectedRevision: number, code: string, recovery: string): void {
+    this.db.transaction(() => this.admission.attention(taskId, expectedRevision, code, recovery));
+  }
   enqueueAction(input: ActionInput) { return this.db.transaction(() => this.outbox.enqueue(input)); }
   pendingActions() { return this.outbox.pending(); }
   completeAction(id: string): void { this.db.transaction(() => this.outbox.complete(id)); }

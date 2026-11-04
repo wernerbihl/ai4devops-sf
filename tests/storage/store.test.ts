@@ -199,7 +199,7 @@ test('uses SQLite WAL foreign keys and immutable history with exclusive optimist
     second.close();
     const db = new DatabaseSync(f.path);
     assert.equal(db.prepare('PRAGMA journal_mode').get()!.journal_mode, 'wal');
-    assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 1);
+    assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 2);
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     assert.throws(() => db.prepare("UPDATE task_revisions SET payload = '{}' WHERE task_id = ?").run(f.task.id), /immutable/i);
     assert.throws(() => db.prepare("DELETE FROM recipe_revisions WHERE recipe_id = ?").run('recipe-1'), /immutable/i);

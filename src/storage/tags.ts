@@ -50,6 +50,8 @@ export class TagStorage {
     const revisions = recipes.reassignActiveTag(id, replacementId);
     for (const task of this.db.all<TaskRecord>('tasks')) {
       if (task.spec.tagId !== id || task.status !== 'queued') continue;
+      // A queued reservation may already have launched. Its immutable pin is part of external identity.
+      if (this.db.sql.prepare('SELECT id FROM admission_reservations WHERE task_id = ? AND lease_active = 1').get(task.spec.id)) continue;
       const key = `${task.spec.recipeId}:${task.spec.recipeRevision}`;
       let revision = revisions.get(key);
       if (!revision) {

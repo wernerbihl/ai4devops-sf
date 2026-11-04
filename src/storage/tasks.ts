@@ -99,6 +99,14 @@ export class TaskStorage {
     ensure(recipe.repositoryIds.includes(repositoryId), 'repository_scope', 'Repository is outside recipe assignments');
     ensure(this.db.read('repositories', repositoryId), 'invalid_repository', 'Repository does not exist');
   }
+  /** Trusted admission only; validates the exact revision and authority before fresh insertion. */
+  insertAutomatic(spec: TaskSpec): void {
+    ensure(spec.source === 'automatic' && !spec.parentId, 'invalid_candidate', 'Fresh automatic task has no parent');
+    const recipe = this.availableRecipe(spec.recipeId);
+    ensure(recipe.revision === spec.recipeRevision, 'revision_conflict', 'Automatic task requires current recipe revision');
+    this.checkSpec(spec, recipe, spec.repositoryId);
+    this.insert(spec);
+  }
   create(request: CreateTaskRequest, key: string, actor?: ActorScope): TaskSpec[] {
     validateContract('CreateTaskRequest', request);
     const registered = actor ? this.authorize(actor) : undefined;
@@ -164,6 +172,7 @@ export class TaskStorage {
       ensure(task, 'not_found', 'Task not found');
       if (registration) this.owned(task, registration);
       ensure(task.revision === expectedRevision, 'revision_conflict', 'Task revision conflict');
+      ensure(!this.db.sql.prepare('SELECT id FROM admission_reservations WHERE task_id = ? AND lease_active = 1').get(id), 'task_reserved', 'Reserved tasks require launch reconciliation or lifecycle control');
       ensure(task.status === 'queued', 'immutable_task', 'Only queued tasks can be edited or cancelled through CRUD');
       const { status, ...specPatch } = patch;
       const spec = { ...task.spec, ...specPatch };

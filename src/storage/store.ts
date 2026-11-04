@@ -3,6 +3,9 @@ import type { ActorScope, Clock, CreateTaskRequest, FactorySnapshot, FindingInpu
 import { defaultConfig } from '../contracts/defaults.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { StoreDatabase, ensure, systemClock } from './database.ts';
+import { LifecycleStorage } from './lifecycle.ts';
+import type { LifecycleUpdate, LifecycleRecord } from './lifecycle.ts';
+import type { LifecycleState } from '../scheduling/leases.ts';
 import { AdmissionStorage } from './admission.ts';
 import type { AdmissionCandidate, ExternalStartIdentity, Reservation } from '../scheduling/admission-types.ts';
 import { Outbox } from './outbox.ts';
@@ -26,6 +29,7 @@ export class FactoryStore {
   private tasks: TaskStorage;
   private outbox: Outbox;
   private admission: AdmissionStorage;
+  private lifecycle: LifecycleStorage;
   private closed = false;
   constructor(path: string, options: OpenStoreOptions = {}) {
     this.db = new StoreDatabase(path, options.clock ?? systemClock);
@@ -34,6 +38,7 @@ export class FactoryStore {
     this.tasks = new TaskStorage(this.db, this.recipes, options.materialize);
     this.outbox = new Outbox(this.db);
     this.admission = new AdmissionStorage(this.db, this.recipes, this.tasks);
+    this.lifecycle = new LifecycleStorage(this.db, this.admission, this.tasks, this.outbox);
     try {
       this.db.transaction(() => {
         if (this.db.read('settings', 1)) return;
@@ -177,6 +182,18 @@ export class FactoryStore {
   markAdmissionAttention(taskId: string, expectedRevision: number, code: string, recovery: string): void {
     this.db.transaction(() => this.admission.attention(taskId, expectedRevision, code, recovery));
   }
+  returnLifecycleControl(repositoryId: string, revision: number, token: string): void { this.db.transaction(() => this.lifecycle.returnControl(repositoryId, revision, token)); }
+  getLifecycleEpoch(): string { return this.db.epoch; }
+  getLifecycle(attemptId: string): LifecycleRecord { return this.db.transaction(() => this.lifecycle.get(attemptId)); }
+  updateLifecycle(attemptId: string, fence: number, patch: LifecycleUpdate): LifecycleRecord { return this.db.transaction(() => this.lifecycle.update(attemptId, fence, patch)); }
+  bindLifecycleIdentity(attemptId: string, identity: import('../contracts/domain.ts').NativeIdentity): void { this.db.transaction(() => this.lifecycle.bindIdentity(attemptId, identity)); }
+  validateLifecycleIdentity(attemptId: string, identity: import('../contracts/domain.ts').NativeIdentity): void { this.lifecycle.validateIdentity(attemptId, identity); }
+  queueLifecycleReply(requestId: string, value: unknown, key: string) { return this.db.transaction(() => this.lifecycle.queueReply(requestId, value, key)); }
+  acquireLifecycle(attemptId: string, token: string, retry: boolean, actionId: string): Reservation { return this.db.transaction(() => { const reservation = this.lifecycle.acquire(attemptId, token, retry); this.lifecycle.bindAction(actionId, reservation.attempt.id, reservation.lease.fence); return reservation; }); }
+  beginLifecycleAction(attemptId: string, fence: number, epoch: string): void { this.db.transaction(() => this.lifecycle.beginAction(attemptId, fence, epoch)); }
+  bindLifecycleAction(actionId: string, attemptId: string, fence: number): void { this.db.transaction(() => this.lifecycle.bindAction(actionId, attemptId, fence)); }
+  getLifecycleActionBinding(actionId: string) { return this.lifecycle.actionBinding(actionId); }
+  finishLifecycleAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number): void { this.db.transaction(() => this.lifecycle.finishAction(actionId, attemptId, fence, state, activeDurationMs)); }
   enqueueAction(input: ActionInput) { return this.db.transaction(() => this.outbox.enqueue(input)); }
   pendingActions() { return this.outbox.pending(); }
   completeAction(id: string): void { this.db.transaction(() => this.outbox.complete(id)); }

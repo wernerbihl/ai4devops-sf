@@ -60,6 +60,8 @@ export class TaskStorage {
     ensure(Date.parse(actor.expiresAt) > this.db.clock.wallNow().getTime(), 'expired_scope', 'Actor scope is expired');
     const registration = this.db.read<RegisteredActor>('actor_scopes', actor.attemptId);
     ensure(registration && canonical(registration.scope) === canonical(actor), 'invalid_scope', 'Actor scope or fence does not match its trusted registration');
+    const issued = this.db.sql.prepare("SELECT lease_active, fence FROM admission_reservations WHERE json_extract(payload, '$.attempt.id') = ?").get(actor.attemptId);
+    if (issued) ensure(issued.lease_active === 1 && issued.fence === actor.fence, 'stale_fence', 'Actor requires a current active execution lease');
     const recipe = this.recipes.revision(actor.recipeId, actor.recipeRevision);
     ensure(recipe, 'invalid_scope', 'Actor recipe revision does not exist');
     const task = this.db.read<TaskRecord>('tasks', registration.taskId);
@@ -173,6 +175,7 @@ export class TaskStorage {
       if (registration) this.owned(task, registration);
       ensure(task.revision === expectedRevision, 'revision_conflict', 'Task revision conflict');
       ensure(!this.db.sql.prepare('SELECT id FROM admission_reservations WHERE task_id = ? AND lease_active = 1').get(id), 'task_reserved', 'Reserved tasks require launch reconciliation or lifecycle control');
+      ensure(!this.db.sql.prepare("SELECT id FROM admission_reservations WHERE task_id = ? AND status = 'confirmed'").get(id), 'immutable_task', 'Started execution identity and authority are fixed');
       ensure(task.status === 'queued', 'immutable_task', 'Only queued tasks can be edited or cancelled through CRUD');
       const { status, ...specPatch } = patch;
       const spec = { ...task.spec, ...specPatch };

@@ -19,6 +19,8 @@ export interface SchedulerDeps {
   /** E1/E2/E4 verify the exact assigned owner/provider, capability and isolation before returning prepared paths. */
   readiness(task: TaskSpec): Promise<PreparedStart | UnavailableStart>;
   /** This port must return started only after proving the external execution exists, never on an accepted request alone. */
+  /** Explicit user continuations run before new task admission and are not a new daily/weighted start. */
+  continuations?(): Promise<{ kind: 'started'; attemptId: string } | null>;
   start(reservation: Reservation): Promise<StartOutcome>;
 }
 export type DispatchResult = { kind: 'started'; attemptId: string }
@@ -80,6 +82,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   }
   return {
     async dispatch(_trigger): Promise<DispatchResult> {
+      const continuation = await deps.continuations?.();
+      if (continuation) return continuation;
       const excluded = new Set<string>();
       for (;;) {
         const state = deps.store.getAdmissionState();

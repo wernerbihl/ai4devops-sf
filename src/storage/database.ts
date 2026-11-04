@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Clock, FactoryEvent } from '../contracts/domain.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { migrate } from './migrate.ts';
@@ -27,6 +27,7 @@ type PayloadTable = 'settings' | 'tags' | 'repositories' | 'recipes' | 'tasks' |
 export class StoreDatabase {
   readonly sql: DatabaseSync;
   readonly clock: Clock;
+  readonly epoch = randomUUID();
   constructor(path: string, clock: Clock) {
     if (path !== ':memory:') mkdirSync(dirname(resolve(path)), { recursive: true });
     this.clock = clock;

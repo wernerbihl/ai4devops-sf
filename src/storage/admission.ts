@@ -159,9 +159,10 @@ export class AdmissionStorage {
     if (externalIdentity.native) validateContract('NativeIdentity', externalIdentity.native);
     const reservation = this.require(id);
     ensure(reservation.status !== 'released', 'released_reservation', 'A released reservation cannot have started');
-    ensure(!reservation.externalIdentity || canonical(reservation.externalIdentity) === canonical(externalIdentity), 'identity_conflict', 'External start identity is immutable');
+    ensure(!reservation.externalIdentity || (canonical(reservation.externalIdentity.workflow) === canonical(externalIdentity.workflow)
+      && (!externalIdentity.native || !reservation.externalIdentity.native || canonical(reservation.externalIdentity.native) === canonical(externalIdentity.native))), 'identity_conflict', 'External start identity is immutable');
     if (externalIdentity.native) ensure(externalIdentity.native.ownerId === reservation.task.spec.ownerId && externalIdentity.native.providerId === reservation.task.spec.providerId, 'identity_conflict', 'Native owner/provider must match the selected task');
-    reservation.externalIdentity = externalIdentity; this.write(reservation);
+    reservation.externalIdentity = { ...externalIdentity, ...(reservation.externalIdentity?.native ? { native: reservation.externalIdentity.native } : {}) }; this.write(reservation);
   }
   confirm(id: string, externalIdentity: ExternalStartIdentity): void {
     this.rememberExternal(id, externalIdentity);
@@ -190,6 +191,7 @@ export class AdmissionStorage {
     reservation.attempt = validateContract('Attempt', { ...reservation.attempt, ...externalIdentity, status: 'running', startedAt: this.db.now() });
     reservation.task = taskChanged ? task : this.tasks.write({ ...task, status: 'running', revision: task.revision + 1, updatedAt: this.db.now() });
     this.write(reservation); this.advanceDay(state.quota.dayKey);
+    this.db.sql.prepare('INSERT INTO lifecycle_state(attempt_id, payload) VALUES (?, ?) ON CONFLICT(attempt_id) DO NOTHING').run(reservation.attempt.id, JSON.stringify({ segments: [], active: { epoch: this.db.epoch, started: this.db.clock.monotonicMs() }, quiescent: false }));
     this.db.sql.prepare('INSERT INTO admission_starts(reservation_id, repository_id, recipe_id, day_key) VALUES (?, ?, ?, ?)').run(id, repository.id, spec.recipeId, state.quota.dayKey);
     const updated = { ...repository, lastServicedAt: this.db.now(), currentTaskId: spec.id, revision: repository.revision + 1 };
     this.db.sql.prepare('UPDATE repositories SET payload = ? WHERE id = ?').run(JSON.stringify(updated), repository.id);

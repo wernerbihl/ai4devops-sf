@@ -157,10 +157,11 @@ test('activation_readiness_grants_and_versions_are_rechecked_after_async_preflig
     const f = createFixture();
     try {
       ready(f); activate(f);
+      if (mutate === 'deactivate') cancelSeed(f); // This branch must select automatic work: inactive manual work is allowed.
       const result = await scheduler(f, { readiness: async () => {
         switch (mutate) {
           case 'pause': f.store.patchSettings({ paused: true }, f.store.getSettings().revision); break;
-          case 'deactivate': f.store.setRepositoryControl('repo-1', 'human', f.store.getRepository('repo-1')!.revision); break;
+          case 'deactivate': f.store.patchRepository('repo-1', { active: false }, f.store.getRepository('repo-1')!.revision); break;
           case 'readiness': { const summary = f.store.snapshot().recipes[0]!; f.store.setRecipeReadiness(summary.id, summary.currentRevision, { hash: f.recipe.hash, ready: false, reasons: ['Revoked'] }, summary.revision); break; }
           case 'grant': f.store.revokeGrant('grant-1'); break;
           case 'task': f.store.patchTask(f.task.id, { title: 'Edited' }, f.store.getTask(f.task.id)!.revision); break;

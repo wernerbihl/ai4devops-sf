@@ -1,3 +1,4 @@
+import { devNull } from 'node:os';
 import type { AuthState, DeviceFlow } from '../contracts/domain.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { DefinitiveNoEffect } from '../service/api.ts';
@@ -584,6 +585,9 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
       const bound = await requireCredential(record, save);
       if (!(await facts(record, bound, repository)).operations[operation])
         throw new GitHubFailure('denied', 'GitHub repository capability does not permit this Git operation');
+      // Helper/gh discovery retains the user's real HOME. Authenticated Git must never follow
+      // global/system includes into a worker-writable file between preflight and credential use.
+      const gitEnv = { ...deps.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: devNull };
       for (const args of [
         ['config', '--null', '--get-regexp', '^url\\..*\\.(insteadof|pushinsteadof)$'],
         ['config', '--local', '--null', '--get-regexp', '^(include|includeif)\\.'],
@@ -591,7 +595,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         const config = await processPort({
           command: 'git',
           args,
-          env: deps.env,
+          env: gitEnv,
           cwd: input.cwd,
           timeoutMs,
           maxBytes,
@@ -606,7 +610,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
       const effective = await processPort({
         command: 'git',
         args: ['ls-remote', '--get-url', remote],
-        env: deps.env,
+        env: gitEnv,
         cwd: input.cwd,
         timeoutMs,
         maxBytes,
@@ -620,7 +624,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
       registerSecret(header);
       registerSecret(header.slice(21));
       const env: Record<string, string> = {
-        ...deps.env,
+        ...gitEnv,
         GIT_CONFIG_COUNT: '1',
         GIT_CONFIG_KEY_0: 'http.https://github.com/.extraHeader',
         GIT_CONFIG_VALUE_0: header,

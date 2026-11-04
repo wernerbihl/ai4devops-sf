@@ -501,6 +501,49 @@ test('private_git_bridge_scopes_credential_to_child_and_rechecks_recipe_grants',
     f.close();
   }
 });
+test('authenticated_git_ignores_global_worker_includes_while_helper_discovery_uses_real_home', async () => {
+  const f = fixture({ ghMissing: true, helperOutput: 'password=opaque-helper-secret\n\n' });
+  const home = join(f.directory, 'fixture home');
+  const source = join(f.directory, 'source'); const target = join(f.directory, 'managed.git');
+  const workerConfig = join(f.directory, 'worker-controlled-config');
+  const cleanEnv = { PATH: process.env.PATH!, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
+  const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, env: cleanEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    mkdirSync(home); mkdirSync(source);
+    git(source, ['init', '--initial-branch=main']);
+    writeFileSync(join(source, 'file.txt'), 'fixture'); git(source, ['add', '--', 'file.txt']);
+    git(source, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'base']);
+    git(f.directory, ['init', '--bare', target]);
+    writeFileSync(workerConfig, '[url "ext::unapproved-transport"]\n\tinsteadOf = https://github.com/\n[http]\n\tsslVerify = false\n');
+    writeFileSync(join(home, '.gitconfig'), `[credential]\n\thelper = cache\n[include]\n\tpath = ${JSON.stringify(workerConfig)}\n`);
+    let authenticatedFetches = 0; let helperDiscovered = false;
+    const backend = createGitHubBackend({ ...f.config, env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home },
+      process: async request => {
+        if (request.command !== 'git') return f.config.process(request);
+        if (request.args[0] === 'credential-cache') return f.config.process(request);
+        if (request.args.includes('--get-urlmatch')) {
+          const result = await runProcess(request);
+          helperDiscovered = result.stdout === 'cache\0';
+          return result;
+        }
+        if (!request.args.includes('fetch')) return runProcess(request);
+        authenticatedFetches++;
+        // Real local Git uses the production config boundary, replacing only transport and dropping fixture auth.
+        const env = { ...request.env }; delete env.GIT_CONFIG_COUNT; delete env.GIT_CONFIG_KEY_0; delete env.GIT_CONFIG_VALUE_0;
+        const effective = await runProcess({ ...request, env, args: ['ls-remote', '--get-url', 'https://github.com/owner/repo.git'] });
+        assert.equal(effective.stdout.trim(), 'https://github.com/owner/repo.git');
+        const ssl = await runProcess({ ...request, env, args: ['config', '--get', 'http.sslVerify'] });
+        assert.equal(ssl.code, 1);
+        return runProcess({ ...request, env, args: ['-c', 'protocol.file.allow=always',
+          ...request.args.map(arg => arg === 'https://github.com/owner/repo.git' ? source : arg)] });
+      },
+    });
+    await backend.git.fetch({ repositoryId: 'repo-1', cwd: target, ref: 'refs/heads/main' });
+    assert.equal(helperDiscovered, true);
+    assert.equal(authenticatedFetches, 1);
+    assert.equal(git(target, ['rev-parse', 'FETCH_HEAD']).toString(), git(source, ['rev-parse', 'HEAD']).toString());
+  } finally { f.close(); }
+});
 test('windows_metadata_store_keeps_gh_usable_but_refuses_app_secrets_before_authorization', async () => {
   const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
   const f = fixture({ ghMissing: true, app: true });

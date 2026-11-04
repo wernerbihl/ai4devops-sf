@@ -39,6 +39,8 @@ export class StoreDatabase {
   }
   now(): string { return this.clock.wallNow().toISOString(); }
   transaction<T>(fn: () => T): T {
+    // Nested trusted store calls share the outer atomic request transaction.
+    if (this.sql.isTransaction) return fn();
     this.sql.exec('BEGIN IMMEDIATE');
     try { const result = fn(); this.sql.exec('COMMIT'); return result; }
     catch (error) { this.sql.exec('ROLLBACK'); throw error; }

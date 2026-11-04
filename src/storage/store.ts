@@ -8,6 +8,8 @@ import type { LifecycleUpdate, LifecycleRecord } from './lifecycle.ts';
 import type { LifecycleState } from '../scheduling/leases.ts';
 import { AdmissionStorage } from './admission.ts';
 import type { AdmissionCandidate, ExternalStartIdentity, Reservation } from '../scheduling/admission-types.ts';
+import { ApiRequests } from './api-requests.ts';
+import type { ApiRequestResult } from './api-requests.ts';
 import { Outbox } from './outbox.ts';
 import type { ActionInput } from './outbox.ts';
 import { RecipeStorage } from './recipes.ts';
@@ -28,6 +30,7 @@ export class FactoryStore {
   private recipes: RecipeStorage;
   private tasks: TaskStorage;
   private outbox: Outbox;
+  private apiRequests: ApiRequests;
   private admission: AdmissionStorage;
   private lifecycle: LifecycleStorage;
   private closed = false;
@@ -37,6 +40,7 @@ export class FactoryStore {
     this.recipes = new RecipeStorage(this.db);
     this.tasks = new TaskStorage(this.db, this.recipes, options.materialize);
     this.outbox = new Outbox(this.db);
+    this.apiRequests = new ApiRequests(this.db);
     this.admission = new AdmissionStorage(this.db, this.recipes, this.tasks);
     this.lifecycle = new LifecycleStorage(this.db, this.admission, this.tasks, this.outbox);
     try {
@@ -53,7 +57,8 @@ export class FactoryStore {
   close(): void { if (!this.closed) { this.db.sql.close(); this.closed = true; } }
   snapshot(): FactorySnapshot {
     // A read transaction gives the event cursor and every entity one coherent SQLite snapshot.
-    this.db.sql.exec('BEGIN');
+    const nested = this.db.sql.isTransaction;
+    if (!nested) this.db.sql.exec('BEGIN');
     try {
       const settings = this.getSettings();
       const sequence = Number(this.db.sql.prepare('SELECT COALESCE(MAX(sequence), 0) AS sequence FROM events').get()!.sequence);
@@ -64,8 +69,8 @@ export class FactoryStore {
         tags: this.db.all('tags'), repositories: this.db.all('repositories'), recipes: this.db.all('recipes'), tasks: this.db.all('tasks'),
         ...this.admission.records(),
       });
-      this.db.sql.exec('COMMIT'); return value;
-    } catch (error) { this.db.sql.exec('ROLLBACK'); throw error; }
+      if (!nested) this.db.sql.exec('COMMIT'); return value;
+    } catch (error) { if (!nested) this.db.sql.exec('ROLLBACK'); throw error; }
   }
   getSettings(): Settings { return this.db.read<Settings>('settings', 1)!; }
   patchSettings(patch: SettingsPatch, expectedRevision: number): Settings {
@@ -199,6 +204,16 @@ export class FactoryStore {
   enqueueAction(input: ActionInput) { return this.db.transaction(() => this.outbox.enqueue(input)); }
   pendingActions() { return this.outbox.pending(); }
   completeAction(id: string): void { this.db.transaction(() => this.outbox.complete(id)); }
+  /** Trusted service only: the callback must be synchronous, returning a sanitized public DTO. */
+  runApiMutation(key: string, input: unknown, mutate: () => ApiRequestResult) {
+    return this.db.transaction(() => {
+      const claim = this.apiRequests.claim(key, input);
+      if (!claim.fresh) { ensure(claim.result, 'request_pending', 'Reconcile pending request'); return { fresh: false, result: claim.result }; }
+      const result = mutate(); this.apiRequests.finish(key, input, result); return { fresh: true, result };
+    });
+  }
+  claimApiRequest(key: string, input: unknown) { return this.db.transaction(() => this.apiRequests.claim(key, input)); }
+  finishApiRequest(key: string, input: unknown, result: ApiRequestResult): void { this.db.transaction(() => this.apiRequests.finish(key, input, result)); }
   eventsAfter(sequence: number) { return this.outbox.eventsAfter(sequence); }
 }
 export function openStore(path: string, options: OpenStoreOptions = {}): FactoryStore { return new FactoryStore(path, options); }

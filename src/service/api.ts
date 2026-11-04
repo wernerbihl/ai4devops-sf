@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { AuthState, Clock, DeviceFlow, Health, NativeIdentity, NativeOpenResult, RecipeCreate, RecipePatch, RecipeSummary, RecipeRevision, RecipeValidation } from '../contracts/domain.ts';
+import type { ApiError, AuthState, Clock, DeviceFlow, Health, NativeIdentity, NativeOpenResult, RecipeCreate, RecipePatch, RecipeSummary, RecipeRevision, RecipeValidation } from '../contracts/domain.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import type { Scheduler } from '../scheduling/admission.ts';
 import type { Lifecycle } from '../scheduling/lifecycle.ts';
@@ -13,6 +13,20 @@ import { sanitize } from './snapshot.ts';
 import { eventStream } from './events.ts';
 export type { FactorySnapshot } from '../contracts/domain.ts';
 export type { SessionPolicy, ProvisionedSession } from './session.ts';
+export type ApiFailureStatus = 400 | 401 | 403 | 404 | 409 | 429 | 503;
+function validateFailureStatus(status: number): asserts status is ApiFailureStatus {
+  if (![400, 401, 403, 404, 409, 429, 503].includes(status)) throw new TypeError('Unsupported API failure status');
+}
+/** Trusted adapters may throw this ONLY after proving the command had no external effect.
+ * Uncertain acceptance/transport errors must remain ordinary exceptions, preserving pending state. */
+export class DefinitiveNoEffect extends Error {
+  readonly status: ApiFailureStatus;
+  readonly error: ApiError;
+  constructor(status: ApiFailureStatus, error: ApiError) {
+    super('Definitive external refusal'); this.name = 'DefinitiveNoEffect';
+    validateFailureStatus(status); this.status = status; this.error = structuredClone(validateContract('ApiError', error));
+  }
+}
 export interface RequestContext { /** Durable API key. Adapters must use it for external deduplication. */ key: string; expectedRevision?: number }
 export interface AuthPort {
   state(): Promise<AuthState>;
@@ -33,7 +47,8 @@ export interface OwnerPort {
   open(identity: NativeIdentity, context: RequestContext): Promise<NativeOpenResult>;
 }
 export interface PendingRequest { key: string; method: string; path: string }
-export type Reconciliation = { state: 'pending' } | { state: 'complete'; body: unknown };
+export type Reconciliation = { state: 'pending' } | { state: 'complete'; body: unknown }
+  | { state: 'failed'; status: ApiFailureStatus; error: ApiError }; // proven definitive no-effect refusal only
 export interface ApiDeps {
   store: FactoryStore; scheduler: Scheduler; session: SessionPolicy;
   lifecycle?: Pick<Lifecycle, 'requestTakeover' | 'returnControl' | 'resumeInput'>;
@@ -81,6 +96,10 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
   if (input.events?.pollMs !== undefined && (!Number.isFinite(input.events.pollMs) || input.events.pollMs < 10)) throw new TypeError('Event poll interval must be at least 10ms');
   const bodyLimit = input.limits?.bodyBytes ?? 1024 * 1024;
   if (!Number.isSafeInteger(bodyLimit) || bodyLimit < 1) throw new TypeError('Positive request size required');
+  const safeErrorResult = (status: number, error: unknown) => {
+    validateFailureStatus(status);
+    return { status, body: validateContract('ApiError', sanitize(error, deps.secrets?.())) };
+  };
   const table = routes(deps); const streams = new Set<() => void>(); let authority = '';
   const send = (res: ServerResponse, status: number, value: unknown) => {
     if (res.destroyed) return;
@@ -153,20 +172,29 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
         if (reconciled?.state === 'complete') {
           const result = safeResult(reconciled.body); deps.store.finishApiRequest(key, identity, result); send(res, result.status, result.body); return;
         }
+        if (reconciled?.state === 'failed') {
+          const result = safeErrorResult(reconciled.status, reconciled.error); deps.store.finishApiRequest(key, identity, result); send(res, result.status, result.body); return;
+        }
         throw new ApiFault(503, 'REQUEST_PENDING', 'Reconcile the exact pending action in the runtime; retry this same key to read its outcome');
       }
       // Only service-owned preconditions can be safely completed as failures before external effects.
       try { route.check?.(id, expected); } catch (error) {
-        const failure = safeFailure(error); deps.store.finishApiRequest(key, identity, failure); send(res, failure.status, failure.body); return;
+        const reason = safeFailure(error); const failure = safeErrorResult(reason.status, reason.body); deps.store.finishApiRequest(key, identity, failure); send(res, failure.status, failure.body); return;
       }
-      // Any exception from a port can follow an accepted external effect. Keep it pending.
+      // Ordinary port exceptions may follow acceptance. Only explicit trusted no-effect proof settles failure.
       try {
         const result = safeResult(await route.run(request, id, expected, key)); deps.store.finishApiRequest(key, identity, result); send(res, result.status, result.body);
       } catch (error) {
+        if (error instanceof DefinitiveNoEffect) {
+          const failure = safeErrorResult(error.status, error.error); deps.store.finishApiRequest(key, identity, failure); send(res, failure.status, failure.body); return;
+        }
         const failure = safeFailure(error);
         send(res, failure.status, failure.body);
       }
     } catch (error) {
+      if (error instanceof DefinitiveNoEffect) {
+        try { const failure = safeErrorResult(error.status, error.error); send(res, failure.status, failure.body); return; } catch { /* Invalid explicit failure remains an unavailable operation. */ }
+      }
       const failure = error instanceof SessionError ? { status: error.status, body: { code: error.status === 401 ? 'UNPAIRED' : 'FORBIDDEN', message: 'Session authorization required', recovery: 'Pair through the trusted local host and use its approved origin and CSRF token', retryable: false } } : safeFailure(error);
       send(res, failure.status, failure.body);
     }

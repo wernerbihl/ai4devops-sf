@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { Ajv2020 } from 'ajv/dist/2020.js';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { request as httpRequest } from 'node:http';
 import { startApi } from '../../src/service/api.ts';
+import type { ApiFailureStatus, Reconciliation } from '../../src/service/api.ts';
 import { createFixture } from '../helpers/store.ts';
 import { fakePorts, fakeRuntime } from '../helpers/fake-ports.ts';
 const origin = 'http://127.0.0.1:5173';
@@ -303,4 +305,124 @@ test('open_native_requires_proven_repository_quiescence_even_if_control_was_paus
     const response = await fetch(api.url + `/v1/tasks/${x.fixture.task.id}/open-native`, { method: 'POST', headers: { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'idempotency-key': 'unsafe-open', 'content-type': 'application/json' }, body: '{}' });
     assert.equal(response.status, 409); assert.equal(x.opened.length, 0);
   } finally { await api.close(); x.fixture.close(); }
+});
+
+test('definitive_auth_and_recipe_refusals_replay_exact_safe_errors_across_restart', async () => {
+  const apiModule = await import('../../src/service/api.ts');
+  const fixture = createFixture(); const ports = fakePorts(fixture.store); let appCalls = 0; let recipeCalls = 0;
+  const appError = { code: 'APP_NOT_CONFIGURED', message: 'Publisher App is missing: fake-credential-secret', recovery: 'Configure the publisher GitHub App', retryable: false };
+  const recipeError = { code: 'INVALID_RECIPE', message: 'Invalid YAML ghp_abcdefghijk1234', recovery: 'Fix the recipe YAML before importing', retryable: false };
+  const auth = { state: async () => ({ status: 'unavailable' as const, reasons: [] }), probe: async () => { throw new Error(); }, deviceFlow: async () => { throw new Error(); }, completeDeviceFlow: async () => { throw new Error(); }, startDeviceFlow: async () => { appCalls++; throw new apiModule.DefinitiveNoEffect(503, appError); } };
+  const recipes = { patch: async () => { throw new Error(); }, validate: async () => { throw new Error(); }, revise: async () => { throw new Error(); }, create: async () => { recipeCalls++; throw new apiModule.DefinitiveNoEffect(400, recipeError); } };
+  let api = await startApi({ ...ports.deps, auth, recipes });
+  const run = (path: string, key: string, body: unknown) => { const session = api.sessions.provision(origin); return fetch(api.url + path, { method: 'POST', headers: { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'idempotency-key': key, 'content-type': 'application/json' }, body: JSON.stringify(body) }); };
+  const cases = [
+    { path: '/v1/auth/device-flow', key: 'known-app', body: {}, status: 503, error: { ...appError, message: 'Publisher App is missing: [redacted]' } },
+    { path: '/v1/recipes', key: 'known-yaml', body: { yaml: 'invalid:' }, status: 400, error: { ...recipeError, message: 'Invalid YAML [redacted]' } },
+  ];
+  try {
+    for (const c of cases) { const response = await run(c.path, c.key, c.body); assert.equal(response.status, c.status); assert.deepEqual(await response.json(), c.error); }
+    await api.close(); fixture.reopen(); api = await startApi({ ...ports.deps, store: fixture.store, auth, recipes });
+    for (const c of cases) { const response = await run(c.path, c.key, c.body); assert.equal(response.status, c.status); assert.deepEqual(await response.json(), c.error); }
+    assert.equal(appCalls, 1); assert.equal(recipeCalls, 1);
+    const db = new DatabaseSync(fixture.path); const rows = db.prepare('SELECT state, result FROM api_requests WHERE key IN (?, ?)').all('known-app', 'known-yaml'); db.close();
+    assert.equal(rows.length, 2); for (const row of rows) { assert.equal(row.state, 'complete'); assert.equal(String(row.result).includes('fake-credential-secret'), false); assert.equal(String(row.result).includes('ghp_abcdefghijk1234'), false); }
+  } finally { await api.close(); fixture.close(); }
+});
+
+test('reconciled_no_effect_failure_completes_exact_safe_error_without_reinvoking_the_port', async () => {
+  const fixture = createFixture(); const ports = fakePorts(fixture.store); let calls = 0; let reconciles = 0;
+  const error = { code: 'AUTH_DENIED', message: 'Denied fake-credential-secret', recovery: 'Authorize the configured App', retryable: false };
+  const auth = { state: async () => ({ status: 'missing' as const, reasons: [] }), probe: async () => { calls++; throw new Error('lost transport'); }, startDeviceFlow: async () => { throw new Error(); }, deviceFlow: async () => { throw new Error(); }, completeDeviceFlow: async () => { throw new Error(); } };
+  const api = await startApi({ ...ports.deps, auth, reconcileRequest: async () => { reconciles++; return { state: 'failed', status: 403, error }; } });
+  try {
+    const session = api.sessions.provision(origin); const run = () => fetch(api.url + '/v1/auth/probe', { method: 'POST', headers: { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'idempotency-key': 'known-reconciliation', 'content-type': 'application/json' }, body: '{}' });
+    assert.equal((await run()).status, 503);
+    for (let i = 0; i < 2; i++) { const response = await run(); assert.equal(response.status, 403); assert.deepEqual(await response.json(), { ...error, message: 'Denied [redacted]' }); }
+    assert.equal(calls, 1); assert.equal(reconciles, 1);
+  } finally { await api.close(); fixture.close(); }
+});
+
+test('schema_field_identifiers_survive_http_snapshot_events_answers_and_journal_while_instance_credentials_are_redacted', async () => {
+  const x = fakeRuntime();
+  const schema = {
+    type: 'object', properties: {
+      password: { type: 'string', minLength: 3, default: 'opaque-password-default', examples: ['opaque-password-example'] },
+      accessToken: { $ref: '#/$defs/accessToken' },
+      nested: { type: 'object', properties: { secret: { type: 'string', default: 'opaque-nested-default' } }, required: ['secret'], additionalProperties: false },
+    },
+    $defs: { accessToken: { type: 'string', default: 'opaque-token-default', examples: ['opaque-token-example'] } },
+    required: ['password', 'accessToken', 'nested'], additionalProperties: false,
+    default: { password: 'opaque-object-default', accessToken: 'opaque-object-token' },
+    examples: [{ password: 'opaque-object-example', accessToken: 'opaque-example-token' }],
+  };
+  const recipe = structuredClone(x.fixture.recipe); recipe.id = 'recipe-1:schema-rev'; recipe.revision = 'schema-rev';
+  recipe.contract.variables.sf.inputSchema = schema;
+  recipe.contract.variables.sf.taskTemplate.context = { inputSchema: schema,
+    response: { password: 'opaque-response', accessToken: 'opaque-response-token' },
+    schema: { type: 'object', properties: { password: { type: 'string' } }, password: 'opaque-schema-instance' },
+  };
+  x.fixture.store.saveRecipeRevision(recipe, x.fixture.store.snapshot().recipes[0]!.revision);
+  await x.scheduler.dispatch('manual'); const attempt = x.fixture.store.snapshot().attempts[0]!;
+  const cursor = x.fixture.store.snapshot().cursor;
+  await x.lifecycle.applyOwnerEvent(attempt.id, { type: 'input', identity: x.native, at: x.fixture.clock.wallNow().toISOString(), input: { id: 'credential-fields', prompt: 'Supply input', schema } });
+  const api = await startApi(x.deps); const session = api.sessions.provision(origin);
+  const headers = { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'content-type': 'application/json' };
+  const answer = { password: 'answer-password', accessToken: 'answer-token', nested: { secret: 'answer-secret' } };
+  const assertSchema = (value: typeof schema) => {
+    assert.equal(typeof value.properties.password, 'object'); assert.equal(value.properties.password.type, 'string');
+    assert.equal(typeof value.$defs.accessToken, 'object'); assert.equal(value.properties.accessToken.$ref, '#/$defs/accessToken');
+    assert.deepEqual(value.required, ['password', 'accessToken', 'nested']); assert.deepEqual(value.properties.nested.required, ['secret']);
+    const ajv = new Ajv2020({ strict: false }); assert.equal(ajv.validateSchema(value), true); assert.equal(ajv.compile(value)(answer), true);
+    assert.equal(value.properties.password.default, '[redacted]'); assert.deepEqual(value.properties.password.examples, ['[redacted]']);
+    assert.equal(value.$defs.accessToken.default, '[redacted]'); assert.deepEqual(value.$defs.accessToken.examples, ['[redacted]']);
+    assert.equal(value.properties.nested.properties.secret.default, '[redacted]');
+    assert.equal(value.default.password, '[redacted]'); assert.equal(value.examples[0]!.accessToken, '[redacted]');
+  };
+  const assertNoInstanceSecrets = (value: unknown) => {
+    const text = JSON.stringify(value);
+    for (const secret of ['opaque-password-default', 'opaque-password-example', 'opaque-nested-default', 'opaque-token-default', 'opaque-token-example', 'opaque-object-default', 'opaque-object-token', 'opaque-object-example', 'opaque-example-token', 'opaque-response', 'opaque-response-token', 'opaque-schema-instance']) assert.equal(text.includes(secret), false, secret);
+  };
+  try {
+    const created = await fetch(api.url + '/v1/tasks', { method: 'POST', headers: { ...headers, 'idempotency-key': 'schema-create' }, body: JSON.stringify(x.fixture.request) });
+    assert.equal(created.status, 200); const records = await created.json(); assertSchema(records[0].spec.context.inputSchema); assertNoInstanceSecrets(records);
+    assert.equal(records[0].spec.context.response.password, '[redacted]'); assert.equal(records[0].spec.context.schema.password, '[redacted]');
+    const snapshot = await (await fetch(api.url + '/v1/snapshot', { headers })).json();
+    const attention = snapshot.attention.find((a: { nativeInputId: string }) => a.nativeInputId === 'credential-fields'); assert.ok(attention); assertSchema(attention.inputSchema); assertNoInstanceSecrets(snapshot);
+    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 1000);
+    try {
+      const response = await fetch(api.url + '/v1/events', { headers: { ...headers, 'last-event-id': cursor }, signal: controller.signal }); assert.equal(response.status, 200);
+      const reader = response.body!.getReader(); const decoder = new TextDecoder(); let pending = ''; let event;
+      while (!event) {
+        const chunk = await reader.read(); assert.equal(chunk.done, false); pending += decoder.decode(chunk.value, { stream: true });
+        let end; while ((end = pending.indexOf('\n\n')) >= 0) { const frame = pending.slice(0, end); pending = pending.slice(end + 2); if (frame.includes('event: attention\n')) event = JSON.parse(frame.split('\n').find(line => line.startsWith('data: '))!.slice(6)); }
+      }
+      assertSchema(event.data.inputSchema); assertNoInstanceSecrets(event);
+    } finally { clearTimeout(timer); controller.abort(); }
+    const answered = await fetch(api.url + `/v1/attention/${attention.id}/respond`, { method: 'POST', headers: { ...headers, 'idempotency-key': 'schema-answer', 'if-match': String(attention.revision) }, body: JSON.stringify({ input: answer }) });
+    assert.equal(answered.status, 200); assertSchema((await answered.json()).inputSchema); assert.deepEqual(x.sent[0]!.input, { requestId: 'credential-fields', response: answer, answers: answer });
+    const db = new DatabaseSync(x.fixture.path); const rows = db.prepare('SELECT key, result FROM api_requests WHERE key IN (?, ?)').all('schema-create', 'schema-answer'); db.close();
+    assert.equal(rows.length, 2);
+    for (const row of rows) { const result = JSON.parse(String(row.result)); assertNoInstanceSecrets(result); assertSchema(row.key === 'schema-create' ? result.body[0].spec.context.inputSchema : result.body.inputSchema); }
+  } finally { await api.close(); x.fixture.close(); }
+});
+
+test('invalid_explicit_failure_status_or_error_cannot_complete_a_pending_request', async () => {
+  const apiModule = await import('../../src/service/api.ts');
+  const fixture = createFixture(); const ports = fakePorts(fixture.store); let calls = 0;
+  const error = { code: 'REFUSED', message: 'Command refused', recovery: 'Fix the configuration', retryable: false };
+  const auth = { state: async () => ({ status: 'missing' as const, reasons: [] }),
+    probe: async () => { calls++; throw new apiModule.DefinitiveNoEffect(200 as ApiFailureStatus, error); },
+    startDeviceFlow: async () => { throw new Error(); }, deviceFlow: async () => { throw new Error(); }, completeDeviceFlow: async () => { throw new Error(); } };
+  let proof: Reconciliation = { state: 'failed', status: 200 as ApiFailureStatus, error };
+  const api = await startApi({ ...ports.deps, auth, reconcileRequest: async () => proof });
+  try {
+    const session = api.sessions.provision(origin); const run = () => fetch(api.url + '/v1/auth/probe', { method: 'POST', headers: { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'idempotency-key': 'invalid-proof', 'content-type': 'application/json' }, body: '{}' });
+    assert.equal((await run()).status, 503); assert.equal((await run()).status, 503);
+    proof = { state: 'failed', status: 400, error: { ...error, retryable: 'false' } as unknown as typeof error };
+    assert.equal((await run()).status, 503);
+    const db = new DatabaseSync(fixture.path); assert.equal(db.prepare('SELECT state FROM api_requests WHERE key = ?').get('invalid-proof')!.state, 'pending'); db.close();
+    proof = { state: 'failed', status: 400, error };
+    const refused = await run(); assert.equal(refused.status, 400); assert.deepEqual(await refused.json(), error); assert.equal(calls, 1);
+  } finally { await api.close(); fixture.close(); }
 });

@@ -1,0 +1,33 @@
+{
+  "fixtureTests": {
+    "focused": 17,
+    "fullSuite": 63,
+    "failed": 0,
+    "command": "npm test"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "build": "passed",
+    "protocol:check": "passed",
+    "gitDiffCheck": "passed",
+    "headlessScriptConsentGuards": "2/2 passed without live connections",
+    "headlessScriptSyntax": "passed"
+  },
+  "live": {
+    "kestraOssH2": {
+      "passedAssertions": 8,
+      "status": "passed"
+    },
+    "workerProcess": {
+      "passedAssertions": 15,
+      "nativeGate": "blocked"
+    },
+    "headlessStartup": {
+      "passedAssertions": 19,
+      "sessions": 0,
+      "modelTurns": 0,
+      "nativeProfileVerified": false
+    }
+  },
+  "qualification": "Fixture tests and headless startup do not establish actual authenticated native execution or external client tool containment."
+}

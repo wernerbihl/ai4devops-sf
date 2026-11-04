@@ -1,0 +1,33 @@
+import { OwnedDocker, images } from '../../../../probes/docker.ts';
+import { writeFile } from 'node:fs/promises';
+if (!process.argv.includes('--live')) throw new Error('Explicit --live consent required');
+const outputDir = 'release/evidence/p4/headless';
+const docker = new OwnedDocker(outputDir);
+const assets = await docker.volume('native-assets');
+const state = await docker.volume('native-state');
+const config = await docker.volume('native-config');
+await writeFile(`${outputDir}/setup-resources.json`, JSON.stringify({ owner: docker.owner, assets, state, config }, null, 2));
+const setupScript = String.raw`
+const fs = require('fs'), cp = require('child_process'), crypto=require('crypto');
+(async()=>{
+ const url='https://update.code.visualstudio.com/commit:3c0ec3a089398503a462029e7cc2a5749df5169a/server-linux-x64/insider';
+ const res=await fetch(url); if(!res.ok)throw new Error('artifact unavailable');
+ const bytes=Buffer.from(await res.arrayBuffer());fs.writeFileSync('/tmp/server.tar.gz',bytes);
+ fs.mkdirSync('/assets/vscode',{recursive:true});cp.execFileSync('tar',['-xzf','/tmp/server.tar.gz','--strip-components=1','-C','/assets/vscode']);
+ const product=JSON.parse(fs.readFileSync('/assets/vscode/product.json'));
+ if(crypto.createHash('sha256').update(bytes).digest('hex')!=='f410d7b12870992cd988b3bb09b65b1f77e1131b8e9d5daa6bf56317115db7ee')throw new Error('artifact hash mismatch');
+ if(!/^[a-z-]+$/.test(product.serverApplicationName)||!fs.statSync('/assets/vscode/bin/'+product.serverApplicationName).isFile())throw new Error('entrypoint missing');
+ if(product.commit!=='3c0ec3a089398503a462029e7cc2a5749df5169a')throw new Error('commit mismatch');
+ fs.writeFileSync('/config/token',crypto.randomBytes(32).toString('hex'),{mode:0o600});fs.chownSync('/config/token',1000,1000);
+ fs.mkdirSync('/state/data/User/globalStorage',{recursive:true});
+ fs.writeFileSync('/state/data/User/globalStorage/agent-host-config.json',JSON.stringify({githubMcpServerEnabled:false,mcpConnectorsEnabled:false,systemProxyEnabled:false,computerUseEnabled:false,showExternalSessions:false,migrateLegacyCopilotCliSessions:false}));
+ cp.execFileSync('chown',['-R','1000:1000','/state']);
+ console.log(JSON.stringify({downloadUrl:url,commit:product.commit,version:product.version,serverApplicationName:product.serverApplicationName,archiveSha256:crypto.createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length,agentSdks:product.agentSdks}));
+})().catch(e=>{console.error(e.message);process.exit(1)});`;
+const setup = await docker.run('download-setup', ['--pull','never','--network','bridge','--mount',`type=volume,src=${assets},dst=/assets`,'--mount',`type=volume,src=${state},dst=/state`,'--mount',`type=volume,src=${config},dst=/config`,images.worker.image,'node','-e',setupScript]);
+const code = await docker.command(['wait',setup]);
+const output = await docker.command(['logs',setup]);
+if(code !== '0')throw new Error(`Setup failed ${code}: ${output}`);
+await writeFile(`${outputDir}/artifact.json`,output+'\n');
+console.log(output);
+console.log('Owned setup complete; runtime and scoped cleanup remain pending.');

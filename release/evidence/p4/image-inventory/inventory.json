@@ -1,0 +1,8 @@
+{
+  "observedAt": "2026-11-04T00:10:36.459Z",
+  "image": "kestra/kestra@sha256:d7bb1af55f4b5730247e5c8c852e2c912ccd36a58c7846ac96d2d749295ba365",
+  "sourceVersion": "2.0.8",
+  "versionSource": "official exact tag and digest; not a --version result",
+  "additionalPluginJars": [],
+  "resourceOwner": "sf-p4-75021097-c0d8-4dd1-94ba-d333abc699de"
+}

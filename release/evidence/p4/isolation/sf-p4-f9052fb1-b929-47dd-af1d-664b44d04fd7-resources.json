@@ -1,0 +1,20 @@
+{
+  "owner": "sf-p4-f9052fb1-b929-47dd-af1d-664b44d04fd7",
+  "resources": [
+    {
+      "kind": "volume",
+      "name": "sf-p4-f9052fb1-b929-47dd-af1d-664b44d04fd7-host-canary",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-f9052fb1-b929-47dd-af1d-664b44d04fd7-canary-setup",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-f9052fb1-b929-47dd-af1d-664b44d04fd7-worker",
+      "removed": true
+    }
+  ]
+}

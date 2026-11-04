@@ -1,0 +1,25 @@
+{
+  "nativeProfiles": [],
+  "productionDispatchAllowed": false,
+  "credentialScope": "Fixed canaries only; declared model material may be readable in its approved boundary. No use-only secrecy claim.",
+  "resourceOwner": "sf-p4-f9052fb1-b929-47dd-af1d-664b44d04fd7",
+  "effectiveSettings": {
+    "image": "node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c",
+    "user": "1000:1000",
+    "readOnly": true,
+    "network": "none",
+    "capDrop": [
+      "ALL"
+    ],
+    "securityOpt": [
+      "no-new-privileges"
+    ],
+    "mounts": []
+  },
+  "workerBoundary": "passed",
+  "blockers": [
+    "Worker process exercised; actual VS Code native owner/model/client-tool boundary was not exercised.",
+    "BB enrollment forbidden under confirmed initial credential forwarding policy; no native profile exists."
+  ],
+  "cleanup": "complete"
+}

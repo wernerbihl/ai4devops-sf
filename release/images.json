@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "kestra": {
+    "version": "2.0.8",
+    "tag": "kestra/kestra:v2.0.8-slim",
+    "image": "kestra/kestra@sha256:d7bb1af55f4b5730247e5c8c852e2c912ccd36a58c7846ac96d2d749295ba365",
+    "plugins": { "core": "2.0.8 (bundled)", "additional": [] },
+    "autoInstall": false
+  },
+  "worker": {
+    "version": "24.22.2",
+    "tag": "node:24.22.2-bookworm-slim",
+    "image": "node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c"
+  },
+  "sources": [
+    "https://github.com/kestra-io/kestra/releases/tag/v2.0.8",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/cli/src/main/java/io/kestra/cli/commands/servers/LocalCommand.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/webserver/src/main/java/io/kestra/webserver/controllers/api/ExecutionController.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/webserver/src/main/java/io/kestra/webserver/controllers/api/FlowController.java",
+    "https://kestra.io/docs/installation/docker",
+    "https://hub.docker.com/_/node"
+  ]
+}

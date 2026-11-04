@@ -1,0 +1,10 @@
+{
+  "owner": "sf-p4-c1a0d5cf-8161-42ad-a4a7-9622342c7b76",
+  "resources": [
+    {
+      "kind": "container",
+      "name": "sf-p4-c1a0d5cf-8161-42ad-a4a7-9622342c7b76-inventory",
+      "removed": true
+    }
+  ]
+}

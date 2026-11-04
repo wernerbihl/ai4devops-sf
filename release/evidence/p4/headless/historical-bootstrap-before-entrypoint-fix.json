@@ -1,0 +1,53 @@
+{
+  "mode": "live",
+  "status": "blocked",
+  "observedAt": "2026-11-04T00:09:19.441Z",
+  "nativeProfileVerified": false,
+  "modelTurnsStarted": 0,
+  "loginStarted": false,
+  "resourceOwner": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941",
+  "assertions": [],
+  "sdk": {
+    "url": "https://main.vscode-cdn.net/agent-sdk/codex/0.163.0/linux-x64.tgz",
+    "version": "0.163.0",
+    "sha256": "201b83598aaa2764468788cff3ad450e81e5d1e2f00662be668f94d85e8de294",
+    "bytes": 162068382
+  },
+  "effectiveSettings": {
+    "image": "node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c",
+    "user": "1000:1000",
+    "readOnly": true,
+    "network": "none",
+    "capDrop": [
+      "ALL"
+    ],
+    "securityOpt": [
+      "no-new-privileges"
+    ],
+    "mounts": [
+      {
+        "type": "volume",
+        "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-native-assets",
+        "destination": "/assets",
+        "readWrite": false
+      },
+      {
+        "type": "volume",
+        "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-native-state",
+        "destination": "/state",
+        "readWrite": true
+      },
+      {
+        "type": "volume",
+        "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-native-config",
+        "destination": "/config",
+        "readWrite": false
+      }
+    ]
+  },
+  "startupErrors": [
+    "Error: Cannot find module '/assets/vscode/bin/code-server'"
+  ],
+  "failure": "Headless discovery did not complete",
+  "cleanup": "complete"
+}

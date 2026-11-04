@@ -1,0 +1,35 @@
+{
+  "owner": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941",
+  "resources": [
+    {
+      "kind": "volume",
+      "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-native-assets",
+      "removed": true
+    },
+    {
+      "kind": "volume",
+      "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-native-state",
+      "removed": true
+    },
+    {
+      "kind": "volume",
+      "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-native-config",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-download-setup",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-sdk-setup",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-84b46eac-ecf9-4adf-8f93-b4d2e7ec4941-native",
+      "removed": true
+    }
+  ]
+}

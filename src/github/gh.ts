@@ -16,8 +16,12 @@ export interface ProcessResult {
   stderr: string;
   missing?: boolean;
 }
+/** A returned result means normal foreground completion (or a proven missing executable).
+ * Throw ProcessFailure for known lifecycle failures; untyped rejection cannot prove completion. */
 export type ProcessPort = (request: ProcessRequest) => Promise<ProcessResult>;
-/** Captured output is private and is never forwarded to logging/UI. */
+/** Captured output is private and is never forwarded to logging/UI.
+ * Abnormal termination is explicitly unknown: sending SIGKILL is not process-tree quiescence.
+ * Git callers must retain trusted exclusion on that outcome until independent quiescence proof. */
 export const runProcess: ProcessPort = (request) =>
   new Promise((resolve, reject) => {
     const child = spawn(request.command, [...request.args], {
@@ -41,9 +45,9 @@ export const runProcess: ProcessPort = (request) =>
       } else resolve(result!);
     };
     const abort = () =>
-      finish(new GitHubFailure('unavailable', 'GitHub operation cancelled; retry intentionally'));
+      finish(new ProcessFailure('unknown', 'GitHub operation cancelled; establish writer quiescence before retrying'));
     const timer = setTimeout(
-      () => finish(new GitHubFailure('unavailable', 'GitHub operation timed out; check connectivity')),
+      () => finish(new ProcessFailure('unknown', 'GitHub operation timed out; establish writer quiescence before retrying')),
       request.timeoutMs,
     );
     for (const [stream, chunks] of [
@@ -53,16 +57,16 @@ export const runProcess: ProcessPort = (request) =>
       stream.on('data', (chunk: Buffer) => {
         bytes += chunk.length;
         if (bytes > request.maxBytes)
-          finish(new GitHubFailure('unavailable', 'GitHub output limit exceeded'));
+          finish(new ProcessFailure('unknown', 'GitHub output limit exceeded; writer completion is unproven'));
         else chunks.push(chunk);
       });
     child.on('error', (error) => {
       if ('code' in error && error.code === 'ENOENT')
         finish(undefined, { code: 127, stdout: '', stderr: '', missing: true });
-      else finish(new GitHubFailure('unavailable', 'GitHub process could not start'));
+      else finish(new ProcessFailure(child.pid === undefined ? 'stopped' : 'unknown', 'GitHub process failed; inspect trusted writer state'));
     });
     child.on('close', (code) =>
-      finish(undefined, {
+      code === null ? finish(new ProcessFailure('unknown', 'GitHub process terminated abnormally; writer completion is unproven')) : finish(undefined, {
         code: code ?? 1,
         stdout: Buffer.concat(out).toString('utf8'),
         stderr: Buffer.concat(err).toString('utf8'),
@@ -80,6 +84,21 @@ export class GitHubFailure extends Error {
     super(recovery);
     this.name = 'GitHubFailure';
     this.kind = kind;
+  }
+}
+export type WriterCompletion = 'stopped' | 'unknown';
+/** Trusted private process lifecycle evidence; contains no PID, output, argv or credential. */
+export class ProcessFailure extends GitHubFailure {
+  readonly completion: WriterCompletion;
+  constructor(completion: WriterCompletion, recovery: string) {
+    super('unavailable', recovery); this.name = 'ProcessFailure'; this.completion = completion;
+  }
+}
+/** Sanitized Git boundary error. stopped proves no remaining writer, not whether the operation succeeded. */
+export class GitWriterFailure extends GitHubFailure {
+  readonly writerCompletion: WriterCompletion;
+  constructor(completion: WriterCompletion, recovery: string, kind: FailureKind = 'unavailable') {
+    super(kind, recovery); this.name = 'GitWriterFailure'; this.writerCompletion = completion;
   }
 }
 export function failureFor(status: number, headers: Headers): GitHubFailure {

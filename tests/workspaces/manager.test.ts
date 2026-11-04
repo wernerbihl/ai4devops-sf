@@ -8,6 +8,7 @@ import { join, relative, isAbsolute } from 'node:path';
 import type { TaskSpec } from '../../src/contracts/domain.ts';
 import { createWorkspaceManager } from '../../src/workspaces/manager.ts';
 import { createLocalGit } from '../../src/workspaces/git.ts';
+import { GitWriterFailure, runProcess } from '../../src/github/gh.ts';
 
 const exec = promisify(execFile);
 const task = (id = 'task /../一; $(touch injected)'): TaskSpec => ({
@@ -125,7 +126,7 @@ test('reconciles_completed_worktree_add_after_uncertain_result_without_replacing
     const localGit = createLocalGit();
     const manager = createWorkspaceManager({ ...f.options, localGit: async request => {
       const result = await localGit(request);
-      if (request.args[0] === 'worktree') throw new Error('lost completion acknowledgement');
+      if (request.args[0] === 'worktree') throw new GitWriterFailure('stopped', 'lost completion acknowledgement after proven Git exit');
       return result;
     } });
     await assert.rejects(manager.prepareWorkspace(task()));
@@ -231,5 +232,89 @@ test('trusted_closeout_scope_shares_the_manager_lock_and_expires_after_use', asy
     await assert.rejects(escaped!(), /expired/);
     await assert.rejects(f.manager.withTrustedMetadata(async () => { throw new Error('closeout failed'); }), /closeout failed/);
     assert.equal((await other.revalidateWorkspace(workspace, f.base)).kind, 'ready');
+  } finally { await f.close(); }
+});
+
+test('failed_process_with_delayed_descendant_writer_retains_exclusion_until_trusted_recovery', async () => {
+  const f = await fixture();
+  const release = join(f.root, 'release-writer'); const done = join(f.root, 'writer-done');
+  const started = join(f.root, 'writer-started'); const lateWrite = join(f.factoryRoot, 'late-metadata-write');
+  const exists = async (path: string) => readFile(path).then(() => true, () => false);
+  const waitDone = async () => {
+    for (let i = 0; i < 200 && !await exists(done); i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(await exists(done), true);
+  };
+  try {
+    const localGit = createLocalGit({ process: async request => {
+      const result = await runProcess(request);
+      if (!request.args.includes('worktree')) return result;
+      const childCode = `const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(started)},'started');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(t);fs.writeFileSync(${JSON.stringify(lateWrite)},'late write');fs.writeFileSync(${JSON.stringify(done)},'done')}},10)`;
+      const parentCode = `const {spawn}=require('node:child_process');const fs=require('node:fs');spawn(process.execPath,['-e',${JSON.stringify(childCode)}],{detached:true,stdio:'ignore'}).unref();setInterval(()=>{if(fs.existsSync(${JSON.stringify(started)}))process.stdout.write('overflow')},10)`;
+      return runProcess({ command: process.execPath, args: ['-e', parentCode], env: { PATH: process.env.PATH! }, timeoutMs: 2000, maxBytes: 1 });
+    } });
+    const manager = createWorkspaceManager({ ...f.options, localGit });
+    await assert.rejects(manager.prepareWorkspace(task()), error =>
+      error instanceof Error && (error as Error & { writerCompletion?: string }).writerCompletion === 'unknown');
+    assert.equal(await exists(started), true); assert.equal(await exists(done), false);
+    await assert.rejects(createWorkspaceManager(f.options).prepareWorkspace(task('competing')), /active|recovery/);
+    assert.equal(await exists(lateWrite), false);
+    await writeFile(release, 'release'); await waitDone();
+    // A late writer really changed managed state after its failed foreground operation.
+    assert.equal(await readFile(lateWrite, 'utf8'), 'late write');
+    await assert.rejects(createWorkspaceManager(f.options).prepareWorkspace(task('competing')), /active|recovery/);
+    // This test owns/proves both writer outcomes. Production cannot substitute age/PID guesses here.
+    await rm(join(f.factoryRoot, '.workspace-manager.lock'), { recursive: true });
+    const recovered = await createWorkspaceManager(f.options).prepareWorkspace(task());
+    assert.equal(await readFile(join(recovered.path, 'file.txt'), 'utf8'), 'base\n');
+  } finally {
+    await writeFile(release, 'release');
+    if (await exists(started)) await waitDone();
+    await f.close();
+  }
+});
+
+test('managed_local_git_effectively_disables_automatic_and_detached_maintenance', async () => {
+  const f = await fixture();
+  try {
+    for (const [key, value] of [['maintenance.auto', 'false'], ['maintenance.autoDetach', 'false'],
+      ['gc.auto', '0'], ['gc.autoDetach', 'false'], ['fetch.writeCommitGraph', 'false']]) {
+      const result = await createLocalGit()({ cwd: f.source, hooksDirectory: f.factoryRoot,
+        args: ['config', '--get', key!], allowedExitCodes: [0, 1] });
+      assert.equal(result.stdout.trim(), value, key);
+    }
+  } finally { await f.close(); }
+});
+
+test('converted_attention_retains_unknown_fetch_lock_but_proven_refusal_and_nonzero_release_it', async () => {
+  const f = await fixture();
+  try {
+    let outcome: 'success' | 'unknown' | 'stopped' = 'success';
+    const manager = createWorkspaceManager({ ...f.options, gitAuth: { fetch: async input => {
+      if (outcome !== 'success') throw new GitWriterFailure(outcome, 'sanitized fetch refusal');
+      await f.options.gitAuth.fetch(input);
+    } } });
+    const workspace = await manager.prepareWorkspace(task());
+    outcome = 'unknown';
+    const uncertain = await manager.revalidateWorkspace(workspace, f.base);
+    assert.equal(uncertain.kind, 'needs_attention');
+    if (uncertain.kind === 'needs_attention') assert.match(uncertain.reasons.join(' '), /quiescence/);
+    const lock = join(f.factoryRoot, '.workspace-manager.lock');
+    assert.equal(JSON.parse(await readFile(join(lock, 'owner.json'), 'utf8')).state, 'writer_completion_unknown');
+    await assert.rejects(createWorkspaceManager(f.options).prepareWorkspace(task('other')), /active|recovery/);
+    // The fixture threw before starting any writer, so it can independently prove quiescence here.
+    await rm(lock, { recursive: true });
+    outcome = 'stopped';
+    assert.equal((await manager.revalidateWorkspace(workspace, f.base)).kind, 'needs_attention');
+    outcome = 'success';
+    assert.equal((await manager.revalidateWorkspace(workspace, f.base)).kind, 'ready');
+    await assert.rejects(manager.withTrustedMetadata(async () => {
+      await createLocalGit()({ cwd: workspace.path, gitDirectory: workspace.gitDirectory, workTree: workspace.path,
+        hooksDirectory: workspace.hooksDirectory, args: ['rev-parse', '--verify', 'refs/heads/does-not-exist'] });
+    }), error => error instanceof GitWriterFailure && error.writerCompletion === 'stopped');
+    assert.equal((await manager.revalidateWorkspace(workspace, f.base)).kind, 'ready');
+    await assert.rejects(manager.withTrustedMetadata(async () => {
+      throw new GitWriterFailure('unknown', 'unproven closeout writer');
+    }));
+    await assert.rejects(createWorkspaceManager(f.options).prepareWorkspace(task('other')), /active|recovery/);
   } finally { await f.close(); }
 });

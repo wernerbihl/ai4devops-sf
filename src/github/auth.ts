@@ -7,6 +7,8 @@ import {
   createGh,
   fetchJson,
   GitHubFailure,
+  GitWriterFailure,
+  ProcessFailure,
   jsonObject,
   processEnvironment,
   runProcess,
@@ -58,6 +60,8 @@ export interface GitInvocation {
   key?: string;
 }
 export interface GitAuthPort {
+  /** Throws sanitized GitWriterFailure. Unknown completion requires retained metadata exclusion;
+   * stopped proves no remaining managed writer, not success or absence of remote/local effects. */
   fetch(input: GitInvocation): Promise<void>;
   push(input: GitInvocation & { ref: string }): Promise<void>;
 }
@@ -566,6 +570,17 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
     },
   };
   async function invokeGit(input: GitInvocation, push: boolean): Promise<void> {
+    const writer: { completion: 'stopped' | 'unknown' } = { completion: 'stopped' };
+    try { return await invokeGitOperation(input, push, writer); }
+    catch (error) {
+      if (error instanceof GitWriterFailure) throw error;
+      // Before invocation this is stopped (no writer started). Carry the writer state outside
+      // storage cleanup too, so a cleanup failure cannot erase an uncertain process outcome.
+      const failure = safeFailure(error);
+      throw new GitWriterFailure(writer.completion, failure.message, failure.kind);
+    }
+  }
+  async function invokeGitOperation(input: GitInvocation, push: boolean, writer: { completion: 'stopped' | 'unknown' }): Promise<void> {
     const repository = options.repositories.find((r) => r.id === input.repositoryId);
     if (!repository) throw new GitHubFailure('denied', 'Explicitly allow this Git repository first');
     if (
@@ -647,6 +662,8 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         'protocol.https.allow=always',
         '-c',
         `core.hooksPath=${options.storageDirectory}/.disabled-hooks`,
+        '-c', 'maintenance.auto=false', '-c', 'maintenance.autoDetach=false',
+        '-c', 'gc.auto=0', '-c', 'gc.autoDetach=false', '-c', 'fetch.writeCommitGraph=false',
         push ? 'push' : 'fetch',
         '--no-recurse-submodules',
         ...(push ? ['--no-follow-tags'] : ['--no-tags']),
@@ -655,14 +672,20 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         ...(input.ref ? [input.ref] : []),
       ];
       try {
+        writer.completion = 'unknown';
         const result = await processPort({ command: 'git', args, env, cwd: input.cwd, timeoutMs, maxBytes });
+        writer.completion = 'stopped';
         if (result.code !== 0)
-          throw new GitHubFailure(
-            'unavailable',
+          throw new GitWriterFailure(
+            'stopped',
             'Git repository operation failed; inspect repository state and reconcile before retrying',
           );
       } catch (error) {
-        throw safeFailure(error);
+        const completion = error instanceof GitWriterFailure ? error.writerCompletion
+          : error instanceof ProcessFailure ? error.completion : 'unknown';
+        writer.completion = completion;
+        const failure = safeFailure(error);
+        throw new GitWriterFailure(completion, failure.message, failure.kind);
       }
     });
   }

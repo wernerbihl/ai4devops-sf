@@ -424,7 +424,8 @@ test('production_process_port_bounds_output_timeout_and_sanitizes_errors', async
       timeoutMs: 1000,
       maxBytes: 32,
     }),
-    (e) => e instanceof Error && !e.message.includes('private'),
+    (e) => e instanceof Error && !e.message.includes('private')
+      && (e as Error & { completion?: string }).completion === 'unknown',
   );
   await assert.rejects(
     runProcess({
@@ -434,6 +435,7 @@ test('production_process_port_bounds_output_timeout_and_sanitizes_errors', async
       timeoutMs: 20,
       maxBytes: 32,
     }),
+    e => e instanceof Error && (e as Error & { completion?: string }).completion === 'unknown',
   );
 });
 test('real_empty_gh_json_is_absent_and_network_status_is_unavailable', async () => {
@@ -544,6 +546,48 @@ test('authenticated_git_ignores_global_worker_includes_while_helper_discovery_us
     assert.equal(git(target, ['rev-parse', 'FETCH_HEAD']).toString(), git(source, ['rev-parse', 'HEAD']).toString());
   } finally { f.close(); }
 });
+test('authenticated_git_preserves_writer_completion_and_suppresses_background_maintenance', async () => {
+  const f = fixture();
+  const cleanEnv = { PATH: process.env.PATH!, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
+  const cwd = join(f.directory, 'managed.git');
+  execFileSync('git', ['init', '--bare', cwd], { env: cleanEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    let outcome: 'success' | 'unknown' | 'nonzero' = 'success'; let writes = 0;
+    const backend = createGitHubBackend({ ...f.config, process: async request => {
+      const index = request.args.findIndex(arg => arg === 'fetch' || arg === 'push');
+      if (request.command !== 'git' || index < 0) return f.config.process(request);
+      writes++;
+      if (outcome === 'unknown') throw new Error('private writer transport failure');
+      if (outcome === 'nonzero') return { code: 1, stdout: '', stderr: 'private nonzero' };
+      const env = { ...request.env }; delete env.GIT_CONFIG_COUNT; delete env.GIT_CONFIG_KEY_0; delete env.GIT_CONFIG_VALUE_0;
+      for (const [key, expected] of [['maintenance.auto', 'false'], ['maintenance.autoDetach', 'false'],
+        ['gc.auto', '0'], ['gc.autoDetach', 'false'], ['fetch.writeCommitGraph', 'false']]) {
+        const effective = await runProcess({ ...request, env, args: [...request.args.slice(0, index), 'config', '--get', key!] });
+        assert.equal(effective.stdout.trim(), expected, key);
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    } });
+    await backend.git.fetch({ repositoryId: 'repo-1', cwd, ref: 'refs/heads/main' });
+    await backend.git.push({ repositoryId: 'repo-1', cwd, ref: 'refs/heads/work', key: 'push-maintenance' });
+    outcome = 'unknown';
+    await assert.rejects(backend.git.fetch({ repositoryId: 'repo-1', cwd, ref: 'refs/heads/main' }), error =>
+      error instanceof Error && (error as Error & { writerCompletion?: string }).writerCompletion === 'unknown'
+        && !error.message.includes('private'));
+    outcome = 'nonzero';
+    await assert.rejects(backend.git.fetch({ repositoryId: 'repo-1', cwd, ref: 'refs/heads/main' }), error =>
+      error instanceof Error && (error as Error & { writerCompletion?: string }).writerCompletion === 'stopped');
+    const before = writes;
+    await assert.rejects(backend.git.fetch({ repositoryId: 'not-allowed', cwd }), error =>
+      error instanceof Error && (error as Error & { writerCompletion?: string }).writerCompletion === 'stopped');
+    assert.equal(writes, before);
+    const absent = fixture({ ghMissing: true });
+    try {
+      await assert.rejects(absent.backend.git.fetch({ repositoryId: 'repo-1', cwd }), error =>
+        error instanceof Error && (error as Error & { writerCompletion?: string }).writerCompletion === 'stopped');
+      assert.equal(absent.calls.some(call => call.args.includes('fetch')), false);
+    } finally { absent.close(); }
+  } finally { f.close(); }
+});
 test('windows_metadata_store_keeps_gh_usable_but_refuses_app_secrets_before_authorization', async () => {
   const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
   const f = fixture({ ghMissing: true, app: true });
@@ -611,7 +655,8 @@ test('git_bridge_rejects_effective_remote_rewrites_before_attaching_credentials'
         return f.config.process(request);
       },
     });
-    await assert.rejects(backend.git.fetch({ repositoryId: 'repo-1', cwd: f.directory }));
+    await assert.rejects(backend.git.fetch({ repositoryId: 'repo-1', cwd: f.directory }), error =>
+      error instanceof Error && (error as Error & { writerCompletion?: string }).writerCompletion === 'stopped');
     assert.equal(authenticatedInvocations, 0);
   } finally {
     f.close();
@@ -705,6 +750,7 @@ test('git_bridge_rejects_pushinsteadof_and_local_include_configuration', async (
       });
       await assert.rejects(
         backend.git.push({ repositoryId: 'repo-1', cwd: f.directory, ref: 'refs/heads/work', key: 'push' }),
+        error => error instanceof Error && (error as Error & { writerCompletion?: string }).writerCompletion === 'stopped',
       );
       assert.equal(sends, 0);
     } finally {

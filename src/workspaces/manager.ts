@@ -3,6 +3,7 @@ import { lstat, mkdir, writeFile, rename, rm, readdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { TaskSpec } from '../contracts/domain.ts';
 import type { GitAuthPort } from '../github/auth.ts';
+import { GitWriterFailure } from '../github/gh.ts';
 import { createLocalGit } from './git.ts';
 import type { LocalGit } from './git.ts';
 import { attention, assertManagedPath, opaqueSha, readPrivateJson, validateWorkspaceFiles, WorkspaceAttention } from './revalidate.ts';
@@ -30,7 +31,8 @@ export interface WorkspaceManager {
   /** Trusted C8/E6 capability only. Never expose callbacks to workers or public RPC.
    * Requires the same metadata protection as all manager calls; C8 separately proves native
    * worktree quiescence before Git writes/commit/push. Callback must await all its operations.
-   * Nonreentrant: use scope.revalidateWorkspace inside the callback, never public manager methods. */
+   * Nonreentrant: use scope.revalidateWorkspace inside the callback, never public manager methods.
+   * Unknown GitWriterFailure must escape this callback; convert it to attention outside the scope. */
   withTrustedMetadata<T>(operation: (scope: TrustedMetadataScope) => Promise<T>): Promise<T>;
 }
 export interface TrustedMetadataScope {
@@ -58,7 +60,19 @@ export function createWorkspaceManager(options: WorkspaceManagerOptions): Worksp
     throw new TypeError('Canonical absolute factory root required');
   if (!options.metadataBoundary?.assertProtected) throw new TypeError('Verified metadata boundary required');
   const root = options.factoryRoot;
-  const git = options.localGit ?? createLocalGit();
+  const gitPort = options.localGit ?? createLocalGit();
+  let heldLock: { retain: boolean } | undefined;
+  async function trackWriter<T>(operation: () => Promise<T>): Promise<T> {
+    const lock = heldLock;
+    try { return await operation(); }
+    catch (error) {
+      const failure = error instanceof GitWriterFailure ? error
+        : new GitWriterFailure('unknown', 'Managed Git writer completion is unproven; retain exclusion and establish trusted quiescence');
+      if (lock && failure.writerCompletion === 'unknown') lock.retain = true;
+      throw failure;
+    }
+  }
+  const git: LocalGit = request => trackWriter(() => gitPort(request));
   const hooksDirectory = join(root, 'disabled-hooks');
   const repositoriesDirectory = join(root, 'repositories');
   const worktreesDirectory = join(root, 'worktrees');
@@ -95,12 +109,23 @@ export function createWorkspaceManager(options: WorkspaceManagerOptions): Worksp
     await assertManagedPath(root, lockDirectory, true);
     try { await mkdir(lockDirectory, { mode: 0o700 }); }
     catch { throw new WorkspaceAttention('Workspace manager is active or recovery is required; establish trusted quiescence before reconciling its lock'); }
+    const lock = { retain: false }; heldLock = lock;
+    const owner = { version: 1, operationId: randomUUID() };
     try {
-      await writeFile(join(lockDirectory, 'owner.json'), JSON.stringify({ version: 1, operationId: randomUUID() }), { flag: 'wx', mode: 0o600 });
+      await writeFile(join(lockDirectory, 'owner.json'), JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
       for (const path of [hooksDirectory, repositoriesDirectory, worktreesDirectory, manifestsDirectory]) await directory(path);
       if ((await readdir(hooksDirectory)).length) throw new WorkspaceAttention('Disabled hooks directory must remain empty');
       return await operation();
-    } finally { await rm(lockDirectory, { recursive: true }); }
+    } catch (error) {
+      if (error instanceof GitWriterFailure && error.writerCompletion === 'unknown') lock.retain = true;
+      throw error;
+    } finally {
+      heldLock = undefined;
+      if (lock.retain) {
+        // The directory remains authoritative even if writing this diagnostic fails.
+        await writeFile(join(lockDirectory, 'owner.json'), JSON.stringify({ ...owner, state: 'writer_completion_unknown' }), { mode: 0o600 });
+      } else await rm(lockDirectory, { recursive: true });
+    }
   }
   async function local(cwd: string, args: string[], allowedExitCodes?: number[]) {
     return git({ cwd, args, hooksDirectory, ...(allowedExitCodes ? { allowedExitCodes } : {}) });
@@ -118,7 +143,7 @@ export function createWorkspaceManager(options: WorkspaceManagerOptions): Worksp
   }
   async function fetchBase(repository: ManagedRepository, common: string, key: string) {
     await verifyRepository(repository, common);
-    await options.gitAuth.fetch({ repositoryId: repository.id, cwd: common, ref: repository.baseRef, key });
+    await trackWriter(() => options.gitAuth.fetch({ repositoryId: repository.id, cwd: common, ref: repository.baseRef, key }));
     const sha = (await local(common, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}'])).stdout.trim();
     if (!opaqueSha.test(sha)) throw new WorkspaceAttention('Fetched base must be a full verified commit SHA');
     return sha;
@@ -162,7 +187,9 @@ export function createWorkspaceManager(options: WorkspaceManagerOptions): Worksp
       if (base !== expectedBase) return attention(retained, 'The repository base branch moved; review retained changes before continuing');
       return { kind: 'ready', workspace: retained, retainedChanges: state.retainedChanges };
     } catch (error) {
-      return attention(workspace, error instanceof WorkspaceAttention ? error.message
+      return attention(workspace, error instanceof GitWriterFailure && error.writerCompletion === 'unknown'
+        ? 'Git writer completion is unproven; retain all files and the factory lock until trusted writer quiescence is established'
+        : error instanceof WorkspaceAttention ? error.message
         : 'Workspace validation or authenticated fetch failed; retain all files and repair trusted repository access');
     }
   }

@@ -1,5 +1,6 @@
 import { devNull } from 'node:os';
-import { runProcess } from '../github/gh.ts';
+import { GitWriterFailure, ProcessFailure, runProcess } from '../github/gh.ts';
+import type { ProcessPort } from '../github/gh.ts';
 
 export interface LocalGitRequest {
   cwd: string;
@@ -10,10 +11,14 @@ export interface LocalGitRequest {
   allowedExitCodes?: readonly number[];
 }
 export interface LocalGitResult { stdout: string; code: number }
+/** Return only after normal managed-command completion; throw GitWriterFailure with truthful
+ * stopped/unknown evidence. Generic injected errors are treated as unknown by the manager. */
 export type LocalGit = (request: LocalGitRequest) => Promise<LocalGitResult>;
 export interface LocalGitOptions {
   timeoutMs?: number;
   maxBytes?: number;
+  /** Trusted process-boundary injection; returned results must establish normal foreground completion. */
+  process?: ProcessPort;
   /** Trusted diagnostics: no credentials, child output or inherited environment. */
   onInvocation?(invocation: { args: readonly string[]; options: { shell: false } }): void;
 }
@@ -38,18 +43,23 @@ export function createLocalGit(options: LocalGitOptions = {}): LocalGit {
       '-c', 'credential.helper=', '-c', 'core.askPass=', '-c', 'protocol.allow=never',
       '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false',
       '-c', `core.attributesFile=${devNull}`, '-c', 'submodule.recurse=false',
+      '-c', 'maintenance.auto=false', '-c', 'maintenance.autoDetach=false',
+      '-c', 'gc.auto=0', '-c', 'gc.autoDetach=false', '-c', 'fetch.writeCommitGraph=false',
       ...(request.gitDirectory ? [`--git-dir=${request.gitDirectory}`] : []),
       ...(request.workTree ? [`--work-tree=${request.workTree}`] : []),
       ...request.args,
     ];
     options.onInvocation?.({ args, options: { shell: false } });
     try {
-      const result = await runProcess({ command: 'git', args, cwd: request.cwd, env, timeoutMs, maxBytes });
-      if (!(request.allowedExitCodes ?? [0]).includes(result.code)) throw new Error();
+      const result = await (options.process ?? runProcess)({ command: 'git', args, cwd: request.cwd, env, timeoutMs, maxBytes });
+      if (!(request.allowedExitCodes ?? [0]).includes(result.code))
+        throw new GitWriterFailure('stopped', 'Managed local Git exited unsuccessfully; retain the workspace and inspect trusted state');
       return { code: result.code, stdout: result.stdout };
-    } catch {
+    } catch (error) {
       // Git's messages can contain remote URLs and arbitrary repository-controlled strings.
-      throw new Error('Managed local Git failed or exceeded its I/O limit; retain the workspace and inspect trusted state');
+      const completion = error instanceof GitWriterFailure ? error.writerCompletion
+        : error instanceof ProcessFailure ? error.completion : 'unknown';
+      throw new GitWriterFailure(completion, 'Managed local Git failed or exceeded its I/O limit; retain the workspace and inspect trusted writer state');
     }
   };
 }

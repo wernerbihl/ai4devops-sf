@@ -60,11 +60,20 @@ export interface GitAuthPort {
   fetch(input: GitInvocation): Promise<void>;
   push(input: GitInvocation & { ref: string }): Promise<void>;
 }
+export interface RepositoryCatalogEntry {
+  githubId: string;
+  owner: string;
+  name: string;
+  url: string;
+  defaultBranch?: string;
+}
 export interface GitHubBackend {
   resolveGitHubAuth(request: AuthRequest): Promise<AuthState>;
   authApi: AuthPort;
   github: GitHubPort;
   git: GitAuthPort;
+  /** Trusted identity-bound metadata only; listing does not authorize repository actions. */
+  listRepositories(): Promise<RepositoryCatalogEntry[]>;
   probeRepositoryAccess(repositoryId: string): Promise<RepositoryCapabilities>;
   reconcileRequest(request: PendingRequest): Promise<Reconciliation>;
   /** Trusted broker redaction only. Never expose through a DTO, worker, or health response. */
@@ -635,7 +644,8 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         '-c',
         `core.hooksPath=${options.storageDirectory}/.disabled-hooks`,
         push ? 'push' : 'fetch',
-        ...(push ? [] : ['--no-tags']),
+        '--no-recurse-submodules',
+        ...(push ? ['--no-follow-tags'] : ['--no-tags']),
         '--',
         `https://github.com/${repository.owner}/${repository.name}.git`,
         ...(input.ref ? [input.ref] : []),
@@ -662,6 +672,123 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
     authApi,
     github,
     git: { fetch: (input) => invokeGit(input, false), push: (input) => invokeGit(input, true) },
+    async listRepositories() {
+      return store.run(async (record, save) => {
+        const bound = await requireCredential(record, save);
+        let remainingRequests = 100;
+        // Construct each next-page path locally. Never follow a provider Link URL with this credential.
+        const pages = async (path: string, field?: string): Promise<unknown[]> => {
+          const all: unknown[] = [];
+          for (let page = 1; page <= 10; page++) {
+            if (--remainingRequests < 0)
+              throw new GitHubFailure(
+                'unavailable',
+                'GitHub repository catalog request limit reached; narrow App installations before retrying',
+              );
+            const response = await bound.request('GET', `${path}?per_page=100&page=${page}`);
+            const object = field ? jsonObject(response.data) : undefined;
+            const items = field ? object![field] : response.data;
+            if (!Array.isArray(items) || items.length > 100)
+              throw new GitHubFailure('unavailable', 'GitHub repository catalog returned invalid pagination');
+            all.push(...items);
+            const total = object?.total_count;
+            if (total !== undefined && (!Number.isSafeInteger(total) || (total as number) < 0))
+              throw new GitHubFailure('unavailable', 'GitHub repository catalog returned an invalid total');
+            const more =
+              /;\s*rel="?next"?(?:\s|,|$)/i.test(response.headers.get('link') ?? '') ||
+              (typeof total === 'number' ? all.length < total : items.length === 100);
+            if (!more) return all;
+          }
+          throw new GitHubFailure(
+            'unavailable',
+            'GitHub repository catalog pagination limit reached; results are truncated, so no partial catalog was returned',
+          );
+        };
+        const id = (raw: unknown): string => {
+          const value = jsonObject(raw).id;
+          if (!Number.isSafeInteger(value) || (value as number) <= 0)
+            throw new GitHubFailure('unavailable', 'GitHub repository catalog returned an invalid identity');
+          return String(value);
+        };
+        const metadata = (raw: unknown): RepositoryCatalogEntry => {
+          const value = jsonObject(raw);
+          const owner = jsonObject(value.owner).login;
+          const name = value.name;
+          if (
+            typeof owner !== 'string' ||
+            !/^[a-z\d][a-z\d-]{0,38}$/i.test(owner) ||
+            typeof name !== 'string' ||
+            !/^[a-z\d_.-]{1,100}$/i.test(name) ||
+            name === '.' ||
+            name === '..' ||
+            value.full_name !== `${owner}/${name}`
+          )
+            throw new GitHubFailure(
+              'unavailable',
+              'GitHub repository catalog returned invalid repository metadata',
+            );
+          const branch = value.default_branch;
+          if ((branch === null || branch === undefined || branch === '') && value.size !== 0)
+            throw new GitHubFailure(
+              'unavailable',
+              'GitHub repository catalog omitted the default branch for a nonempty repository',
+            );
+          if (
+            branch !== null &&
+            branch !== undefined &&
+            (typeof branch !== 'string' || /[\x00-\x20\x7f]/.test(branch))
+          )
+            throw new GitHubFailure(
+              'unavailable',
+              'GitHub repository catalog returned an invalid default branch',
+            );
+          return {
+            githubId: id(raw),
+            owner,
+            name,
+            url: `https://github.com/${owner}/${name}.git`,
+            ...(branch ? { defaultBranch: branch as string } : {}),
+          };
+        };
+        try {
+          const catalog = new Map<string, RepositoryCatalogEntry>();
+          for (const raw of await pages('/user/repos')) {
+            const entry = metadata(raw);
+            const previous = catalog.get(entry.githubId);
+            if (previous && JSON.stringify(previous) !== JSON.stringify(entry))
+              throw new GitHubFailure(
+                'unavailable',
+                'GitHub repository metadata changed during pagination; retry the catalog',
+              );
+            catalog.set(entry.githubId, entry);
+          }
+          let entries = [...catalog.values()];
+          if (bound.source === 'github_app') {
+            const installed = new Set<string>();
+            for (const installation of await pages('/user/installations', 'installations')) {
+              const installationId = id(installation);
+              for (const repository of await pages(
+                `/user/installations/${installationId}/repositories`,
+                'repositories',
+              ))
+                installed.add(id(repository));
+            }
+            entries = entries.filter((entry) => installed.has(entry.githubId));
+          }
+          // Check the exact credential actor again before releasing any collected metadata.
+          bind(record, (await bound.request('GET', '/user')).data);
+          save();
+          return entries;
+        } catch (error) {
+          const safe = safeFailure(error);
+          if (safe.kind === 'identity_changed' || safe.kind === 'expired') {
+            record.state = publicState(record, safe.kind, bound.source, safe.message);
+            save();
+          }
+          throw safe;
+        }
+      });
+    },
     async probeRepositoryAccess(repositoryId) {
       const repository = options.repositories.find((r) => r.id === repositoryId);
       if (!repository) throw new GitHubFailure('denied', 'Explicitly allow this GitHub repository first');

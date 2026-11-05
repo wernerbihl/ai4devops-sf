@@ -268,9 +268,12 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       ensure(repo.controlMode === 'human', 'control_mode', 'Repository is not under human control');
       ensure(!store.pendingActions().some(a=>a.kind==='lifecycle.human_open'&&a.payload.repositoryId===repositoryId),'human_open_pending','Human native control start/open is pending or unknown; reconcile before return');
       const attempts = store.getReservations().filter(r => r.lease.repositoryId === repositoryId && r.status === 'confirmed');
-      for (const r of attempts.filter(r => store.getTask(r.attempt.taskId)!.attemptIds.at(-1) === r.attempt.id && !['completed', 'failed', 'cancelled'].includes(store.getTask(r.attempt.taskId)!.status))) {
+      // Terminal history can still own a human/background writer after an explicit native open.
+      // Stop every latest owned runtime before restoring repository automation.
+      for (const r of attempts.filter(r => store.getTask(r.attempt.taskId)!.attemptIds.at(-1) === r.attempt.id)) {
         if (r.lease.active) await pause(r.attempt.id, 'needs_attention', undefined, true);
         else await quiet(r.attempt.id);
+        if (['completed', 'failed', 'cancelled'].includes(store.getTask(r.attempt.taskId)!.status)) continue;
         const token = await preflight(r.attempt.id);
         ensure(store.getAdmissionState().token === token, 'admission_changed', 'Policy changed while returning control');
       }

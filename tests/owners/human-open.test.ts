@@ -11,7 +11,7 @@ import { createFactoryToolGate } from '../../src/owners/tools.ts';
 import { createManagedVsCodeLauncher } from '../../src/owners/managed.ts';
 import { createVsCodeOwner } from '../../src/owners/vscode.ts';
 import { fakeHost } from './ahp-fixture.ts';
-for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'focus-race'] as const)
+for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'focus-race', 'completed', 'failed'] as const)
     test(`actual C4 human takeover ${scenario} preserves admission and original native identity`, async () => {
         const f = createFixture();
         const summary = f.store.snapshot().recipes[0]!;
@@ -93,10 +93,21 @@ for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'foc
             await boundary.prepareBinding(start, 'initial');
             const identity = await owner.ensureSession(start);
             f.store.bindLifecycleIdentity(attempt.id, identity);
-            const lifecycle = createLifecycle({ store: f.store, clock: f.clock, owner: () => owner, readiness: async () => prepared, workspace: async () => true, workflow: { snapshot: async () => 'present', quiesce: async () => 'waiting', resume: async () => { } }, managedContinuation: { async preflight(a) { return await owner.stoppedReceipt(a.native!) ? prepared : undefined; }, async prepare() { throw Error('unused'); } }, managedHumanOpen: createManagedHumanOpen({ owner, launcher, boundary, authenticate }) });
+            const lifecycle = createLifecycle({ store: f.store, clock: f.clock, owner: () => owner, readiness: async () => {assert.ok(scenario!=='completed'&&scenario!=='failed','Terminal history must not undergo continuation readiness');return prepared;}, workspace: async () => true, workflow: { snapshot: async () => 'present', quiesce: async () => 'waiting', resume: async () => { } }, managedContinuation: { async preflight(a) {assert.ok(scenario!=='completed'&&scenario!=='failed','Terminal history must not undergo continuation preflight'); return await owner.stoppedReceipt(a.native!) ? prepared : undefined; }, async prepare() { throw Error('unused'); } }, managedHumanOpen: createManagedHumanOpen({ owner, launcher, boundary, authenticate }) });
             await assert.rejects(owner.open(identity), /admitted/);
             assert.equal(restartChecks, 0);
             assert.equal(opens.length, 0);
+            if(scenario==='completed'||scenario==='failed'){
+                assert.equal(await owner.quiesce(identity),'stopped');
+                f.store.updateLifecycle(attempt.id,attempt.fence,{status:scenario,release:'stopped'});
+                const repo=f.store.getRepository('repo-1')!;f.store.setRepositoryControl(repo.id,'human',repo.revision);
+                await lifecycle.openNative(identity,'terminal-history');assert.equal(running,true);assert.equal(opens.length,1);
+                await lifecycle.returnControl('repo-1');
+                assert.equal(running,false,'Returning terminal history to factory control must stop its human runtime');
+                assert.equal(f.store.getRepository('repo-1')!.controlMode,'factory');assert.equal(f.store.getTask(start.task.id)!.status,scenario);
+                assert.equal(host.creates,1);assert.equal(host.actions.filter(a=>a==='chat/turnStarted').length,0);assert.equal(f.store.getAdmissionState().activeLeases.length,0);
+                return;
+            }
             const taking = lifecycle.requestTakeover(start.task.id);
             if (scenario === 'pending') {
                 await startReached;

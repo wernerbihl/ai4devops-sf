@@ -19,6 +19,8 @@ import { createProfileVerifier } from '../isolation/verify.ts';
 import { NATIVE_STATE_TARGET, type NativeStateMount } from '../isolation/native-state.ts';
 import { resolveNativeMounts } from '../isolation/mounts.ts';
 import type { NativeModelProxyControl, ModelProxyPolicy } from '../owners/model-proxy.ts';
+import { imageMatches } from '../isolation/image.ts';
+import { expectedImageBuild } from '../install/images.ts';
 import { proxyTopology } from './proxy-topology.ts';
 import { createProxyPlaceholder, finalizeProxyPolicy } from './proxy-policy.ts';
 import type { RuntimeConfig, IsolatedNativeTemplate } from './config.ts';
@@ -52,7 +54,10 @@ export function createNativeFleet(options: { installation: Installation; config:
       const credential = config.providerCredentials.find(c => c.ref === template.credentialRef);
       ensure(credential && Date.parse(credential.expiresAt) > Date.now() + 30_000 && readVaultSecret(installation.root, credential.ref).length > 0, 'native_auth', 'Current provider credential is unavailable');
       ensure((navigationCommits as readonly string[]).includes(template.hostCommit), 'native_version', 'Native host commit unsupported');
-      for (const image of [template.nativeImage,template.workerImage,template.proxy.image]) { const actual = JSON.parse(await docker.command(['image','inspect',image]))[0]; ensure(actual?.RepoDigests?.includes(image) && actual.Os === 'linux' && actual.Architecture === 'amd64', 'native_image', 'Pinned native/worker/proxy image is unavailable'); }
+      for (const [role,image] of [['native',template.nativeImage],['worker',template.workerImage],['proxy',template.proxy.image]] as const) {
+        const actual = JSON.parse(await docker.command(['image','inspect',image]))[0];
+        ensure(imageMatches(image,actual) && actual.Os === 'linux' && actual.Architecture === 'amd64' && (!image.startsWith('sha256:') || actual.Config?.Labels?.['sf.installation'] === installation.id && actual.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && actual.Config?.Labels?.['sf.role'] === role), 'native_image', 'Pinned native/worker/proxy image is unavailable or its owned build does not match');
+      }
       return [];
     } catch (error) { return [error instanceof Error ? error.message : 'Native provisioning unavailable']; }
   }
@@ -70,9 +75,9 @@ export function createNativeFleet(options: { installation: Installation; config:
     if (!n && create) { try { await docker.command(['network','create',...(internal ? ['--internal'] : []),'--driver','bridge','--label','sf.installation='+installation.id,name]); } catch {} n = await inspect('network',name); }
     ensure(n?.Name === name && n.Internal === internal && n.Driver === 'bridge' && n.Labels?.['sf.installation'] === installation.id, 'native_network', 'Exact owned runtime network unavailable'); return n;
   }
-  async function container(input: { name: string; image: string; owner: string; network: string; mounts: { source: string; target: string; writable: boolean }[]; env: string[]; cwd: string; command: string[]; create: boolean; alias?: string }) {
+  async function container(input: { name: string; image: string; role: 'native' | 'worker' | 'proxy'; owner: string; network: string; mounts: { source: string; target: string; writable: boolean }[]; env: string[]; cwd: string; command: string[]; create: boolean; alias?: string }) {
     const image = JSON.parse(await docker.command(['image','inspect',input.image]))[0];
-    ensure(image.RepoDigests?.includes(input.image) && !image.Config.Entrypoint?.length && canonical(image.Config.Env ?? []) === canonical(input.env), 'native_image', 'Pinned image must declare exact minimal environment and no implicit entrypoint');
+    ensure(imageMatches(input.image,image) && (!input.image.startsWith('sha256:') || image.Config?.Labels?.['sf.installation'] === installation.id && image.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && image.Config?.Labels?.['sf.role'] === input.role) && !image.Config.Entrypoint?.length && canonical(image.Config.Env ?? []) === canonical(input.env), 'native_image', 'Pinned image must declare exact minimal environment and no implicit entrypoint');
     const uid = process.getuid!(); const gid = process.getgid!(); ensure(uid > 0, 'native_user', 'Native runtimes require a nonroot installation');
     let c = await inspect('container',input.name);
     if (!c && input.create) {
@@ -105,8 +110,8 @@ export function createNativeFleet(options: { installation: Installation; config:
     const nativeState: NativeStateMount = { installationId: installation.id, runtimeOwnerId: ownerId, taskId: start.task.id, source: data, target: NATIVE_STATE_TARGET, markerPath };
     const internal = await network(ownerId+'-internal',true,create); const egress = await network(ownerId+'-model-egress',false,create);
     const targets = [{ source: start.workspacePath, target:'/workspaces/task' }]; const mounts = await resolveNativeMounts(start,targets);
-    const native = await container({ name:ownerId+'-native', image:t.nativeImage, owner:ownerId, network:internal.Name, mounts:[{source:data,target:NATIVE_STATE_TARGET,writable:true}], env:nativeEnv, cwd:'/workspaces/task', command:['node','-e','setInterval(()=>{},1000)'], create });
-    const workerContainer = await container({ name:ownerId+'-worker', image:t.workerImage, owner:ownerId, network:'none', mounts, env:workerEnv, cwd:'/workspaces/task', command:['node','-e','setInterval(()=>{},1000)'], create });
+    const native = await container({ name:ownerId+'-native', image:t.nativeImage, role:'native', owner:ownerId, network:internal.Name, mounts:[{source:data,target:NATIVE_STATE_TARGET,writable:true}], env:nativeEnv, cwd:'/workspaces/task', command:['node','-e','setInterval(()=>{},1000)'], create });
+    const workerContainer = await container({ name:ownerId+'-worker', image:t.workerImage, role:'worker', owner:ownerId, network:'none', mounts, env:workerEnv, cwd:'/workspaces/task', command:['node','-e','setInterval(()=>{},1000)'], create });
     // The immutable proxy image must contain the reviewed runtime source, not an arbitrary supplied digest.
     const proxySourceHash = reviewedProxyHash();
     ensure(t.proxy.entrypointSha256 === proxySourceHash, 'native_proxy', 'Proxy entrypoint does not match the reviewed installed source');
@@ -121,7 +126,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     ensure(policyIntent && policyIntent.kind === 'runtime.proxy-policy' && policyIntent.payload.path === policyPath, 'native_proxy', 'Missing owned proxy policy intent');
     const policyFile = statSync(policyPath);
     ensure(policyIntent.payload.dev === policyFile.dev && policyIntent.payload.ino === policyFile.ino, 'native_proxy', 'Proxy policy inode changed');
-    const proxy = await container({ name:ownerId+'-proxy', image:t.proxy.image, owner:ownerId, network:internal.Name, mounts:[{source:policyPath,target:'/etc/software-factory/proxy.json',writable:false}], env:workerEnv, cwd:'/', command:['node',t.proxy.entrypoint,'/etc/software-factory/proxy.json'], alias:'sf-model-proxy', create });
+    const proxy = await container({ name:ownerId+'-proxy', image:t.proxy.image, role:'proxy', owner:ownerId, network:internal.Name, mounts:[{source:policyPath,target:'/etc/software-factory/proxy.json',writable:false}], env:workerEnv, cwd:'/', command:['node',t.proxy.entrypoint,'/etc/software-factory/proxy.json'], alias:'sf-model-proxy', create });
     if (!proxy.NetworkSettings.Networks[egress.Name] && create) { try { await docker.command(['network','connect',egress.Name,proxy.Id]); } catch {} }
     const currentProxy = await inspect('container',proxy.Id);
     const currentNative = await inspect('container',native.Id);

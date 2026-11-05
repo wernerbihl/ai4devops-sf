@@ -1,3 +1,4 @@
+import { imageMatches } from './image.ts';
 import type { NativeStart } from '../contracts/domain.ts';
 import type { DockerPort } from '../kestra/deployment.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
@@ -26,7 +27,7 @@ export function createDockerNativeBoundary(options: { docker: DockerPort; contai
     const c = JSON.parse(await docker.command(['container','inspect',options.containerId]))[0];
     const image = JSON.parse(await docker.command(['image','inspect',options.image]))[0]; const h = c?.HostConfig;
     ensure(c?.Id === options.containerId && c.State?.Running && c.State.Pid > 0 && c.State.StartedAt
-      && image?.RepoDigests?.includes(options.image) && c.Image === image.Id && c.Config?.User && !/^(0|root)(:|$)/.test(c.Config.User)
+      && imageMatches(options.image,image) && c.Image === image.Id && c.Config?.User && !/^(0|root)(:|$)/.test(c.Config.User)
       && options.runtimeOwnerId && c.Config.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId
       && h?.ReadonlyRootfs && !h.Privileged && canonical(h.CapDrop) === canonical(['ALL']) && !h.CapAdd?.length
       && canonical(h.SecurityOpt) === canonical(['no-new-privileges']) && !h.PidMode && (!h.IpcMode || h.IpcMode === 'private')

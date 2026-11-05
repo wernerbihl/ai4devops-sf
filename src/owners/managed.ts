@@ -1,3 +1,4 @@
+import { imageMatches, isImagePin } from '../isolation/image.ts';
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync, readFileSync, unlinkSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -51,7 +52,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     readonly controlIntentPath: string;
     readonly pauseReceiptPath: string;
 } {
-    ensure(/^[a-f0-9]{64}$/.test(options.containerId) && /^[\w./:-]+@sha256:[a-f0-9]{64}$/.test(options.image) && /^[a-f0-9]{64}$/.test(options.entrypointSha256), 'owner_managed', 'Pinned managed container, image and entrypoint digest are required');
+    ensure(/^[a-f0-9]{64}$/.test(options.containerId) && isImagePin(options.image) && /^[a-f0-9]{64}$/.test(options.entrypointSha256), 'owner_managed', 'Pinned managed container, image and entrypoint digest are required');
     ensure(options.entrypoint.startsWith('/') && options.entrypoint.endsWith('/out/vs/platform/agentHost/node/agentHostServerMain.js') && options.tokenFile.startsWith('/') && options.userDataDir.startsWith('/') && Number.isInteger(options.port) && options.port > 1024 && options.port < 65536, 'owner_managed', 'Unsupported native standalone launch configuration');
     ensure(options.nativeState.runtimeOwnerId === options.runtimeOwnerId && options.userDataDir === options.nativeState.target + '/user-data' && options.tokenFile === options.nativeState.target + '/connection-token', 'owner_managed', 'Native userdata/token must use the fixed persistent owned state mount');
     const docker = options.docker ?? new ProcessDocker(options.dockerExecutable);
@@ -69,7 +70,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     };
     const clearControlIntent = () => { unlinkSync(controlIntentPath); syncControlDirectory(); };
     const assertSettled = () => ensure(!existsSync(controlIntentPath), 'owner_control_unknown', 'Native control start is pending or outcome unknown; retain exclusion');
-    async function processes() { const state = await verifyNativeStateMount(options.nativeState, options.nativeState.taskId, options.nativeStateOwnership); const c = JSON.parse(await docker.command(['container', 'inspect', options.containerId]))[0]; const image = JSON.parse(await docker.command(['image', 'inspect', options.image]))[0]; ensure(c?.Id === options.containerId && c.State?.Running && !c.State.Paused && c.Config?.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId && c.Config.User && !/^(0|root)(:|$)/.test(c.Config.User) && image?.Id === c.Image && image.RepoDigests?.includes(options.image), 'owner_managed', 'Native runtime ownership/image changed'); ensure(c.Mounts?.some((m: any) => m.Type === 'bind' && m.Source === state.source && m.Destination === state.target && m.RW === true), 'owner_managed', 'Actual persistent native state mount is missing'); const value = JSON.parse(await docker.command(['exec', options.containerId, 'node', '-e', inspectProgram, JSON.stringify({ entrypoint: options.entrypoint, userDataDir: options.userDataDir, tokenFile: options.tokenFile, port: options.port })])); ensure(value.entrypointHash === options.entrypointSha256 && Array.isArray(value.processes) && value.processes.length <= 1, 'owner_managed', 'Native entrypoint digest or process identity mismatch'); return value.processes as NativeProcess[]; }
+    async function processes() { const state = await verifyNativeStateMount(options.nativeState, options.nativeState.taskId, options.nativeStateOwnership); const c = JSON.parse(await docker.command(['container', 'inspect', options.containerId]))[0]; const image = JSON.parse(await docker.command(['image', 'inspect', options.image]))[0]; ensure(c?.Id === options.containerId && c.State?.Running && !c.State.Paused && c.Config?.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId && c.Config.User && !/^(0|root)(:|$)/.test(c.Config.User) && image?.Id === c.Image && imageMatches(options.image,image), 'owner_managed', 'Native runtime ownership/image changed'); ensure(c.Mounts?.some((m: any) => m.Type === 'bind' && m.Source === state.source && m.Destination === state.target && m.RW === true), 'owner_managed', 'Actual persistent native state mount is missing'); const value = JSON.parse(await docker.command(['exec', options.containerId, 'node', '-e', inspectProgram, JSON.stringify({ entrypoint: options.entrypoint, userDataDir: options.userDataDir, tokenFile: options.tokenFile, port: options.port })])); ensure(value.entrypointHash === options.entrypointSha256 && Array.isArray(value.processes) && value.processes.length <= 1, 'owner_managed', 'Native entrypoint digest or process identity mismatch'); return value.processes as NativeProcess[]; }
     async function start() {
         const before = await processes();
         if (before.length)
@@ -88,7 +89,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         await verifyNativeStateMount(options.nativeState, options.nativeState.taskId, options.nativeStateOwnership);
         const c = JSON.parse(await docker.command(['container', 'inspect', options.containerId]))[0];
         const image = JSON.parse(await docker.command(['image', 'inspect', options.image]))[0];
-        ensure(c?.Id === options.containerId && c.Config?.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId && image?.Id === c.Image && image.RepoDigests?.includes(options.image), 'owner_managed', 'Stopped runtime ownership/image changed');
+        ensure(c?.Id === options.containerId && c.Config?.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId && image?.Id === c.Image && imageMatches(options.image,image), 'owner_managed', 'Stopped runtime ownership/image changed');
         ensure(c.HostConfig?.RestartPolicy?.Name === 'no' && c.HostConfig.AutoRemove === false, 'owner_quiescence', 'Managed runtime must disable automatic restart and removal');
         return c;
     }

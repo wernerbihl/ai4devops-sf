@@ -1,3 +1,4 @@
+import { isImagePin } from '../isolation/image.ts';
 import { isIP } from 'node:net';
 import type { NativeStart } from '../contracts/domain.ts';
 import { ensure, fingerprint } from '../storage/database.ts';
@@ -32,6 +33,6 @@ export async function inspectModelProxy(control: NativeModelProxyControl | undef
     const p = control.policy;
     ensure(p.schemaVersion === 2 && isIP(p.nativeAddress) === 4 && isIP(p.listenAddress) === 4 && p.nativeAddress !== p.listenAddress && p.kind === 'copilot-model-connect' && p.listenPort === 3128 && p.nativeRuntimeId === nativeRuntimeId && p.internalNetworkId && p.allowedAuthorities.length > 0 && new Set(p.allowedAuthorities).size === p.allowedAuthorities.length && p.allowedAuthorities.every(a => /^[a-z0-9][a-z0-9.-]+:443$/.test(a) && !isIP(a.slice(0, -4)) && a.slice(0, -4).includes('.') && !a.endsWith('.local:443')), 'owner_model_proxy', 'Exact reviewed public provider host:443 allowlist and owned native network required');
     const actual = await control.inspect(start);
-    ensure(actual.runtimeId && actual.runtimeId !== nativeRuntimeId && actual.processIdentity && /@sha256:[a-f0-9]{64}$/.test(actual.image) && actual.policySha256 === fingerprint(p) && actual.nativeRuntimeId === nativeRuntimeId && actual.internalNetworkId === p.internalNetworkId && actual.egressNetworkId && actual.egressNetworkId !== actual.internalNetworkId, 'owner_model_proxy', 'Actual model proxy policy/image/process/topology does not match');
+    ensure(actual.runtimeId && actual.runtimeId !== nativeRuntimeId && actual.processIdentity && isImagePin(actual.image) && actual.policySha256 === fingerprint(p) && actual.nativeRuntimeId === nativeRuntimeId && actual.internalNetworkId === p.internalNetworkId && actual.egressNetworkId && actual.egressNetworkId !== actual.internalNetworkId, 'owner_model_proxy', 'Actual model proxy policy/image/process/topology does not match');
     return actual;
 }

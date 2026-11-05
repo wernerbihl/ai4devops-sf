@@ -1,5 +1,7 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { isImagePin } from '../isolation/image.ts';
+import { expectedImageBuild, type OwnedImageBuild } from '../install/images.ts';
 import type { RepositoryAccess } from '../github/capabilities.ts';
 import { validateRepositories } from '../github/capabilities.ts';
 import type { SelectedIdentity } from '../github/store.ts';
@@ -29,7 +31,7 @@ export function readPrivateFile(path: string): Buffer {
   return readFileSync(path);
 }
 function keys(value: object, allowed: string[]) { ensure(Object.keys(value).every(k => allowed.includes(k)), 'runtime_config', 'Unknown runtime config field; secrets belong in the vault'); }
-const pin = (value: unknown) => typeof value === 'string' && /^[\w./:-]+@sha256:[a-f0-9]{64}$/.test(value);
+const pin = isImagePin;
 export function loadRuntimeConfig(root: string, installationId: string): RuntimeConfig {
   const value = JSON.parse(readPrivateFile(join(root, 'runtime.json')).toString()) as RuntimeConfig;
   keys(value, ['schemaVersion','installationId','allowedOrigins','repositories','selectedIdentity','providerCredentials','native','apiPort']);
@@ -52,6 +54,20 @@ export function loadRuntimeConfig(root: string, installationId: string): Runtime
       && native.proxy.entrypoint.startsWith('/opt/') && /^[a-f0-9]{64}$/.test(native.proxy.entrypointSha256)
       && value.providerCredentials.some(ref => ref.ref === native.credentialRef)
       && native.proxy.allowedAuthorities.length > 0 && native.proxy.allowedAuthorities.every(host => /^[a-z0-9][a-z0-9.-]+:443$/.test(host)), 'runtime_config', 'Pinned isolated native/worker/proxy template required');
+  }
+  for (const native of value.native) {
+    const images = [native.nativeImage, native.workerImage, native.proxy.image];
+    if (images.some(image => image.startsWith('sha256:'))) {
+      ensure(images.every(image => /^sha256:[a-f0-9]{64}$/.test(image)), 'owned_image', 'All locally built images require one owned build');
+      const manifest = JSON.parse(readPrivateFile(join(root,'owned-images.json')).toString()) as OwnedImageBuild;
+      const expected = expectedImageBuild();
+      keys(manifest, ['schemaVersion','installationId','sourceFingerprint','baseImage','serverArchiveSha256','hostCommit','proxySha256','workerProgramSha256','builderSha256','images','nativeEntrypoint','nativeEntrypointSha256']);
+      ensure(manifest.images && Object.keys(manifest.images).length === 3 && Object.keys(manifest.images).every(k => ['native','worker','proxy'].includes(k)), 'owned_image', 'Invalid owned image roles');
+      ensure(manifest && manifest.schemaVersion === 1 && manifest.installationId === installationId && Object.keys(expected).every(k => manifest[k as keyof typeof expected] === expected[k as keyof typeof expected])
+        && manifest.images?.native === native.nativeImage && manifest.images?.worker === native.workerImage && manifest.images?.proxy === native.proxy.image
+        && manifest.nativeEntrypoint === native.entrypoint && manifest.nativeEntrypointSha256 === native.entrypointSha256 && native.hostCommit === expected.hostCommit && native.proxy.entrypointSha256 === expected.proxySha256 && native.proxy.entrypoint === '/opt/software-factory/connect.cjs',
+        'owned_image', 'Protected owned image manifest does not match the installed source or native template');
+    }
   }
   ensure(value.native.length <= 1 && (value.apiPort === undefined || Number.isInteger(value.apiPort) && value.apiPort >= 0 && value.apiPort <= 65535), 'runtime_config', 'Unsupported runtime configuration');
   return value;

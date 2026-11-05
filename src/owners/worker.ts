@@ -1,3 +1,4 @@
+import { imageMatches } from '../isolation/image.ts';
 import { hasCapabilityGrants } from '../scheduling/eligibility.ts';
 import type { ToolDefinition } from '@microsoft/agent-host-protocol';
 import type { NativeIdentity, NativeStart } from '../contracts/domain.ts';
@@ -10,15 +11,8 @@ import { resolveNativeMounts, type NativeMountTarget } from '../isolation/mounts
 
 export type WorkerOperation = { kind: 'read'; path: string } | { kind: 'write'; path: string; content: string } | { kind: 'terminal'; command: string };
 /** Runs only inside the isolated worker. The controller chooses roots/cwd; model input chooses a finite operation. */
-export const workerProgram = String.raw`
-const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');
-let raw='';process.stdin.on('data',b=>{raw+=b;if(Buffer.byteLength(raw)>262144)process.exit(1)});
-process.stdin.on('end',()=>{try{const p=JSON.parse(raw),o=p.operation;const within=(r,f)=>f===r||f.startsWith(r+'/');
-const target=(name,write)=>{if(typeof name!=='string'||!path.isAbsolute(name))throw Error();const full=path.resolve(name);let real;try{real=fs.realpathSync(full)}catch(e){if(e.code!=='ENOENT'||!write)throw e;real=path.join(fs.realpathSync(path.dirname(full)),path.basename(full))}if(!p.roots.some(r=>within(r.target,real)&&(!write||r.writable)))throw Error();return real};
-let result;if(o.kind==='read'){const f=target(o.path,false);if(fs.statSync(f).size>131072)throw Error();result={content:fs.readFileSync(f,'utf8')}}
-else if(o.kind==='write'){if(typeof o.content!=='string'||Buffer.byteLength(o.content)>131072)throw Error();fs.writeFileSync(target(o.path,true),o.content,{flag:'w'});result={written:true}}
-else if(o.kind==='terminal'){if(typeof o.command!=='string'||o.command.length>32768)throw Error();const r=cp.spawnSync('/bin/sh',['-c',o.command],{cwd:p.cwd,env:{PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/tmp',TMPDIR:'/tmp',LANG:'C.UTF-8'},encoding:'utf8',timeout:60000,maxBuffer:131072});if(r.error)throw Error();result={exitCode:r.status,stdout:r.stdout,stderr:r.stderr}}
-else throw Error();process.stdout.write(JSON.stringify(result))}catch{process.exitCode=1}});`;
+import { workerProgram } from './worker-program.ts';
+export { workerProgram } from './worker-program.ts';
 
 export const isolatedToolDefinitions: ToolDefinition[] = [
   { name: 'sf_read_file', description: 'Read a UTF-8 file from the approved task workspace, at most 128 KiB.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
@@ -45,7 +39,7 @@ export class IsolatedToolWorker {
   private async container() {
     const c = JSON.parse(await this.docker.command(['container', 'inspect', this.config.containerId]))[0];
     const image = JSON.parse(await this.docker.command(['image', 'inspect', this.config.image]))[0]; const h = c?.HostConfig;
-    ensure(c?.Id === this.config.containerId && c.Id !== this.config.nativeContainerId && c.Image === image?.Id && image.RepoDigests?.includes(this.config.image)
+    ensure(c?.Id === this.config.containerId && c.Id !== this.config.nativeContainerId && c.Image === image?.Id && imageMatches(this.config.image,image)
       && c.Config?.Labels?.['sf.runtime-owner'] === this.config.runtimeOwnerId && c.Config.User && !/^(root|0)(:|$)/.test(c.Config.User)
       && h?.NetworkMode === 'none' && h.ReadonlyRootfs && !h.Privileged && canonical(h.CapDrop) === canonical(['ALL']) && !h.CapAdd?.length
       && canonical(h.SecurityOpt) === canonical(['no-new-privileges']) && !h.PidMode && (!h.IpcMode || h.IpcMode === 'private')

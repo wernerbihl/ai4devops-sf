@@ -79,6 +79,8 @@ const CapabilityReport = object({
   ready: T.Boolean(), reasons: T.Array(text()), supportedProviders: T.Array(ProviderId, { uniqueItems: true }),
   verifiedProfileIds: strings(), version: text(),
 });
+const ProviderReadiness = object({providerId:ProviderId,ready:T.Boolean(),reasons:T.Array(text()),verifiedProfileIds:strings()});
+const OwnerReadiness = object({ ownerId: text(), ...CapabilityReport.properties,providers:T.Array(ProviderReadiness) });
 const TaskResult = object({
   attemptId: text(), summary: text(), evidence: strings(), createdTaskIds: strings(),
   outcome: choice('result', 'changes', 'needs_input'), headSha: optionalText(),
@@ -242,7 +244,7 @@ const Acknowledgement = object({ accepted: T.Boolean() });
 export const schemas = {
   ProviderId, FinishPolicy, TaskStatus, TaskSource, RequiredCapabilities, ExecutionDefaults, FactoryConfig,
   TaskSpec, CreateTaskRequest, TaskTemplate, RecipeMetadata, RecipeContract, RecipeRevision,
-  NativeIdentity, Usage, NativeInput, NativeSnapshot, NativeStart, CapabilityReport, TaskResult, CloseoutResult, ApiError,
+  NativeIdentity, Usage, NativeInput, NativeSnapshot, NativeStart, CapabilityReport, ProviderReadiness, OwnerReadiness, TaskResult, CloseoutResult, ApiError,
   TaskRecord, WorkflowIdentity, WorkflowStart, WorkflowSnapshot, Attempt, AttentionRequest, ActorScope,
   FindingInput, Grant, ProbeOptions, ProbeEvidence, VerifiedProbeEvidence, ProfileSpec, ProfileEvidence, OwnerEvent, OwnerRpc, OwnerRpcResponse,
   Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse, WorkerTransport,

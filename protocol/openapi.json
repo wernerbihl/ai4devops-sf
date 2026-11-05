@@ -6831,6 +6831,99 @@
           "version"
         ]
       },
+      "ProviderReadiness": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "$ref": "#/components/schemas/ProviderId"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "verifiedProfileIds": {
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "providerId",
+          "ready",
+          "reasons",
+          "verifiedProfileIds"
+        ]
+      },
+      "OwnerReadiness": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "supportedProviders": {
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderId"
+            }
+          },
+          "verifiedProfileIds": {
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "version": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderReadiness"
+            }
+          }
+        },
+        "required": [
+          "ownerId",
+          "ready",
+          "reasons",
+          "supportedProviders",
+          "verifiedProfileIds",
+          "version",
+          "providers"
+        ]
+      },
       "TaskResult": {
         "additionalProperties": false,
         "type": "object",

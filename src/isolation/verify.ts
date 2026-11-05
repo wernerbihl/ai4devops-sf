@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
+import { verifyNativeStateMount } from './native-state.ts';
+import { resolveNativeMounts, pathContains } from './mounts.ts';
 import type { NativeStart, ProfileEvidence } from '../contracts/domain.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
@@ -24,13 +26,13 @@ export function createProfileVerifier(options: { profiles?: readonly RuntimeProf
         ensure(canonical([...value[key]].sort()) === canonical([...required[key]].sort()), 'profile_authority', `Effective ${key} exceed or omit approved authority`);
       ensure(profile.protectedPaths.length >= 3 && profile.protectedPaths.every(p => isAbsolute(p) && resolve(p) === p) && canonical([...value.protectedPaths].sort()) === canonical([...profile.protectedPaths].sort()), 'profile_protection', 'Host credentials, factory state and Docker access require explicit protection');
       const protectedTargets = await resolveProtectedPaths(profile.protectedPaths);
-      const expected = [{ source: start.workspacePath, target: start.workspacePath, writable: true }, ...required.paths.map(p => ({ source: p.root, target: p.root, writable: p.mode === 'write' }))];
+      const expected = await resolveNativeMounts(start,profile.mountTargets);
+      if(profile.nativeState){ensure(profile.nativeStateOwnership,'profile_state','Trusted installation native-state root required');const state=await verifyNativeStateMount(profile.nativeState,start.task.id,profile.nativeStateOwnership);ensure(protectedTargets.some(p=>pathContains(p,profile.nativeState!.markerPath)),'profile_state','Native state ownership marker must be protected');for(const mount of expected)ensure(!pathContains(mount.source,state.source)&&!pathContains(state.source,mount.source)&&!pathContains(mount.target,state.target)&&!pathContains(state.target,mount.target)&&!pathContains(mount.source,profile.nativeState.markerPath),'profile_state','Native state/ownership marker overlaps a recipe mount');expected.push(state);}
       ensure(canonical(value.mounts) === canonical(expected), 'profile_mount', 'Effective mounts differ from approved paths');
       for (const mount of value.mounts) {
         ensure(isAbsolute(mount.source) && resolve(mount.source) === mount.source && await realpath(mount.source) === mount.source, 'profile_path', 'Mount source escapes through an alias');
         for (const protectedPath of protectedTargets) {
-          const rel = relative(mount.source, protectedPath);
-          ensure(rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel), 'profile_path', 'A mount exposes protected host state');
+          ensure(!pathContains(mount.source, protectedPath) && !pathContains(protectedPath, mount.source) && !pathContains(mount.target, protectedPath) && !pathContains(protectedPath, mount.target), 'profile_path', 'A mount intersects protected host state');
         }
       }
       return protectedTargets;

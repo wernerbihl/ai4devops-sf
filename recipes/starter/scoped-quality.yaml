@@ -27,13 +27,13 @@ variables:
         - The report cites concrete evidence
         - Recommendations stay within the requested scope
       skills: []
-      tools: []
+      tools: [native-files, native-terminal]
       context: "{{ inputs.context }}"
     required:
       paths:
         - root: .
           mode: read
-      tools: []
+      tools: [native-files, native-terminal]
       networkDestinations: []
       credentialRefs: []
       allowedFinishPolicies:
@@ -46,7 +46,9 @@ variables:
     defaultProviderId: copilot
     defaultFinishPolicy: result
     skillVersions: {}
-    toolVersions: {}
+    toolVersions:
+      native-files: "1"
+      native-terminal: "1"
 inputs:
   - id: sf_capability
     type: SECRET

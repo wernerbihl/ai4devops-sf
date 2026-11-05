@@ -17,6 +17,13 @@ export interface LifecycleDeps {
   owner(identity: NativeIdentity): NativeOwner;
   readiness(task: TaskSpec, attempt: Attempt): Promise<PreparedStart | UnavailableStart>;
   workspace(attempt: Attempt): Promise<boolean>;
+  /** Trusted managed-owner stopped receipts only. Preflight never starts a process or claims live history.
+   * prepare runs under the acquired writer fence and active effect accounting; it must restore only the
+   * original runtime/state, authenticate, rebind tools, verify containment and reconcile original history. */
+  managedContinuation?: {
+    preflight(attempt: Attempt): Promise<PreparedStart | UnavailableStart | undefined>;
+    prepare(attempt: Attempt, key: string): Promise<void>;
+  };
   workflow: {
     /** Reconcile this exact execution; never create an execution during recovery. */
     snapshot(attempt: Attempt): Promise<'present' | 'absent' | 'unknown'>;
@@ -96,11 +103,12 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       && state.recipes.some(recipe => recipe.id === task.spec.recipeId && recipe.active)
       && state.recipeReadiness.some(r => r.recipeId === task.spec.recipeId && r.recipeRevision === task.spec.recipeRevision && r.ready)
       && state.tags.some(tag => tag.id === task.spec.tagId && !tag.archivedAt), 'capability_blocked', 'Revalidate the pinned recipe and explicit capability grants');
-    const prepared = await deps.readiness(task.spec, attempt);
+    const stopped = await deps.managedContinuation?.preflight(attempt);
+    const prepared = stopped ?? await deps.readiness(task.spec, attempt);
     ensure(prepared.ready, prepared.ready ? 'unavailable' : prepared.code, prepared.ready ? 'Unavailable' : prepared.recovery);
     ensure(prepared.baseSha === attempt.baseSha && prepared.workspacePath === attempt.workspacePath && prepared.profileId === attempt.profileId
       && await deps.workspace(attempt), 'workspace_changed', 'Revalidate the original isolated workspace; do not allocate a replacement');
-    ensure(await reconcile(attempt), 'identity_missing', 'Reconnect original native and workflow history');
+    ensure(stopped ? !!attempt.native && await deps.workflow.snapshot(attempt) === 'present' : await reconcile(attempt), 'identity_missing', 'Reconnect original native and workflow history');
     return state.token;
   }
   async function runAction(action: OutboxAction): Promise<Attempt | null> {
@@ -116,9 +124,10 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     if (await enforceBudget(r.attempt.id)) throw new StoreError('active_time_limit', 'Attempt active execution budget is exhausted');
     store.assertLifecycleAuthority(r.attempt.id, binding.fence);
     // Snapshot before every replay; actions retain their original external idempotency key.
-    ensure(await reconcile(r.attempt), 'identity_missing', 'Reconcile snapshots before replaying native actions');
+    const stopped = await deps.managedContinuation?.preflight(r.attempt);
+    if (!stopped) ensure(await reconcile(r.attempt), 'identity_missing', 'Reconcile snapshots before replaying native actions');
     const token = store.assertLifecycleAuthority(r.attempt.id, binding.fence);
-    const prepared = await deps.readiness(store.getTask(r.attempt.taskId)!.spec, r.attempt);
+    const prepared = stopped ?? await deps.readiness(store.getTask(r.attempt.taskId)!.spec, r.attempt);
     ensure(prepared.ready && prepared.workspacePath === r.attempt.workspacePath && prepared.baseSha === r.attempt.baseSha && prepared.profileId === r.attempt.profileId && await deps.workspace(r.attempt), 'unavailable', 'Revalidate original workspace before sending');
     ensure(store.assertLifecycleAuthority(r.attempt.id, binding.fence) === token, 'admission_changed', 'Policy changed before native send');
     // External preflight can itself consume the remaining active budget.
@@ -128,6 +137,17 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     const effectToken = store.beginLifecycleAction(r.attempt.id, binding.fence, epoch, action.id);
     let accepted = false;
     try {
+      if (stopped) {
+        await deps.managedContinuation!.prepare(r.attempt, action.key);
+        assertEffect(r.attempt.id, binding.fence, effectToken);
+        ensure(store.assertLifecycleAuthority(r.attempt.id, binding.fence) === token, 'admission_changed', 'Policy changed during managed restart');
+        ensure(await reconcile(r.attempt), 'identity_missing', 'Original native history missing after managed restart');
+        const live = await deps.readiness(store.getTask(r.attempt.taskId)!.spec, r.attempt);
+        ensure(live.ready && live.workspacePath === r.attempt.workspacePath && live.baseSha === r.attempt.baseSha && live.profileId === r.attempt.profileId && await deps.workspace(r.attempt), 'unavailable', 'Fresh managed runtime proof required after restart');
+        assertEffect(r.attempt.id, binding.fence, effectToken);
+        ensure(store.assertLifecycleAuthority(r.attempt.id, binding.fence) === token, 'admission_changed', 'Policy changed after managed restart verification');
+        if (await enforceBudget(r.attempt.id)) throw new StoreError('active_time_limit', 'Attempt active execution budget is exhausted');
+      }
       await deps.workflow.resume(r.attempt, action.key);
       assertEffect(r.attempt.id, binding.fence, effectToken);
       ensure(store.assertLifecycleAuthority(r.attempt.id, binding.fence) === token, 'admission_changed', 'Policy changed during workflow resume');

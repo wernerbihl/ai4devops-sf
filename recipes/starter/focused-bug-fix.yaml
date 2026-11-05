@@ -27,13 +27,13 @@ variables:
         - A regression check demonstrates the fix
         - Existing behavior outside the bug remains intact
       skills: []
-      tools: []
+      tools: [native-files, native-terminal]
       context: "{{ inputs.context }}"
     required:
       paths:
         - root: .
           mode: write
-      tools: []
+      tools: [native-files, native-terminal]
       networkDestinations: []
       credentialRefs: []
       allowedFinishPolicies:
@@ -46,7 +46,9 @@ variables:
     defaultProviderId: copilot
     defaultFinishPolicy: pr
     skillVersions: {}
-    toolVersions: {}
+    toolVersions:
+      native-files: "1"
+      native-terminal: "1"
 inputs:
   - id: sf_capability
     type: SECRET

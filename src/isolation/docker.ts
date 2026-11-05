@@ -7,9 +7,10 @@ import { denialChecks } from './profiles.ts';
 export type NativeToolSettings = Pick<EffectiveBoundary,'runtimeId'|'processIdentity'|'ownerId'|'providerId'|'tools'|'credentialRefs'|'networkDestinations'|'unapprovedToolsDenied'|'alternateEgressDenied'|'metadataProtected'> & { attemptId: string; fence: number };
 export interface NativeToolBoundary {
   /** Trusted E4/E6 control only, after C4 acquires the current reservation/fence and before readiness.
-   * Idempotently rotate the actual native tool gate/capability on the SAME quiescent runtime.
-   * Must validate current store authority, preserve process/session identity, and observe applied policy.
-   * No native send, new process/session, or engine Pause resume. Never exposed as a worker route.
+   * Idempotently rotate actual native tool authority on the current quiescent managed runtime.
+   * Must validate current store authority and preserve original native session/workspace and owned persistent state.
+   * A controlled stop/restart may change the PID; all process-bound evidence must then be freshly verified.
+   * No native send, process launch, new/replacement session, or engine Pause resume in this method. Never exposed as a worker route.
    * E3 does not call this from inspection: an inspect implementation must never echo start as proof. */
   prepareBinding(start: NativeStart, key: string): Promise<void>;
   /** E4 must inspect the actual paired owner/client tools; declarations and Docker flags alone are insufficient. */

@@ -1,3 +1,5 @@
+import type { NativeMountTarget } from './mounts.ts';
+import type { NativeStateMount, NativeStateOwnership } from './native-state.ts';
 import type { NativeStart, ProviderId } from '../contracts/domain.ts';
 export const denialChecks = ['docker-socket','factory-store','host-credentials','metadata-write','alternate-egress','external-tool'] as const;
 export interface EffectiveBoundary {
@@ -15,6 +17,7 @@ export interface NativeBoundary {
 }
 export interface RuntimeProfile {
   id: string; ownerId: string; providerId: ProviderId; image: string; networks: string[]; protectedPaths: string[]; boundary: NativeBoundary;
+  mountTargets?: readonly NativeMountTarget[]; nativeState?: NativeStateMount; nativeStateOwnership?: NativeStateOwnership;
 }
 /** No owner/provider is globally ready: E4 registers the actual owned native runtime and inspection adapter. */
 export const builtinProfiles: readonly RuntimeProfile[] = [];

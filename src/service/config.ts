@@ -33,8 +33,8 @@ export function readPrivateFile(path: string): Buffer {
 }
 function keys(value: object, allowed: string[]) { ensure(Object.keys(value).every(k => allowed.includes(k)), 'runtime_config', 'Unknown runtime config field; secrets belong in the vault'); }
 const pin = isImagePin;
-export function loadRuntimeConfig(root: string, installationId: string): RuntimeConfig {
-  const value = JSON.parse(readPrivateFile(join(root, 'runtime.json')).toString()) as RuntimeConfig;
+export function loadRuntimeConfig(root: string, installationId: string, preloaded?:{config:Buffer;manifest?:Buffer}): RuntimeConfig {
+  const value = JSON.parse((preloaded?.config??readPrivateFile(join(root, 'runtime.json'))).toString()) as RuntimeConfig;
   keys(value, ['schemaVersion','installationId','allowedOrigins','repositories','selectedIdentity','providerCredentials','native','apiPort']);
   ensure(value.schemaVersion === 1 && value.installationId === installationId && Array.isArray(value.allowedOrigins) && value.allowedOrigins.length > 0
     && value.allowedOrigins.every(origin => { try { const url = new URL(origin); return url.origin === origin && ['http:','https:'].includes(url.protocol); } catch { return false; } }), 'runtime_config', 'Exact installation and UI origins required');
@@ -60,7 +60,7 @@ export function loadRuntimeConfig(root: string, installationId: string): Runtime
     const images = [native.nativeImage, native.workerImage, native.proxy.image];
     if (images.some(image => image.startsWith('sha256:'))) {
       ensure(images.every(image => /^sha256:[a-f0-9]{64}$/.test(image)), 'owned_image', 'All locally built images require one owned build');
-      const manifest = JSON.parse(readPrivateFile(join(root,'owned-images.json')).toString()) as OwnedImageBuild;
+      const manifest = JSON.parse((preloaded?.manifest??readPrivateFile(join(root,'owned-images.json'))).toString()) as OwnedImageBuild;
       const expected = expectedImageBuild();
       keys(manifest, ['schemaVersion','installationId','sourceFingerprint','baseImage','serverArchiveSha256','hostCommit','proxySha256','workerProgramSha256','builderSha256','images','nativeEntrypoint','nativeEntrypointSha256']);
       ensure(manifest.images && Object.keys(manifest.images).length === 3 && Object.keys(manifest.images).every(k => ['native','worker','proxy'].includes(k)), 'owned_image', 'Invalid owned image roles');
@@ -77,4 +77,21 @@ export function readVaultSecret(root: string, ref: string): Buffer {
   ensure(/^[a-zA-Z0-9_-]{1,100}$/.test(ref), 'vault_reference', 'Invalid vault reference');
   const path=join(root,'vault',ref);if(process.platform==='win32'){const value=readWindowsSecret(path);ensure(value.length<=1_048_576,'vault_size','Vault item exceeds the size limit');return value}
   return readPrivateFile(path);
+}
+
+/** Asynchronous protected reads for live controller paths. */
+export async function readPrivateFileAsync(path:string):Promise<Buffer>{
+  if(process.platform!=='win32')return readPrivateFile(path);
+  const {readWindowsPrivateFileAsync}=await import('../platform/windows-private.ts');const value=await readWindowsPrivateFileAsync(path);ensure(value.length<=1_048_576,'private_size','Private file exceeds the size limit');return value;
+}
+export async function readVaultSecretAsync(root:string,ref:string):Promise<Buffer>{
+  if(process.platform!=='win32')return readVaultSecret(root,ref);
+  ensure(/^[a-zA-Z0-9_-]{1,100}$/.test(ref),'vault_reference','Invalid vault reference');
+  const {readWindowsSecretAsync}=await import('../platform/windows-private.ts');const value=await readWindowsSecretAsync(join(root,'vault',ref));ensure(value.length<=1_048_576,'vault_size','Vault item exceeds the size limit');return value;
+}
+
+export async function loadRuntimeConfigAsync(root:string,id:string):Promise<RuntimeConfig>{
+ if(process.platform!=='win32')return loadRuntimeConfig(root,id);
+ const config=await readPrivateFileAsync(join(root,'runtime.json'));const parsed=JSON.parse(config.toString());const needs=Array.isArray(parsed.native)&&parsed.native.some((n:any)=>[n?.nativeImage,n?.workerImage,n?.proxy?.image].some((v:any)=>typeof v==='string'&&v.startsWith('sha256:')));
+ const manifest=needs?await readPrivateFileAsync(join(root,'owned-images.json')):undefined;return loadRuntimeConfig(root,id,{config,...(manifest?{manifest}:{})});
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Installation } from '../kestra/deployment.ts';
 import { ensureKestra, ProcessDocker } from '../kestra/deployment.ts';
+import { prepareExecutionJournal } from '../kestra/executions.ts';
 import { KestraClient } from '../kestra/client.ts';
 import { createKestraAuthority } from '../broker/authority.ts';
 import { createAttemptBroker } from '../broker/operations.ts';
@@ -28,9 +29,9 @@ import { startApi } from './api.ts';
 import { createCoordinator } from './coordinator.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
 import { createDispatchApi } from './dispatch-api.ts';
-import { acquireInstallationSingleton } from './singleton.ts';
+import { acquireInstallationSingletonAsync } from './singleton.ts';
 import { startPrivateControl } from './control.ts';
-import { loadRuntimeConfig, readVaultSecret } from './config.ts';
+import { loadRuntimeConfigAsync, readVaultSecretAsync } from './config.ts';
 import { createNativeFleet, isolatedProfileId } from './native.ts';
 import type { NativeFleet } from './native.ts';
 import { reconcileInstallation } from './reconcile.ts';
@@ -41,11 +42,11 @@ import { hasCapabilityGrants } from '../scheduling/eligibility.ts';
 export type { Installation } from '../kestra/deployment.ts';
 const promptFor=(start: import('../contracts/domain.ts').NativeStart)=>({text:`Work on this admitted task in the isolated tool workspace /workspaces/task. The native host CWD is pristine; use only sf_read_file, sf_write_file and sf_terminal for repository work. Submit an explicit TaskResult through sf_factory_operation result.submit with attemptId ${start.attemptId}; never treat turn idle as task completion.\n${JSON.stringify({title:start.task.title,goal:start.task.goal,description:start.task.description,acceptanceCriteria:start.task.acceptanceCriteria,context:start.task.context})}`});
 export async function startRuntime(installation: Installation) {
-  const singleton=acquireInstallationSingleton(installation.root);
+  const singleton=await acquireInstallationSingletonAsync(installation.root);
   const cleanup:(()=>Promise<void>|void)[]=[()=>singleton.close()];
   try {
-    const config=loadRuntimeConfig(installation.root,installation.id);
-    const signingKey=readVaultSecret(installation.root,'broker-signing');const controlKey=readVaultSecret(installation.root,'private-control');
+    const config=await loadRuntimeConfigAsync(installation.root,installation.id);
+    const signingKey=await readVaultSecretAsync(installation.root,'broker-signing');const controlKey=await readVaultSecretAsync(installation.root,'private-control');
     ensure(signingKey.length>=32&&controlKey.length>=32,'runtime_secrets','Persistent protected broker/control keys required');
     const store=openStore(join(installation.root,'factory.sqlite'),{clock:systemClock,materialize:recipeMaterializer});cleanup.push(()=>store.close());
     if(process.platform!=='win32')chmodSync(join(installation.root,'factory.sqlite'),0o600);
@@ -176,7 +177,7 @@ export async function startRuntime(installation: Installation) {
     // No dispatch/continuation admission is enabled until that initial recovery completes.
     coordinator.start({admission:false});
     await coordinator.check();
-    try {const handle=await ensureKestra(installation);const client=new KestraClient({...handle,authority:createKestraAuthority({broker,store})});engine=client;cleanup.push(()=>client.close());const bridge=await startPrivateBrokerBridge({installation,kestra:handle,broker:await startWorkerBroker({broker}),...(installation.docker instanceof ProcessDocker?{streaming:new ProcessStreamingDocker(installation.docker.executable)}:{})});cleanup.push(()=>bridge.close());engineReason='';} catch {engine=undefined;engineReason='Pinned private Kestra deployment/transport is unavailable; inspect owned installation assets and bind support';}
+    try {const handle=await ensureKestra(installation);const journalProtection=await prepareExecutionJournal(handle.journalDirectory);const client=new KestraClient({...handle,...(journalProtection?{journalProtection}:{}),authority:createKestraAuthority({broker,store})});engine=client;cleanup.push(()=>client.close());const bridge=await startPrivateBrokerBridge({installation,kestra:handle,broker:await startWorkerBroker({broker}),...(installation.docker instanceof ProcessDocker?{streaming:new ProcessStreamingDocker(installation.docker.executable)}:{})});cleanup.push(()=>bridge.close());engineReason='';} catch {engine=undefined;engineReason='Pinned private Kestra deployment/transport is unavailable; inspect owned installation assets and bind support';}
     if(engine)services.engine=engine;
     await refreshReadiness();
     lastReport=await reconcileInstallation(services);
@@ -195,7 +196,7 @@ export async function startRuntime(installation: Installation) {
       }
       if(method==='POST'&&path==='/reconcile')return reconcileInstallation(services);
       if(method==='POST'&&path==='/retry'){ensure(typeof input.attemptId==='string','retry_id','Attempt required');return lifecycle.retryTransient(input.attemptId,{transient:true,reason:'Explicit trusted retry'})}
-      if(method==='POST'&&path==='/refresh'){const next=loadRuntimeConfig(installation.root,installation.id);ensure(canonical(next.selectedIdentity)===canonical(config.selectedIdentity)&&canonical(next.native)===canonical(config.native)&&canonical(next.allowedOrigins)===canonical(config.allowedOrigins),'runtime_reconfigure','Immutable user/native/origin changes require a new explicit installation');ensure(config.repositories.every(old=>{const replacement=next.repositories.find(r=>r.id===old.id);return !replacement||replacement.owner===old.owner&&replacement.name===old.name}),'repository_identity','Repository identities cannot be repointed');config.repositories.splice(0,config.repositories.length,...next.repositories);config.providerCredentials.splice(0,config.providerCredentials.length,...next.providerCredentials);const catalog=await backend.listRepositories();for(const item of catalog){const existing=store.snapshot().repositories.find(r=>r.id==='github:'+item.githubId||r.url===item.url);if(!existing)store.createRepository({id:config.repositories.find(r=>r.owner===item.owner&&r.name===item.name)?.id??'github:'+item.githubId,name:item.owner+'/'+item.name,url:item.url})}await refreshReadiness();return{repositories:store.snapshot().repositories}}
+      if(method==='POST'&&path==='/refresh'){const next=await loadRuntimeConfigAsync(installation.root,installation.id);ensure(canonical(next.selectedIdentity)===canonical(config.selectedIdentity)&&canonical(next.native)===canonical(config.native)&&canonical(next.allowedOrigins)===canonical(config.allowedOrigins),'runtime_reconfigure','Immutable user/native/origin changes require a new explicit installation');ensure(config.repositories.every(old=>{const replacement=next.repositories.find(r=>r.id===old.id);return !replacement||replacement.owner===old.owner&&replacement.name===old.name}),'repository_identity','Repository identities cannot be repointed');config.repositories.splice(0,config.repositories.length,...next.repositories);config.providerCredentials.splice(0,config.providerCredentials.length,...next.providerCredentials);const catalog=await backend.listRepositories();for(const item of catalog){const existing=store.snapshot().repositories.find(r=>r.id==='github:'+item.githubId||r.url===item.url);if(!existing)store.createRepository({id:config.repositories.find(r=>r.owner===item.owner&&r.name===item.name)?.id??'github:'+item.githubId,name:item.owner+'/'+item.name,url:item.url})}await refreshReadiness();return{repositories:store.snapshot().repositories}}
       throw new Error('Unsupported private command');
     }});cleanup.push(()=>control.close());
     coordinator.enableAdmission();

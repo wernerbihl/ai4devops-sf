@@ -55,7 +55,7 @@ export interface AuthRecord {
 export interface CredentialStore {
   readonly protectsSecrets: boolean;
   read(): Promise<AuthRecord>;
-  run<T>(action: (record: AuthRecord, save: () => void) => Promise<T>): Promise<T>;
+  run<T>(action: (record: AuthRecord, save: () => Promise<void>) => Promise<T>): Promise<T>;
 }
 const queues = new Map<string, Promise<unknown>>();
 export function createFileCredentialStore(directory: string): CredentialStore {
@@ -173,7 +173,7 @@ export function createFileCredentialStore(directory: string): CredentialStore {
       prepare();
       return load();
     },
-    async run<T>(action: (record: AuthRecord, save: () => void) => Promise<T>): Promise<T> {
+    async run<T>(action: (record: AuthRecord, save: () => Promise<void>) => Promise<T>): Promise<T> {
       const previous = queues.get(directory) ?? Promise.resolve();
       const result = previous
         .catch(() => {})
@@ -190,7 +190,7 @@ export function createFileCredentialStore(directory: string): CredentialStore {
             mutex.exec('BEGIN IMMEDIATE');
             acquired = true;
             const record = load();
-            return await action(record, () => save(record));
+            return await action(record, async () => save(record));
           } catch (error) {
             if (!acquired)
               throw new GitHubFailure(

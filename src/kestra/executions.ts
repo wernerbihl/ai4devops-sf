@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { protectWindowsDirectory, assertWindowsPrivateFile, writeWindowsPrivateFile } from '../platform/windows-private.ts';
+import { protectWindowsDirectory, protectWindowsDirectoryAsync, assertWindowsPrivateFile, assertWindowsPrivateFileAsync, writeWindowsPrivateFile, writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
 import { fingerprint } from '../storage/database.ts';
 import type { NativeIdentity, TaskResult, WorkflowIdentity, WorkflowStart } from '../contracts/domain.ts';
 
@@ -26,14 +26,20 @@ export function privateDirectory(path: string): string {
   }
   return absolute;
 }
+export async function privateDirectoryAsync(path:string):Promise<string> {
+  if(process.platform!=='win32')return privateDirectory(path);
+  const absolute=resolve(path);mkdirSync(absolute,{recursive:true,mode:0o700});check(realpathSync(absolute)===absolute&&lstatSync(absolute).isDirectory(),'Private canonical directory required');await protectWindowsDirectoryAsync(absolute);return absolute;
+}
 export interface ResumeIntent { key: string; hash: string; input: TaskResult; phase: 'pending' | 'sent' | 'done'; taskRunId?: string; wire?: string; requestId?: string; }
 export interface ContinuationBinding { attemptId: string; fence: number; taskId: string; recipeId: string; recipeRevision: string; native: NativeIdentity; previousAttemptId: string; }
 export interface ExecutionIntent { binding?: ContinuationBinding; bindingGeneration?: number; continuationKeys?: Record<string, string>; nativeTaskId?: string; nativeRequestId?: string; start: WorkflowStart; hash: string; namespace: string; flowId: string; engineRevision: number; phase: 'prepared' | 'sent' | 'known'; identity?: WorkflowIdentity; resume?: ResumeIntent; stopRequested?: boolean; }
+const preparedJournals=new WeakMap<object,string>();
+export async function prepareExecutionJournal(directory:string):Promise<object|undefined>{if(process.platform!=='win32')return;const parent=await privateDirectoryAsync(directory);const path=join(parent,'execution-intents.sqlite');if(!existsSync(path))await writeWindowsPrivateFileAsync(path,Buffer.alloc(0));await assertWindowsPrivateFileAsync(path);const token={};preparedJournals.set(token,path);return token}
 export class ExecutionJournal {
   private db: DatabaseSync;
-  constructor(directory: string) {
-    const path = join(privateDirectory(directory), 'execution-intents.sqlite');
-    if(process.platform==='win32'){if(!existsSync(path))writeWindowsPrivateFile(path,Buffer.alloc(0));assertWindowsPrivateFile(path)}
+  constructor(directory: string,token?:object) {
+    const path = join(process.platform==='win32'?resolve(directory):privateDirectory(directory), 'execution-intents.sqlite');
+    if(process.platform==='win32'){if(!token||preparedJournals.get(token)!==path)throw new Error('Execution journal protection is not initialized');preparedJournals.delete(token)}
     else {try { const s = lstatSync(path); check(s.isFile() && !s.isSymbolicLink() && s.uid === process.getuid!() && (s.mode & 0o077) === 0, 'Unsafe execution journal'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }}
     this.db = new DatabaseSync(path); if(process.platform!=='win32')chmodSync(path, 0o600);
     this.db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS intents (attempt TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL);');

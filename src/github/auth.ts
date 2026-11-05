@@ -200,7 +200,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
   }
   async function resolve(
     record: AuthRecord,
-    save: () => void,
+    save: () => Promise<void>,
     request: AuthRequest,
     preflightOnly = false,
   ): Promise<BoundCredential | undefined> {
@@ -219,7 +219,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         if (!preflightOnly) {
           const discovery = await gh.user(request.signal);
           bind(record, discovery.data);
-          save();
+          await save();
         }
         // gh api has no account selector. Extract the explicitly selected account only, then validate
         // its immutable actor before sending any action. An external gh switch cannot change this actor.
@@ -252,14 +252,14 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
               );
             const previous = record.app;
             record.app = { ...previous, refreshPending: true };
-            save();
+            await save();
             try {
               record.app = await device.refresh(previous);
-              save();
+              await save();
             } catch (error) {
               if (error instanceof GitHubFailure && error.kind === 'expired') {
                 record.app = { ...previous };
-                save();
+                await save();
               }
               throw error;
             }
@@ -274,21 +274,21 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
           undefined,
           'No supported GitHub API credential was found. Use gh auth login; SSH access does not authorize API operations',
         );
-        save();
+        await save();
         return undefined;
       }
       bind(record, (await bound.request('GET', '/user')).data);
       record.state = publicState(record, 'ready', bound.source);
-      save();
+      await save();
       return bound;
     } catch (error) {
       const safe = safeFailure(error);
       record.state = publicState(record, safe.kind, source, safe.message);
-      save();
+      await save();
       return undefined;
     }
   }
-  async function requireCredential(record: AuthRecord, save: () => void): Promise<BoundCredential> {
+  async function requireCredential(record: AuthRecord, save: () => Promise<void>): Promise<BoundCredential> {
     const bound = await resolve(record, save, {});
     if (!bound)
       throw new GitHubFailure(
@@ -370,15 +370,15 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         'GitHub operation lacks the current explicit repository or recipe capability grant',
       );
   }
-  function refusal(
+  async function refusal(
     record: AuthRecord,
-    save: () => void,
+    save: () => Promise<void>,
     key: string,
     operation: string,
     code: string,
     recovery: string,
     status: 400 | 403 | 404 | 409 | 503 = 503,
-  ): never {
+  ): Promise<never> {
     const error = {
       code,
       message: 'GitHub authentication action was not started',
@@ -386,13 +386,13 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
       retryable: false,
     };
     record.outcomes[key] = { kind: 'failed', operation, status, error };
-    save();
+    await save();
     throw new DefinitiveNoEffect(status, error);
   }
   async function mutation<T extends AuthState | DeviceFlow>(
     context: RequestContext,
     operation: string,
-    action: (record: AuthRecord, save: () => void) => Promise<T>,
+    action: (record: AuthRecord, save: () => Promise<void>) => Promise<T>,
   ): Promise<T> {
     if (!context.key.startsWith('api:') || context.key.length > 220)
       throw new TypeError('Stable authentication request key required');
@@ -409,12 +409,12 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         );
       }
       record.outcomes[context.key] = { kind: 'pending', operation };
-      save();
+      await save();
       try {
         const result = await action(record, save);
         const detached = structuredClone(result);
         record.outcomes[context.key] = { kind: 'complete', operation, body: detached };
-        save();
+        await save();
         return detached;
       } catch (error) {
         if (error instanceof DefinitiveNoEffect) throw error;
@@ -471,7 +471,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
           );
         const flow = await device.start();
         record.flows[flow.public.id] = flow;
-        save();
+        await save();
         return flow.public;
       });
     },
@@ -515,7 +515,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         configureIdentity(record);
         if (flow.public.status === 'authorized') return record.state;
         const app = await device.poll(record, id, save);
-        save();
+        await save();
         if (!app) {
           record.state = publicState(
             record,
@@ -529,14 +529,14 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
               ? 'GitHub authorization is pending; poll with a new request key after the displayed interval'
               : 'GitHub authorization expired or was denied; intentionally restart authorization',
           );
-          save();
+          await save();
           return record.state;
         }
         // Persist exchanged credential before validation: transport loss after exchange must not trigger re-poll.
         record.app = app;
         flow.public.status = 'authorized';
         flow.deviceCode = '';
-        save();
+        await save();
         try {
           bind(record, (await credential(app.accessToken, 'github_app').request('GET', '/user')).data);
           record.state = publicState(record, 'ready', 'github_app');
@@ -544,7 +544,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
           const safe = safeFailure(error);
           record.state = publicState(record, safe.kind, 'github_app', safe.message);
         }
-        save();
+        await save();
         return record.state;
       });
     },
@@ -808,13 +808,13 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
           }
           // Check the exact credential actor again before releasing any collected metadata.
           bind(record, (await bound.request('GET', '/user')).data);
-          save();
+          await save();
           return entries;
         } catch (error) {
           const safe = safeFailure(error);
           if (safe.kind === 'identity_changed' || safe.kind === 'expired') {
             record.state = publicState(record, safe.kind, bound.source, safe.message);
-            save();
+            await save();
           }
           throw safe;
         }

@@ -15,10 +15,10 @@ export interface KestraPort {
   resumeInput(identity: WorkflowIdentity, input: TaskResult, key: string): Promise<void>;
   stop(identity: WorkflowIdentity): Promise<void>;
 }
-export interface KestraClientOptions { journalDirectory: string; request: EngineTransport; authority: KestraAuthority; }
+export interface KestraClientOptions { journalDirectory: string; journalProtection?:object; request: EngineTransport; authority: KestraAuthority; }
 export class KestraClient implements KestraPort {
   private journal: ExecutionJournal; private request: EngineTransport; private authority: KestraAuthority;
-  constructor(options: KestraClientOptions) { this.journal = new ExecutionJournal(options.journalDirectory); this.request = options.request; this.authority = options.authority; }
+  constructor(options: KestraClientOptions) { this.journal = new ExecutionJournal(options.journalDirectory,options.journalProtection); this.request = options.request; this.authority = options.authority; }
   close(): void { this.journal.close(); }
   private async importFlow(record: ExecutionIntent): Promise<void> {
     const expected = { ...parse(record.start.recipe.yaml), id: record.flowId, namespace: record.namespace };

@@ -1,11 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import { privateDirectory } from '../kestra/executions.ts';
+import { privateDirectory, privateDirectoryAsync } from '../kestra/executions.ts';
 /** A separate rollback-journal database owns a kernel file lock for the process lifetime.
  * Never hold a transaction on domain state or infer ownership from age/PID files. */
 export function acquireInstallationSingleton(root: string): { close(): void } {
-  const path = join(privateDirectory(root), 'controller-lock.sqlite');
+  return acquireInDirectory(privateDirectory(root));
+}
+function acquireInDirectory(directory:string):{close():void} {
+  const path = join(directory, 'controller-lock.sqlite');
   const db = new DatabaseSync(path);
   let closed = false;
   try {
@@ -16,3 +19,5 @@ export function acquireInstallationSingleton(root: string): { close(): void } {
   }
   return { close() { if (!closed) { closed = true; db.exec('ROLLBACK'); db.close(); } } };
 }
+
+export async function acquireInstallationSingletonAsync(root:string):Promise<{close():void}>{return acquireInDirectory(await privateDirectoryAsync(root))}

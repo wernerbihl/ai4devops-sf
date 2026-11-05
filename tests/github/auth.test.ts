@@ -588,26 +588,16 @@ test('authenticated_git_preserves_writer_completion_and_suppresses_background_ma
     } finally { absent.close(); }
   } finally { f.close(); }
 });
-test('windows_metadata_store_keeps_gh_usable_but_refuses_app_secrets_before_authorization', async () => {
-  const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+test('Windows auth refuses all secret access when protected system storage is unavailable', async () => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!;const oldRoot=process.env.SystemRoot;
   const f = fixture({ ghMissing: true, app: true });
   try {
-    Object.defineProperty(process, 'platform', { ...original, value: 'win32' });
+    delete process.env.SystemRoot;Object.defineProperty(process, 'platform', { ...original, value: 'win32' });
     const app = createGitHubBackend(f.config);
-    await assert.rejects(
-      app.authApi.startDeviceFlow({ key: 'api:windows' }),
-      (e) => e instanceof DefinitiveNoEffect && e.error.code === 'PROTECTED_STORE_REQUIRED',
-    );
-    assert.equal(f.http.length, 0);
-    const gh = fixture();
-    try {
-      assert.equal((await gh.backend.resolveGitHubAuth({})).status, 'ready');
-    } finally {
-      gh.close();
-    }
+    await assert.rejects(app.authApi.startDeviceFlow({key:'api:windows'}),/Windows system directory unavailable/);
+    assert.equal(f.http.length,0,'protection failure must precede external authorization');
   } finally {
-    Object.defineProperty(process, 'platform', original);
-    f.close();
+    Object.defineProperty(process,'platform',original);if(oldRoot===undefined)delete process.env.SystemRoot;else process.env.SystemRoot=oldRoot;f.close();
   }
 });
 test('unknown_token_exchange_blocks_new_poll_keys', async () => {

@@ -3,9 +3,9 @@ import { constants, closeSync, existsSync, fsyncSync, lstatSync, openSync, readF
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parse } from 'yaml';
-import { protectWindowsDirectory, readWindowsPrivateFile, readWindowsSecret, writeWindowsPrivateFile, writeWindowsSecret } from '../platform/windows-private.ts';
+import { protectWindowsDirectoryAsync, readWindowsPrivateFile, readWindowsPrivateFileAsync, readWindowsSecretAsync, writeWindowsPrivateFile, writeWindowsPrivateFileAsync, writeWindowsSecretAsync } from '../platform/windows-private.ts';
 import { canonical, fingerprint } from '../storage/database.ts';
-import { check, KestraError, privateDirectory } from './executions.ts';
+import { check, KestraError, privateDirectory, privateDirectoryAsync } from './executions.ts';
 import type { EngineTransport } from './executions.ts';
 
 export interface DockerPort { command(args: string[], options?: { stdin?: string }): Promise<string>; }
@@ -42,7 +42,8 @@ function createPrivate(path: string, content: string): void {
   const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try { writeFileSync(fd, content); fsyncSync(fd); } finally { closeSync(fd); }
 }
-function ensurePrivateContent(path: string, content: string): void {
+async function ensurePrivateContent(path: string, content: string): Promise<void> {
+  if(process.platform==='win32'){if(!existsSync(path))await writeWindowsPrivateFileAsync(path,Buffer.from(content));check((await readWindowsPrivateFileAsync(path)).toString('utf8')===content,'Managed configuration mismatch; do not overwrite or adopt');return}
   try { createPrivate(path, content); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; }
   check(readPrivate(path) === content, 'Managed configuration mismatch; do not overwrite or adopt');
 }
@@ -58,12 +59,12 @@ export class PosixInstallationSecrets implements InstallationSecretStore {
 }
 /** DPAPI CurrentUser protects persisted Windows engine credentials; ACLs protect runtime directories. */
 export class WindowsInstallationSecrets implements InstallationSecretStore {
-  async protectRuntimeDirectory(path:string):Promise<void>{protectWindowsDirectory(path)}
+  async protectRuntimeDirectory(path:string):Promise<void>{await protectWindowsDirectoryAsync(path)}
   async loadOrCreate(id:string,root:string):Promise<InstallationSecrets>{
     if(process.platform!=='win32')throw new Error('Windows secret storage requires Windows');
-    const path=join(privateDirectory(root),'kestra-secrets.dpapi');
-    if(!existsSync(path))writeWindowsSecret(path,Buffer.from(JSON.stringify({id,username:'factory@localhost.invalid',password:randomBytes(32).toString('base64url'),encryptionKey:randomBytes(32).toString('base64')})));
-    const value=JSON.parse(readWindowsSecret(path).toString('utf8')) as InstallationSecrets & {id:string};
+    const path=join(await privateDirectoryAsync(root),'kestra-secrets.dpapi');
+    if(!existsSync(path))await writeWindowsSecretAsync(path,Buffer.from(JSON.stringify({id,username:'factory@localhost.invalid',password:randomBytes(32).toString('base64url'),encryptionKey:randomBytes(32).toString('base64')})));
+    const value=JSON.parse((await readWindowsSecretAsync(path)).toString('utf8')) as InstallationSecrets & {id:string};
     check(value.id===id,'Installation secret identity mismatch');return {username:value.username,password:value.password,encryptionKey:value.encryptionKey};
   }
 }
@@ -98,8 +99,8 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
   check(uid > 0, 'Run the factory installation as a non-root user');
   const user = `${uid}:${gid}`; const tmpfs = `rw,nosuid,nodev,noexec,uid=${uid},gid=${gid},mode=1777`;
   const effectiveRestrictions = restrictions.map(value => value === '1000:1000' ? user : value === '/tmp:rw,nosuid,nodev,noexec,uid=1000,gid=1000,mode=1777' ? '/tmp:' + tmpfs : value);
-  const root = privateDirectory(installation.root); const dir = privateDirectory(join(root, 'kestra'));
-  const configDir = privateDirectory(join(dir, 'config')); const dataDir = privateDirectory(join(dir, 'data')); const journalDirectory = privateDirectory(join(dir, 'journal'));
+  const root = await privateDirectoryAsync(installation.root); const dir = await privateDirectoryAsync(join(root, 'kestra'));
+  const configDir = await privateDirectoryAsync(join(dir, 'config')); const dataDir = await privateDirectoryAsync(join(dir, 'data')); const journalDirectory = await privateDirectoryAsync(join(dir, 'journal'));
   if (process.platform === 'win32') for (const path of [root, dir, configDir, dataDir, journalDirectory]) await installation.secrets.protectRuntimeDirectory!(path);
   const secrets = await installation.secrets.loadOrCreate(installation.id, root);
   check(secrets.username.length > 0 && !secrets.username.includes(':') && secrets.password.length >= 32 && Buffer.from(secrets.encryptionKey, 'base64').length === 32 && Buffer.from(secrets.encryptionKey, 'base64').toString('base64') === secrets.encryptionKey, 'Invalid protected engine credentials');
@@ -107,7 +108,7 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
   check(config.kestra.repository.type === 'h2' && config.kestra.queue.type === 'h2' && config.kestra.variables['recursive-rendering'] === false && config.kestra.plugins['auto-install'].enabled === false && config.datasources.h2.url.startsWith('jdbc:h2:file:/app/data/database;'), 'Unsafe pinned engine configuration');
   config.kestra.server = { 'basic-auth': { username: secrets.username, password: secrets.password } };
   config.kestra.encryption = { 'secret-key': secrets.encryptionKey };
-  ensurePrivateContent(join(configDir, 'application.yaml'), JSON.stringify(config));
+  await ensurePrivateContent(join(configDir, 'application.yaml'), JSON.stringify(config));
   const docker = installation.docker; const owner = fingerprint({ id: installation.id, root }); const prefix = 'sf-' + owner.slice(0, 24);
   const labels = { 'sf.installation': installation.id, 'sf.owner': owner, 'sf.component': 'kestra' };
   const labelArgs = Object.entries(labels).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
@@ -170,7 +171,7 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
   };
   const containerId = await ensureContainer(prefix + '-kestra', pins.kestra.image, networkName, [{ source: dataDir, target: '/app/data', readOnly: false }, { source: configDir, target: '/app/confs', readOnly: true }], ['MICRONAUT_CONFIG_FILES=/app/confs/application.yaml', 'KESTRA_PLUGINS_AUTO_INSTALL_ENABLED=false'], ['server', 'local']);
   const transportContainerId = await ensureContainer(prefix + '-transport', pins.worker.image, 'container:' + containerId, [], [], ['node', '-e', 'setInterval(()=>{},1000)']);
-  ensurePrivateContent(join(dir, 'owned-resources.json'), JSON.stringify({ installationId: installation.id, owner, networkId: network.Id, containerId, transportContainerId, images: [pins.kestra.image, pins.worker.image] }));
+  await ensurePrivateContent(join(dir, 'owned-resources.json'), JSON.stringify({ installationId: installation.id, owner, networkId: network.Id, containerId, transportContainerId, images: [pins.kestra.image, pins.worker.image] }));
   const request = createEngineTransport(docker, transportContainerId, secrets);
   let ready = false;
   for (let attempt = 0; attempt < 60; attempt++) {

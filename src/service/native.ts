@@ -1,17 +1,18 @@
 import { mkdirSync, existsSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { writeWindowsPrivateFile } from '../platform/windows-private.ts';
+import { writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
 import { randomBytes, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import type { Attempt, NativeIdentity, NativeStart, OwnerEvent, RequiredCapabilities, TaskSpec } from '../contracts/domain.ts';
 import type { NativeOwner } from '../contracts/owner.ts';
 import type { Installation } from '../kestra/deployment.ts';
 import { dockerBind, ProcessDocker } from '../kestra/deployment.ts';
-import { privateDirectory } from '../kestra/executions.ts';
+import { privateDirectoryAsync } from '../kestra/executions.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import type { AttemptBroker } from '../broker/operations.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
 import { createFactoryToolGate } from '../owners/tools.ts';
+import { prepareOwnerJournal } from '../owners/journal.ts';
 import { createVsCodeOwner } from '../owners/vscode.ts';
 import { createManagedVsCodeLauncher } from '../owners/managed.ts';
 import { createIsolatedNativeBoundary, isolatedToolAllowlist } from '../owners/isolated.ts';
@@ -23,11 +24,11 @@ import type { NativeModelProxyControl, ModelProxyPolicy } from '../owners/model-
 import { imageMatches } from '../isolation/image.ts';
 import { expectedImageBuild } from '../install/images.ts';
 import { proxyTopology } from './proxy-topology.ts';
-import { createProxyPlaceholder, finalizeProxyPolicy } from './proxy-policy.ts';
+import { createProxyPlaceholderAsync, finalizeProxyPolicyAsync } from './proxy-policy.ts';
 import type { RuntimeConfig, IsolatedNativeTemplate } from './config.ts';
-import { readPrivateFile } from './config.ts';
+import { readPrivateFileAsync } from './config.ts';
 import { refreshCompanionCredential } from '../install/companion-launch.ts';
-import { loadCompanionCredential } from '../install/companion-auth.ts';
+import { loadCompanionCredentialAsync } from '../install/companion-auth.ts';
 import { navigationCommits } from '../owners/navigation.ts';
 import { createDesktopNavigation } from '../owners/desktop.ts';
 export const isolatedProfileId = 'vscode-copilot-isolated-worker-v2';
@@ -56,7 +57,7 @@ export function createNativeFleet(options: { installation: Installation; config:
       ensure(template, 'native_unconfigured', 'No isolated native template is configured');
       ensure(template.proxy.entrypointSha256 === reviewedProxyHash() && template.proxy.allowedAuthorities.length > 0 && template.proxy.allowedAuthorities.every(a => curatedModelAuthorities.has(a)), 'native_proxy', 'Reviewed model proxy source and curated authorities are required');
       const credential = config.providerCredentials.find(c => c.ref === template.credentialRef);
-      ensure(credential && (credential.expiresAt === undefined || Date.parse(credential.expiresAt) > Date.now() + 30_000) && loadCompanionCredential(installation.root,credential).token.length > 0, 'native_auth', 'Current provider credential is unavailable');
+      ensure(credential && (credential.expiresAt === undefined || Date.parse(credential.expiresAt) > Date.now() + 30_000) && (await loadCompanionCredentialAsync(installation.root,credential)).token.length > 0, 'native_auth', 'Current provider credential is unavailable');
       ensure((navigationCommits as readonly string[]).includes(template.hostCommit), 'native_version', 'Native host commit unsupported');
       for (const [role,image] of [['native',template.nativeImage],['worker',template.workerImage],['proxy',template.proxy.image]] as const) {
         const actual = JSON.parse(await docker.command(['image','inspect',image]))[0];
@@ -102,15 +103,15 @@ export function createNativeFleet(options: { installation: Installation; config:
   }
   async function compose(start: NativeStart, create: boolean) {
     const t = supports(start.task); const ownerId = 'rt-'+fingerprint({ installation: installation.id, task: start.task.id }).slice(0,24);
-    const stateRoot = privateDirectory(join(installation.root,'native-state'));
+    const stateRoot = await privateDirectoryAsync(join(installation.root,'native-state'));
     const parent = join(stateRoot,ownerId); const data = join(parent,'data'); const markerPath = join(parent,'owner.json');
     const marker = { schemaVersion: 1, installationId: installation.id, runtimeOwnerId: ownerId, taskId: start.task.id, source: data };
     if (create) {
-      privateDirectory(parent); privateDirectory(data);
-      if (!existsSync(markerPath)){if(process.platform==='win32')writeWindowsPrivateFile(markerPath,Buffer.from(JSON.stringify(marker)));else writeFileSync(markerPath,JSON.stringify(marker),{flag:'wx',mode:0o600})}
-      if (!existsSync(join(data,'connection-token'))){const token=randomBytes(32).toString('base64url');if(process.platform==='win32')writeWindowsPrivateFile(join(data,'connection-token'),Buffer.from(token));else writeFileSync(join(data,'connection-token'),token,{flag:'wx',mode:0o600})}
+      await privateDirectoryAsync(parent); await privateDirectoryAsync(data);
+      if (!existsSync(markerPath)){if(process.platform==='win32')await writeWindowsPrivateFileAsync(markerPath,Buffer.from(JSON.stringify(marker)));else writeFileSync(markerPath,JSON.stringify(marker),{flag:'wx',mode:0o600})}
+      if (!existsSync(join(data,'connection-token'))){const token=randomBytes(32).toString('base64url');if(process.platform==='win32')await writeWindowsPrivateFileAsync(join(data,'connection-token'),Buffer.from(token));else writeFileSync(join(data,'connection-token'),token,{flag:'wx',mode:0o600})}
     }
-    ensure(canonical(JSON.parse(readPrivateFile(markerPath).toString())) === canonical(marker), 'native_state', 'Original native state marker changed');
+    ensure(canonical(JSON.parse((await readPrivateFileAsync(markerPath)).toString())) === canonical(marker), 'native_state', 'Original native state marker changed');
     const nativeState: NativeStateMount = { installationId: installation.id, runtimeOwnerId: ownerId, taskId: start.task.id, source: data, target: NATIVE_STATE_TARGET, markerPath };
     const internal = await network(ownerId+'-internal',true,create); const egress = await network(ownerId+'-model-egress',false,create);
     const targets = [{ source: start.workspacePath, target:'/workspaces/task' }]; const mounts = await resolveNativeMounts(start,targets);
@@ -124,7 +125,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     let policyIntent = store.getActionByKey(policyKey);
     if (create && !existsSync(policyPath)) {
       ensure(!policyIntent, 'native_proxy', 'Missing original proxy policy; inspect retained provisioning');
-      const identity = createProxyPlaceholder(policyPath);
+      const identity = await createProxyPlaceholderAsync(policyPath);
       policyIntent = store.enqueueAction({key:policyKey,kind:'runtime.proxy-policy',payload:{path:policyPath,...identity}});
     }
     ensure(policyIntent && policyIntent.kind === 'runtime.proxy-policy' && policyIntent.payload.path === policyPath, 'native_proxy', 'Missing owned proxy policy intent');
@@ -138,8 +139,8 @@ export function createNativeFleet(options: { installation: Installation; config:
     const currentEgress = await inspect('network',egress.Id);
     const addresses = proxyTopology(currentInternal,currentEgress,currentNative,currentProxy);
     const policy: ModelProxyPolicy = { schemaVersion:2,kind:'copilot-model-connect',listenPort:3128,nativeRuntimeId:native.Id,internalNetworkId:internal.Id,...addresses,allowedAuthorities:t.proxy.allowedAuthorities };
-    if (create) finalizeProxyPolicy(policyPath, policy);
-    else ensure(canonical(JSON.parse(readPrivateFile(policyPath).toString())) === canonical(policy), 'native_proxy', 'Original model proxy policy changed');
+    if (create) await finalizeProxyPolicyAsync(policyPath, policy);
+    else ensure(canonical(JSON.parse((await readPrivateFileAsync(policyPath)).toString())) === canonical(policy), 'native_proxy', 'Original model proxy policy changed');
     store.completeAction(policyIntent.id);
     const proxyControl: NativeModelProxyControl = { policy, async inspect() {
       const current = await inspect('container',proxy.Id); const networkIds = Object.values(current.NetworkSettings.Networks).map((n:any)=>n.NetworkID).sort();
@@ -171,7 +172,8 @@ export function createNativeFleet(options: { installation: Installation; config:
       const next=await createDesktopNavigation({root:installation.root,installationId:installation.id,runtimeOwnerId:ownerId,identity,assertCurrent,launcher});
       try{assertCurrent();desktop=next}catch(error){await next.close();throw error}
     };
-    const owner = createVsCodeOwner({journalPath:join(parent,'owner.sqlite'),launcher,compatibility:{protocol:'1.0.0',commits:[t.hostCommit]},workspaceUri:async()=>pathToFileURL('/workspaces/task').href,
+    const journalPath=join(parent,'owner.sqlite');const journalProtection=await prepareOwnerJournal(journalPath);
+    const owner = createVsCodeOwner({journalPath,...(journalProtection?{journalProtection}:{}),launcher,compatibility:{protocol:'1.0.0',commits:[t.hostCommit]},workspaceUri:async()=>pathToFileURL('/workspaces/task').href,
       navigation:{get connectionAuthority(){ensure(desktop,'native_navigation','Managed desktop registration is unavailable');return desktop.connectionAuthority},async launch(uri){ensure(desktop,'native_navigation','Managed desktop registration is unavailable');await desktop.launch(uri)}},
       tools:createIsolatedClientTools(gate,worker),
       requireVerifiedProfile:start=>verify.requireVerifiedProfile(start),readinessStarts:async()=>[gate.currentStart()]});
@@ -179,7 +181,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     const protectedPaths = [...options.protectedPaths,markerPath,join(parent,'owner.sqlite'),launcher.controlIntentPath,launcher.pauseReceiptPath,policyPath,join(parent,'navigation.json')];
     boundary = createIsolatedNativeBoundary({owner,gate,worker,launcher,docker,modelProxy:proxyControl,image:t.nativeImage,networks:[internal.Id],protectedPaths});
     verify = createProfileVerifier({profiles:[{id:isolatedProfileId,ownerId:'vscode',providerId:'copilot',image:t.nativeImage,networks:[internal.Id],protectedPaths,boundary,mountTargets:targets,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot}}]});
-    const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const startup=JSON.parse(readPrivateFile(join(installation.root,'startup.json')).toString());ensure(startup.installationId===installation.id&&typeof startup.codeExecutable==='string'&&startup.requestDir===join(installation.root,'auth-request'),'native_auth','Private companion configuration unavailable');await refreshCompanionCredential({root:installation.root,requestDir:startup.requestDir,installationId:installation.id,codeExecutable:startup.codeExecutable});const expiresIn=ref.expiresAt===undefined?undefined:Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn===undefined||expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:loadCompanionCredential(installation.root,ref).token,...(expiresIn===undefined?{}:{expiresIn}),scopes:ref.scopes})};
+    const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const startup=JSON.parse((await readPrivateFileAsync(join(installation.root,'startup.json'))).toString());ensure(startup.installationId===installation.id&&typeof startup.codeExecutable==='string'&&startup.requestDir===join(installation.root,'auth-request'),'native_auth','Private companion configuration unavailable');await refreshCompanionCredential({root:installation.root,requestDir:startup.requestDir,installationId:installation.id,codeExecutable:startup.codeExecutable});const expiresIn=ref.expiresAt===undefined?undefined:Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn===undefined||expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:(await loadCompanionCredentialAsync(installation.root,ref)).token,...(expiresIn===undefined?{}:{expiresIn}),scopes:ref.scopes})};
     return {owner,worker,gate,launcher,boundary,verify,authenticate,prepareDesktop,closeDesktop};
   }
   type Member = Awaited<ReturnType<typeof compose>>;

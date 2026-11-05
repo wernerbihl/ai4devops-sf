@@ -54,10 +54,11 @@ async function fixture(deferIdentity = false) {
 }
 const input = { id: 'native-request', prompt: 'Choose a name', schema: { type: 'object', properties: { name: { type: 'string', minLength: 1 } }, required: ['name'], additionalProperties: false } };
 
-test('deadline observation persists later attempt stops while an earlier physical stop never settles', async () => {
+test('deadline observation persists later attempt stops while an earlier protected subprocess is stalled', async () => {
   const x = await fixture(); const { f } = x;
-  let release!: () => void;
-  const stalled = new Promise<void>(resolve => { release = resolve; });
+  const {runProtectedProcess}=await import('../../src/platform/windows-private.ts');
+  const stalled=runProtectedProcess(process.execPath,['-e','setTimeout(()=>process.stdout.write("done"),800)'],'',3000);
+  let protectorDone=false;void stalled.then(()=>{protectorDone=true});
   const calls = new Map<string, number>();
   try {
     const settings = f.store.getSettings();
@@ -84,8 +85,9 @@ test('deadline observation persists later attempt stops while an earlier physica
     assert.equal(f.store.getLifecycle(second.id).reservation.attempt.activeDurationMs, 60000);
     assert.equal(calls.get(x.native.sessionId), 1, 'one physical stop job per attempt');
     assert.equal(calls.get(second.native!.sessionId), 1);
+    assert.equal(protectorDone,false,'later physical stop advances while the actual asynchronous helper is stalled');
     assert.equal(f.store.getAdmissionState().activeLeases.length, 2, 'unknown writers retain both fences');
-  } finally { release(); await new Promise(resolve => setImmediate(resolve)); f.close(); }
+  } finally { await stalled; await new Promise(resolve => setImmediate(resolve)); f.close(); }
 });
 
 test('expired_lease_does_not_admit_a_second_native_writer', async () => {

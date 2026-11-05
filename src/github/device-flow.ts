@@ -82,7 +82,7 @@ export function createDeviceFlow(deps: DeviceDependencies) {
         nextPollAt: deps.now() + (data.interval as number) * 1000,
       };
     },
-    async poll(record: AuthRecord, id: string, save: () => void): Promise<AppCredential | undefined> {
+    async poll(record: AuthRecord, id: string, save: () => Promise<void>): Promise<AppCredential | undefined> {
       const flow = record.flows[id];
       if (!flow)
         throw new GitHubFailure(
@@ -100,7 +100,7 @@ export function createDeviceFlow(deps: DeviceDependencies) {
           'GitHub device token exchange outcome is unknown; intentionally start a new authorization',
         );
       flow.exchangePending = true;
-      save();
+      await save();
       const data = await post('/login/oauth/access_token', {
         device_code: flow.deviceCode,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',

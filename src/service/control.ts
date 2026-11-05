@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { replaceWindowsPrivateFile, writeWindowsPrivateFile } from '../platform/windows-private.ts';
+import { replaceWindowsPrivateFileAsync, writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
 import { ensure } from '../storage/database.ts';
 /** Protected loopback control for the trusted CLI/host. Browser cookies are deliberately not accepted. */
 export async function startPrivateControl(options:{root:string;key:Buffer;handle(method:string,path:string,input:Record<string,unknown>):Promise<unknown>}) {
@@ -23,6 +23,6 @@ export async function startPrivateControl(options:{root:string;key:Buffer;handle
   await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',()=>resolve())});
   const address=server.address();ensure(address&&typeof address!=='string','control_address','Missing private control address');
   const url=`http://127.0.0.1:${address.port}`;
-  const path=join(options.root,'control.json');const data=JSON.stringify({schemaVersion:1,url});if(process.platform==='win32'){if(existsSync(path))replaceWindowsPrivateFile(path,Buffer.from(data));else writeWindowsPrivateFile(path,Buffer.from(data))}else writeFileSync(path,data,{mode:0o600});
+  const path=join(options.root,'control.json');const data=JSON.stringify({schemaVersion:1,url});if(process.platform==='win32'){if(existsSync(path))await replaceWindowsPrivateFileAsync(path,Buffer.from(data));else await writeWindowsPrivateFileAsync(path,Buffer.from(data))}else writeFileSync(path,data,{mode:0o600});
   return{url,async close(){await new Promise<void>((resolve,reject)=>{server.close(e=>e?reject(e):resolve());server.closeAllConnections()})}};
 }

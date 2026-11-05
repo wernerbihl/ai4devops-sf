@@ -9,3 +9,9 @@ test('Windows protection sends fixture bytes through stdin rather than command a
  const input=JSON.parse(invocation.input);assert.equal(Buffer.from(input.data,'base64').toString(),'fixed-nonsecret-fixture');
  assert.match(invocation.args.at(-1)!,/ProtectedData/);assert.match(invocation.args.at(-1)!,/CurrentUser/);
 });
+
+test('protected subprocess waiting does not stall the controller event loop',async()=>{
+ const {runProtectedProcess}=await import('../../src/platform/windows-private.ts');
+ let observed=false;const timer=setTimeout(()=>{observed=true},10);
+ try {await runProtectedProcess(process.execPath,['-e','setTimeout(()=>process.stdout.write("ok"),100)'],'',1000);assert.equal(observed,true)}finally{clearTimeout(timer)}
+});

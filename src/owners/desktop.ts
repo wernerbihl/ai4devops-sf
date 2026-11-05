@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import type { NativeIdentity } from '../contracts/domain.ts';
-import { readPrivateFile } from '../service/config.ts';
+import { readPrivateFileAsync } from '../service/config.ts';
 import { launchCompanion } from '../install/companion-launch.ts';
 import { startDesktopRegistration } from '../install/desktop-registration.ts';
 import type { ManagedOwnerLauncher } from './vscode.ts';
@@ -11,7 +11,7 @@ const exec=promisify(execFile);
 
 /** Register an actual guarded relay in the factory-owned desktop profile for one admitted open. */
 export async function createDesktopNavigation(options:{root:string;installationId:string;runtimeOwnerId:string;identity:NativeIdentity;assertCurrent():void;launcher:ManagedOwnerLauncher}) {
-  options.assertCurrent();const startup=JSON.parse(readPrivateFile(join(options.root,'startup.json')).toString());
+  options.assertCurrent();const startup=JSON.parse((await readPrivateFileAsync(join(options.root,'startup.json'))).toString());
   if(startup.schemaVersion!==1||startup.installationId!==options.installationId||typeof startup.codeExecutable!=='string'||startup.requestDir!==join(options.root,'auth-request'))throw new Error('Private desktop profile configuration unavailable');
   const profileRoot=join(options.root,'vscode-profile');const profile={root:profileRoot,userDataDir:join(profileRoot,'user-data'),extensionsDir:join(profileRoot,'extensions')};
   const relay=await startHumanRelay({runtimeOwnerId:options.runtimeOwnerId,identity:options.identity,assertCurrent:options.assertCurrent,async connect(){options.assertCurrent();const connection=await options.launcher.ensureStarted();options.assertCurrent();if(!('connect' in connection))throw new Error('Managed native transport unavailable');return connection.connect()}});

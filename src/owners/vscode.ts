@@ -35,6 +35,7 @@ export interface NativeClientTools {
 export interface VsCodeOptions {
     ownerId?: string;
     journalPath: string;
+    journalProtection?: object;
     endpoint?: AhpEndpoint;
     launcher?: ManagedOwnerLauncher;
     /** Trusted transport injection also supports owning-OS relays; default is authenticated IPC. */
@@ -78,7 +79,7 @@ export class VsCodeOwner implements NativeOwner {
     private identities = new Map<string, NativeIdentity>();
     private processing = new Map<string, Promise<void>>();
     private serial: Promise<unknown> = Promise.resolve();
-    constructor(options: VsCodeOptions) { this.options = options; this.metadataDirectory = dirname(resolve(options.journalPath)); this.ownerId = options.ownerId ?? 'vscode'; this.timeoutMs = options.timeoutMs ?? 15000; this.journal = new OwnerJournal(options.journalPath); }
+    constructor(options: VsCodeOptions) { this.options = options; this.metadataDirectory = dirname(resolve(options.journalPath)); this.ownerId = options.ownerId ?? 'vscode'; this.timeoutMs = options.timeoutMs ?? 15000; this.journal = new OwnerJournal(options.journalPath,options.journalProtection); }
     async ensureStarted(): Promise<void> {
         ensure(!this.closed, 'owner_closed', 'Native owner is closed');
         if (this.client && this.root)

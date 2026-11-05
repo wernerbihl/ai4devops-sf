@@ -1,5 +1,5 @@
-import { assertWindowsPrivateFile, writeWindowsPrivateFile } from '../platform/windows-private.ts';
-import { privateDirectory } from '../kestra/executions.ts';
+import { assertWindowsPrivateFileAsync, writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
+import { privateDirectoryAsync } from '../kestra/executions.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -17,10 +17,12 @@ export interface SessionIntent {
     identity?: NativeIdentity;
 }
 export const digest = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex');
+const prepared=new WeakMap<object,string>();
+export async function prepareOwnerJournal(path:string):Promise<object|undefined>{if(process.platform!=='win32')return;await privateDirectoryAsync(dirname(path));if(!existsSync(path))await writeWindowsPrivateFileAsync(path,Buffer.alloc(0));await assertWindowsPrivateFileAsync(path);const token={};prepared.set(token,path);return token}
 /** Protected runner metadata; never mounted into native workspaces. Intent precedes wire I/O. */
 export class OwnerJournal {
     private db: DatabaseSync;
-    constructor(path: string) { if(process.platform==='win32'){privateDirectory(dirname(path));if(!existsSync(path))writeWindowsPrivateFile(path,Buffer.alloc(0));assertWindowsPrivateFile(path)}else mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); this.db = new DatabaseSync(path); if(process.platform!=='win32')chmodSync(path, 0o600); this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS sessions (task_key TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS actions (key TEXT PRIMARY KEY, hash TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS stopped (identity TEXT PRIMARY KEY, stopped_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS paused (identity TEXT PRIMARY KEY, paused_at TEXT NOT NULL);'); }
+    constructor(path: string,token?:object) { if(process.platform==='win32'){if(!token||prepared.get(token)!==path)throw new Error('Owner journal protection is not initialized');prepared.delete(token)}else mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); this.db = new DatabaseSync(path); if(process.platform!=='win32')chmodSync(path, 0o600); this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS sessions (task_key TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS actions (key TEXT PRIMARY KEY, hash TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS stopped (identity TEXT PRIMARY KEY, stopped_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS paused (identity TEXT PRIMARY KEY, paused_at TEXT NOT NULL);'); }
     session(start: NativeStart, directory: string): {
         intent: SessionIntent;
         fresh: boolean;

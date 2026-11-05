@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { win32 } from 'node:path';
 
 type Operation = 'protect-directory'|'check-directory'|'protect-file'|'check-file'|'write-secret'|'replace-secret'|'read-secret'|'write-private'|'replace-private'|'read-private'|'check-owned-file';
@@ -127,3 +127,36 @@ export function replaceWindowsPrivateFile(path:string,data:Buffer):void{execute(
 export function readWindowsPrivateFile(path:string):Buffer{return execute('read-private',path)}
 
 export function assertWindowsOwnedFile(path:string):void{execute('check-owned-file',path)}
+
+/** Await the protected helper without blocking budget observers or other native owners. */
+export function runProtectedProcess(executable:string,args:string[],input:string,timeoutMs=30000):Promise<string> {
+  return new Promise((resolve,reject)=>{
+    const child=spawn(executable,args,{windowsHide:true,stdio:['pipe','pipe','ignore']});let output='';let failure:Error|undefined;
+    // Wait for process close even after timeout: a failed mutation must not continue in the background.
+    const fail=(error:Error)=>{if(failure)return;failure=error;child.kill()};
+    const timer=setTimeout(()=>fail(new Error('Windows protected storage operation timed out')),timeoutMs);
+    child.stdout.setEncoding('utf8');child.stdout.on('data',(chunk:string)=>{output+=chunk;if(output.length>8*1024*1024)fail(new Error('Windows protected storage response too large'))});
+    child.once('error',()=>fail(new Error('Windows protected storage operation failed')));child.stdin.once('error',()=>fail(new Error('Windows protected storage operation failed')));
+    child.once('close',code=>{clearTimeout(timer);if(failure)reject(failure);else if(code!==0)reject(new Error('Windows protected storage operation failed'));else resolve(output)});child.stdin.end(input);
+  });
+}
+async function executeAsync(operation:Operation,path:string,data?:Buffer):Promise<Buffer> {
+  if(process.platform!=='win32')throw new Error('Windows private storage requires Windows');
+  const invocation=windowsPrivateInvocation(operation,path,data);const root=process.env.SystemRoot;
+  if(!root||!win32.isAbsolute(root))throw new Error('Windows system directory unavailable');
+  const encoded=(await runProtectedProcess(win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe'),invocation.args,invocation.input)).trim();
+  if(operation==='read-secret'||operation==='read-private'){
+    if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))throw new Error('Windows protected storage returned invalid data');
+    const value=Buffer.from(encoded,'base64');if(value.length>4194304||value.toString('base64')!==encoded)throw new Error('Windows protected storage returned invalid data');return value;
+  }
+  return Buffer.alloc(0);
+}
+export async function protectWindowsDirectoryAsync(path:string):Promise<void>{await executeAsync('protect-directory',path)}
+export async function assertWindowsPrivateDirectoryAsync(path:string):Promise<void>{await executeAsync('check-directory',path)}
+export async function assertWindowsPrivateFileAsync(path:string):Promise<void>{await executeAsync('check-file',path)}
+export async function writeWindowsSecretAsync(path:string,data:Buffer):Promise<void>{await executeAsync('write-secret',path,data)}
+export async function replaceWindowsSecretAsync(path:string,data:Buffer):Promise<void>{await executeAsync('replace-secret',path,data)}
+export async function readWindowsSecretAsync(path:string):Promise<Buffer>{return executeAsync('read-secret',path)}
+export async function writeWindowsPrivateFileAsync(path:string,data:Buffer):Promise<void>{await executeAsync('write-private',path,data)}
+export async function replaceWindowsPrivateFileAsync(path:string,data:Buffer):Promise<void>{await executeAsync('replace-private',path,data)}
+export async function readWindowsPrivateFileAsync(path:string):Promise<Buffer>{return executeAsync('read-private',path)}

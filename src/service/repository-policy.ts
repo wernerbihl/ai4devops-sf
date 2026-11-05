@@ -1,4 +1,4 @@
-import type { FactoryStore } from '../storage/store.ts';
+import type { FactoryStore, RepositorySelection } from '../storage/store.ts';
 import { StoreError } from '../storage/store.ts';
 import type { GitHubBackend, GitHubBackendOptions } from '../github/auth.ts';
 import type { RuntimeConfig } from './config.ts';
@@ -8,20 +8,25 @@ import { DefinitiveNoEffect } from './api.ts';
 
 /** Only the session-owned selection port can add durable repository authority. */
 export function createRepositoryPolicy(store: FactoryStore, config: Pick<RuntimeConfig, 'repositories' | 'selectedIdentity'>, backend: Pick<GitHubBackend, 'listRepositories' | 'resolveGitHubAuth'>, backendOptions?: GitHubBackendOptions) {
-  const restore = () => {
-    const selections = store.repositorySelections();
+  const compatiblePolicy = (selections: RepositorySelection[]) => {
     const actor = selections[0] && { accountId: selections[0].accountId, login: selections[0].login };
     ensure(!actor || selections.every(item => item.accountId === actor.accountId), 'repository_identity', 'Selected repositories belong to different GitHub accounts');
     ensure(!actor || !config.selectedIdentity || config.selectedIdentity.accountId === actor.accountId, 'repository_identity', 'Configured account differs from repository selections');
-    if (actor && backendOptions) backendOptions.selectedIdentity = actor;
+    const repositories = [...config.repositories];
     for (const selected of selections) {
       const id = `github:${selected.githubId}`;
       const entry = { id, owner: selected.owner, name: selected.name, baseRef: selected.baseRef, operations: ['read', 'contents_write', 'pull_requests_write', 'merge'] as const };
-      const existing = config.repositories.find(item => item.id === id);
+      const existing = repositories.find(item => item.id === id);
       ensure(!existing || existing.owner === entry.owner && existing.name === entry.name && existing.baseRef === entry.baseRef, 'repository_identity', 'Selected repository identity differs from configured policy');
-      if (!existing) config.repositories.push(entry);
+      if (!existing) repositories.push(entry);
     }
-    validateRepositories(config.repositories);
+    validateRepositories(repositories);
+    return { actor, repositories };
+  };
+  const restore = () => {
+    const { actor, repositories } = compatiblePolicy(store.repositorySelections());
+    if (actor && backendOptions) backendOptions.selectedIdentity = actor;
+    config.repositories.splice(0, config.repositories.length, ...repositories);
   };
   restore();
   return {
@@ -43,15 +48,21 @@ export function createRepositoryPolicy(store: FactoryStore, config: Pick<Runtime
         ensure(/^\d+$/.test(githubId) && /^refs\/heads\/[\w./-]+$/.test(`refs/heads/${item.defaultBranch}`) && !item.defaultBranch!.includes('..'), 'repository_identity', 'The selected repository requires a safe immutable identity and branch');
         const previous = existing.find(entry => entry.githubId === githubId || entry.url.toLowerCase() === item.url.toLowerCase());
         ensure(!previous || previous.githubId === githubId && previous.accountId === auth.accountId && previous.owner === item.owner && previous.name === item.name && previous.url === item.url && previous.baseRef === `refs/heads/${item.defaultBranch}`, 'repository_identity', 'Repository identity changed; review the selection');
-        const id = `github:${githubId}`;
-        if (!config.repositories.some(entry => entry.id === id)) validateRepositories([...config.repositories, { id, owner: item.owner, name: item.name, operations: ['read'] }]);
       } catch {
         // Catalog reads and preconditions cannot have selected a repository.
         throw new DefinitiveNoEffect(503, { code: 'CATALOG_UNAVAILABLE', message: 'Repository selection could not be verified', recovery: 'Restore the selected GitHub identity and catalog access, then retry the selection.', retryable: true });
       }
       ensure(auth.accountId && auth.login && item.defaultBranch, 'repository_identity', 'Verified account and default branch required');
+      const selection = { githubId, accountId: auth.accountId, login: auth.login, owner: item.owner, name: item.name, url: item.url, baseRef: `refs/heads/${item.defaultBranch}` };
+      try {
+        const selections = store.repositorySelections();
+        if (!selections.some(existing => existing.githubId === githubId)) selections.push(selection);
+        compatiblePolicy(selections);
+      } catch {
+        throw new DefinitiveNoEffect(409, { code: 'REPOSITORY_IDENTITY_CONFLICT', message: 'Repository selection conflicts with existing policy', recovery: 'Review the configured repository identity and default branch before selecting it.', retryable: false });
+      }
       let repository;
-      try { repository = store.selectRepository({ githubId, accountId: auth.accountId, login: auth.login, owner: item.owner, name: item.name, url: item.url, baseRef: `refs/heads/${item.defaultBranch}` }, key); }
+      try { repository = store.selectRepository(selection, key); }
       catch (error) {
         if (error instanceof StoreError) throw new DefinitiveNoEffect(409, { code: 'REPOSITORY_IDENTITY_CONFLICT', message: 'Repository selection conflicts with existing state', recovery: 'Review the existing repository identity and activation before selecting it.', retryable: false });
         throw error;

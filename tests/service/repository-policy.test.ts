@@ -86,3 +86,39 @@ test('conflicting_preexisting_row_refuses_selection_without_pending_effect', asy
     assert.equal(policy.reconcile('conflict-key'), undefined); assert.equal(config.repositories.length, 0);
   } finally { f.close(); }
 });
+
+for (const [name, configured] of [
+  ['base branch', { id:'github:123', owner:'octo', name:'project', baseRef:'refs/heads/develop', operations:['read' as const] }],
+  ['repository identity', { id:'github:123', owner:'other', name:'project', baseRef:'refs/heads/main', operations:['read' as const] }],
+  ['duplicate path', { id:'legacy', owner:'octo', name:'project', baseRef:'refs/heads/main', operations:['read' as const] }],
+] as const) test(`conflicting_existing_policy_${name}_refuses_before_commit_and_restart_remains_possible`, async () => {
+  const f = createFixture(); const config = { repositories: [{ ...configured }] };
+  const backend = { async listRepositories() { return [{ githubId:'123', owner:'octo', name:'project', url:'https://github.com/octo/project.git', defaultBranch:'main' }]; }, async resolveGitHubAuth() { return { status:'ready' as const, accountId:'9', login:'operator', reasons:[] }; } };
+  try {
+    const policy = createRepositoryPolicy(f.store, config, backend);
+    await assert.rejects(policy.select('123', 'policy-conflict'), (error: any) => error.name === 'DefinitiveNoEffect' && error.status === 409);
+    assert.deepEqual(f.store.repositorySelections(), []);
+    assert.equal(f.store.repositorySelectionReceipt('policy-conflict'), undefined);
+    assert.equal(f.store.getRepository('github:123'), undefined);
+    f.reopen();
+    const restored = createRepositoryPolicy(f.store, config, backend);
+    assert.equal(restored.allows(configured.id), true);
+    assert.equal(restored.reconcile('policy-conflict'), undefined);
+    assert.deepEqual(config.repositories, [configured]);
+  } finally { f.close(); }
+});
+
+test('compatible_existing_policy_survives_selection_and_restart_without_expanding_operations', async () => {
+  const f = createFixture();
+  const config = { repositories: [{ id:'github:123', owner:'octo', name:'project', baseRef:'refs/heads/main', operations:['read' as const] }] };
+  const backend = { async listRepositories() { return [{ githubId:'123', owner:'octo', name:'project', url:'https://github.com/octo/project.git', defaultBranch:'main' }]; }, async resolveGitHubAuth() { return { status:'ready' as const, accountId:'9', login:'operator', reasons:[] }; } };
+  try {
+    const policy = createRepositoryPolicy(f.store, config, backend); const selected = await policy.select('123', 'compatible');
+    assert.equal(selected.active, false); assert.deepEqual(config.repositories[0]!.operations, ['read']);
+    f.reopen(); const restarted = { repositories: [{ ...config.repositories[0]! }] };
+    const restored = createRepositoryPolicy(f.store, restarted, backend);
+    assert.deepEqual(restored.reconcile('compatible'), selected);
+    assert.deepEqual(restored.resolve(selected.id), { id:selected.id, url:'https://github.com/octo/project.git', baseRef:'refs/heads/main' });
+    assert.deepEqual(restarted.repositories[0]!.operations, ['read']);
+  } finally { f.close(); }
+});

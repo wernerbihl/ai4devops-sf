@@ -93,7 +93,7 @@ for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'foc
             const { createVsCodeNativeToolBoundary } = await import('../../src/owners/boundary.ts');
             const { createManagedHumanOpen } = await import('../../src/owners/human-open.ts');
             const { fingerprint } = await import('../../src/storage/database.ts');
-            const policy = { schemaVersion: 1 as const, kind: 'copilot-model-connect' as const, listenPort: 3128 as const, nativeRuntimeId: options.containerId, internalNetworkId: 'internal', allowedAuthorities: ['api.githubcopilot.com:443'] };
+            const policy = { schemaVersion: 2 as const, nativeAddress: '172.18.0.2', listenAddress: '172.18.0.3', kind: 'copilot-model-connect' as const, listenPort: 3128 as const, nativeRuntimeId: options.containerId, internalNetworkId: 'internal', allowedAuthorities: ['api.githubcopilot.com:443'] };
             const modelProxy = { policy, async inspect() { return { runtimeId: 'proxy', processIdentity: 'proxy', image: 'proxy@sha256:' + 'b'.repeat(64), policySha256: fingerprint(policy), nativeRuntimeId: options.containerId, internalNetworkId: 'internal', egressNetworkId: 'egress' }; } };
             const boundary = createVsCodeNativeToolBoundary({ owner, gate, launcher, modelProxy, protectedPaths: [owner.metadataDirectory, nativeState.markerPath, launcher.controlIntentPath, launcher.pauseReceiptPath, '/host-auth', '/var/run/docker.sock'] });
             const authenticate = async () => { auths++; await owner.authenticateProvider('copilot', { resource: 'https://api.github.com', token: 'fixture-native-auth', expiresIn: 300 }); };

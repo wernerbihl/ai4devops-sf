@@ -77,14 +77,14 @@ test('real runtime opens API and private control honestly unavailable without pr
   } finally {await runtime?.stop();rmSync(root,{recursive:true,force:true})}
 });
 
-test('zero existing native runtimes can be provisionable without minting profile evidence',async()=>{
+test('arbitrary proxy digest cannot make an unprovisioned runtime ready',async()=>{
  const {createFixture}=await import('../helpers/store.ts');const {createNativeFleet}=await import('../../src/service/native.ts');const {createAttemptBroker}=await import('../../src/broker/operations.ts');const {mkdirSync,writeFileSync}=await import('node:fs');
  const f=createFixture();try{
   mkdirSync(join(f.directory,'vault'),{mode:0o700});writeFileSync(join(f.directory,'vault','provider'), 'owned-fixture-sentinel',{mode:0o600});
   const calls:string[][]=[];const nativeImage='native@sha256:'+'a'.repeat(64);const workerImage='worker@sha256:'+'b'.repeat(64);const proxyImage='proxy@sha256:'+'c'.repeat(64);
   const docker={async command(args:string[]){calls.push(args);assert.equal(args[0],'image','provisionability must not allocate/start native resources');return JSON.stringify([{RepoDigests:[args.at(-1)],Os:'linux',Architecture:'amd64'}])}};
   const fleet=createNativeFleet({installation:{id:'fixture',root:f.directory,docker,secrets:{async loadOrCreate(){throw Error('unused')}}},store:f.store,broker:createAttemptBroker({store:f.store,clock:f.clock,signingKey:Buffer.alloc(32,7)}),protectedPaths:[join(f.directory,'vault'),f.path,'/var/run/docker.sock'],config:{schemaVersion:1,installationId:'fixture',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[{ref:'provider',providerId:'copilot',resource:'https://api.github.com',expiresAt:'2099-01-01T00:00:00Z',scopes:[]}],native:[{kind:'vscode-isolated-worker-v2',nativeImage,workerImage,entrypoint:'/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js',entrypointSha256:'d'.repeat(64),hostCommit:'e576c7bbeb39772a1d1ebe472545def0d93e6d8b',pristineDirectory:'/workspaces/task',emptyHome:'/opt/software-factory/empty-home',credentialRef:'provider',proxy:{image:proxyImage,entrypoint:'/opt/sf/proxy.cjs',entrypointSha256:'e'.repeat(64),allowedAuthorities:['api.githubcopilot.com:443']}}]}});
-  assert.deepEqual(await fleet.provisionability(f.task),[]);assert.equal(calls.length,3);assert.equal(f.store.getReservations().length,0);
+  assert.match((await fleet.provisionability(f.task)).join(' '), /reviewed.*proxy/i);assert.equal(calls.length,0);assert.equal(f.store.getReservations().length,0);
   const readiness=await fleet.owner.readiness(f.task.required);assert.equal(readiness.ready,false);assert.deepEqual(readiness.verifiedProfileIds,[]);
   await fleet.close();
  }finally{f.close()}

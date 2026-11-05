@@ -128,7 +128,7 @@ test('actual broker first start verifies root policy before allocating original 
         const state = await nativeStateFixture(root, start.task.id);
         const protectedPaths = [owner.metadataDirectory, state.markerPath, '/host-auth', '/var/run/docker.sock'];
         const launcher = { options: { entrypoint: native.entrypoint, nativeState: state, nativeStateOwnership: { installationId: 'installation', root } }, async inspect() { return { runtimeId: 'container', native, processIdentity: nativeProcessIdentity(native) }; } };
-        const policy = { schemaVersion: 1 as const, kind: 'copilot-model-connect' as const, listenPort: 3128 as const, nativeRuntimeId: 'container', internalNetworkId: 'internal', allowedAuthorities: ['api.githubcopilot.com:443'] };
+        const policy = { schemaVersion: 2 as const, nativeAddress: '172.18.0.2', listenAddress: '172.18.0.3', kind: 'copilot-model-connect' as const, listenPort: 3128 as const, nativeRuntimeId: 'container', internalNetworkId: 'internal', allowedAuthorities: ['api.githubcopilot.com:443'] };
         const modelProxy = { policy, async inspect() { return { runtimeId: 'proxy', processIdentity: 'proxy', image: 'proxy@sha256:' + 'b'.repeat(64), policySha256: fingerprint(policy), nativeRuntimeId: 'container', internalNetworkId: 'internal', egressNetworkId: 'egress' }; } };
         const tools = createVsCodeNativeToolBoundary({ owner, gate, launcher: launcher as any, protectedPaths, modelProxy });
         const image = 'image@sha256:' + 'a'.repeat(64);

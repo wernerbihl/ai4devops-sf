@@ -1,6 +1,6 @@
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import type { Attempt, NativeIdentity, NativeStart, OwnerEvent, RequiredCapabilities, TaskSpec } from '../contracts/domain.ts';
 import type { NativeOwner } from '../contracts/owner.ts';
@@ -19,12 +19,19 @@ import { createProfileVerifier } from '../isolation/verify.ts';
 import { NATIVE_STATE_TARGET, type NativeStateMount } from '../isolation/native-state.ts';
 import { resolveNativeMounts } from '../isolation/mounts.ts';
 import type { NativeModelProxyControl, ModelProxyPolicy } from '../owners/model-proxy.ts';
+import { proxyTopology } from './proxy-topology.ts';
+import { createProxyPlaceholder, finalizeProxyPolicy } from './proxy-policy.ts';
 import type { RuntimeConfig, IsolatedNativeTemplate } from './config.ts';
 import { readVaultSecret, readPrivateFile } from './config.ts';
 import { navigationCommits, createNativeNavigation } from '../owners/navigation.ts';
 export const isolatedProfileId = 'vscode-copilot-isolated-worker-v2';
 const workerEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','LANG=C.UTF-8'];
 const nativeEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/opt/software-factory/empty-home','LANG=C.UTF-8','SF_CONTROL_SENTINEL=sf-nonsecret-control-sentinel'];
+const curatedModelAuthorities = new Set(['api.github.com:443','api.githubcopilot.com:443','copilot-proxy.githubusercontent.com:443']);
+function reviewedProxyHash() {
+  const source = new URL(import.meta.url.endsWith('.ts') ? '../../runtime/model-proxy/connect.cjs' : '../runtime/model-proxy/connect.cjs', import.meta.url);
+  return createHash('sha256').update(readFileSync(source)).digest('hex');
+}
 export function createNativeFleet(options: { installation: Installation; config: RuntimeConfig; store: FactoryStore; broker: AttemptBroker; protectedPaths: string[] }) {
   const { installation, config, store, broker } = options; const docker = installation.docker;
   const listeners = new Set<(event: OwnerEvent) => void>();
@@ -41,6 +48,7 @@ export function createNativeFleet(options: { installation: Installation; config:
   async function templateReadiness(): Promise<string[]> {
     try {
       ensure(template, 'native_unconfigured', 'No isolated native template is configured');
+      ensure(template.proxy.entrypointSha256 === reviewedProxyHash() && template.proxy.allowedAuthorities.length > 0 && template.proxy.allowedAuthorities.every(a => curatedModelAuthorities.has(a)), 'native_proxy', 'Reviewed model proxy source and curated authorities are required');
       const credential = config.providerCredentials.find(c => c.ref === template.credentialRef);
       ensure(credential && Date.parse(credential.expiresAt) > Date.now() + 30_000 && readVaultSecret(installation.root, credential.ref).length > 0, 'native_auth', 'Current provider credential is unavailable');
       ensure((navigationCommits as readonly string[]).includes(template.hostCommit), 'native_version', 'Native host commit unsupported');
@@ -99,19 +107,48 @@ export function createNativeFleet(options: { installation: Installation; config:
     const targets = [{ source: start.workspacePath, target:'/workspaces/task' }]; const mounts = await resolveNativeMounts(start,targets);
     const native = await container({ name:ownerId+'-native', image:t.nativeImage, owner:ownerId, network:internal.Name, mounts:[{source:data,target:NATIVE_STATE_TARGET,writable:true}], env:nativeEnv, cwd:'/workspaces/task', command:['node','-e','setInterval(()=>{},1000)'], create });
     const workerContainer = await container({ name:ownerId+'-worker', image:t.workerImage, owner:ownerId, network:'none', mounts, env:workerEnv, cwd:'/workspaces/task', command:['node','-e','setInterval(()=>{},1000)'], create });
-    const policy: ModelProxyPolicy = { schemaVersion:1,kind:'copilot-model-connect',listenPort:3128,nativeRuntimeId:native.Id,internalNetworkId:internal.Id,allowedAuthorities:t.proxy.allowedAuthorities };
+    // The immutable proxy image must contain the reviewed runtime source, not an arbitrary supplied digest.
+    const proxySourceHash = reviewedProxyHash();
+    ensure(t.proxy.entrypointSha256 === proxySourceHash, 'native_proxy', 'Proxy entrypoint does not match the reviewed installed source');
     const policyPath = join(parent,'proxy.json');
-    if (create && !existsSync(policyPath)) writeFileSync(policyPath,JSON.stringify(policy),{flag:'wx',mode:0o600});
-    ensure(canonical(JSON.parse(readFileSync(policyPath,'utf8'))) === canonical(policy), 'native_proxy', 'Original model proxy policy changed');
+    const policyKey = 'runtime:proxy-policy:' + ownerId;
+    let policyIntent = store.getActionByKey(policyKey);
+    if (create && !existsSync(policyPath)) {
+      ensure(!policyIntent, 'native_proxy', 'Missing original proxy policy; inspect retained provisioning');
+      const identity = createProxyPlaceholder(policyPath);
+      policyIntent = store.enqueueAction({key:policyKey,kind:'runtime.proxy-policy',payload:{path:policyPath,...identity}});
+    }
+    ensure(policyIntent && policyIntent.kind === 'runtime.proxy-policy' && policyIntent.payload.path === policyPath, 'native_proxy', 'Missing owned proxy policy intent');
+    const policyFile = statSync(policyPath);
+    ensure(policyIntent.payload.dev === policyFile.dev && policyIntent.payload.ino === policyFile.ino, 'native_proxy', 'Proxy policy inode changed');
     const proxy = await container({ name:ownerId+'-proxy', image:t.proxy.image, owner:ownerId, network:internal.Name, mounts:[{source:policyPath,target:'/etc/software-factory/proxy.json',writable:false}], env:workerEnv, cwd:'/', command:['node',t.proxy.entrypoint,'/etc/software-factory/proxy.json'], alias:'sf-model-proxy', create });
     if (!proxy.NetworkSettings.Networks[egress.Name] && create) { try { await docker.command(['network','connect',egress.Name,proxy.Id]); } catch {} }
+    const currentProxy = await inspect('container',proxy.Id);
+    const currentNative = await inspect('container',native.Id);
+    const currentInternal = await inspect('network',internal.Id);
+    const currentEgress = await inspect('network',egress.Id);
+    const addresses = proxyTopology(currentInternal,currentEgress,currentNative,currentProxy);
+    const policy: ModelProxyPolicy = { schemaVersion:2,kind:'copilot-model-connect',listenPort:3128,nativeRuntimeId:native.Id,internalNetworkId:internal.Id,...addresses,allowedAuthorities:t.proxy.allowedAuthorities };
+    if (create) finalizeProxyPolicy(policyPath, policy);
+    else ensure(canonical(JSON.parse(readPrivateFile(policyPath).toString())) === canonical(policy), 'native_proxy', 'Original model proxy policy changed');
+    store.completeAction(policyIntent.id);
     const proxyControl: NativeModelProxyControl = { policy, async inspect() {
       const current = await inspect('container',proxy.Id); const networkIds = Object.values(current.NetworkSettings.Networks).map((n:any)=>n.NetworkID).sort();
+      const nowNative = await inspect('container',native.Id);
+      const nowInternal = await inspect('network',internal.Id); const nowEgress = await inspect('network',egress.Id);
+      ensure(canonical(proxyTopology(nowInternal,nowEgress,nowNative,current)) === canonical(addresses), 'native_proxy', 'Proxy endpoint identity changed');
       ensure(current.State.Running && current.State.Pid > 0 && current.Image === proxy.Image && canonical(networkIds) === canonical([internal.Id,egress.Id].sort())
         && current.HostConfig.ReadonlyRootfs && !current.HostConfig.Privileged && canonical(current.HostConfig.CapDrop) === canonical(['ALL']) && !current.HostConfig.CapAdd?.length
         && !current.HostConfig.PidMode && !Object.keys(current.HostConfig.PortBindings ?? {}).length && current.Mounts.length === 1 && current.Mounts[0].Source === policyPath && !current.Mounts[0].RW, 'native_proxy', 'Proxy image/topology/restrictions changed');
-      const attestation = JSON.parse(await docker.command(['exec',proxy.Id,'node','-e',`const fs=require('node:fs'),c=require('node:crypto');console.log(JSON.stringify({code:c.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'),policy:JSON.parse(fs.readFileSync('/etc/software-factory/proxy.json','utf8'))}))`,t.proxy.entrypoint]));
-      ensure(attestation.code === t.proxy.entrypointSha256 && canonical(attestation.policy) === canonical(policy), 'native_proxy', 'Pinned CONNECT proxy implementation/policy changed');
+      let attestation: {code:string;policy:unknown;listeners:number} | undefined;
+      for (let attempt=0; attempt<20; attempt++) {
+        attestation = JSON.parse(await docker.command(['exec',proxy.Id,'node','-e',`const fs=require('node:fs'),c=require('node:crypto'),p=JSON.parse(fs.readFileSync('/etc/software-factory/proxy.json','utf8'));const addr=p.listenAddress.split('.').map(n=>Number(n).toString(16).padStart(2,'0')).reverse().join('').toUpperCase()+':0C38';const listeners=fs.readFileSync('/proc/net/tcp','utf8').split('\\n').slice(1).map(s=>s.trim().split(/\\s+/)).filter(a=>a[1]===addr&&a[3]==='0A').length;console.log(JSON.stringify({code:c.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'),policy:p,listeners}))`,t.proxy.entrypoint]));
+        ensure(attestation && attestation.code === proxySourceHash && canonical(attestation.policy) === canonical(policy), 'native_proxy', 'Pinned CONNECT proxy implementation/policy changed');
+        if (attestation.listeners === 1) break;
+        ensure(attestation.listeners === 0, 'native_proxy', 'Unexpected proxy listeners');
+        await new Promise(resolve => setTimeout(resolve,100));
+      }
+      ensure(attestation?.listeners === 1, 'native_proxy', 'Exact proxy listener unavailable');
       return {runtimeId:proxy.Id,processIdentity:fingerprint({pid:current.State.Pid,started:current.State.StartedAt}),image:t.proxy.image,policySha256:fingerprint(policy),nativeRuntimeId:native.Id,internalNetworkId:internal.Id,egressNetworkId:egress.Id};
     } };
     const gate = createFactoryToolGate({store,broker});

@@ -32,3 +32,11 @@ test('owned runtime cleanup refuses foreign mounts and retains unrelated files',
 test('ownership replacement records the exact new file only when old identity was verified',async()=>{
  const {recordCreatedPaths,snapshotCreatedPath,replaceRecordedFileIdentity,readCreatedPaths}=await import('../../src/install/ownership.ts');const {renameSync}=await import('node:fs');const root=mkdtempSync(join(tmpdir(),'sf-owned-replace-'));try{writeFileSync(join(root,'factory.sqlite'),'old',{mode:0o600});await recordCreatedPaths({id:'fixture',root,paths:[snapshotCreatedPath(root,'factory.sqlite')]});const old=(await readCreatedPaths({id:'fixture',root}))[0]!;writeFileSync(join(root,'staged'),'new',{mode:0o600});const next=snapshotCreatedPath(root,'staged');renameSync(join(root,'staged'),join(root,'factory.sqlite'));await replaceRecordedFileIdentity({id:'fixture',root,previous:old,next:{...next,path:'factory.sqlite'}});assert.equal((await readCreatedPaths({id:'fixture',root}))[0]!.ino,snapshotCreatedPath(root,'factory.sqlite').ino);assert.equal(readFileSync(join(root,'factory.sqlite'),'utf8'),'new')}finally{rmSync(root,{recursive:true,force:true})}
 });
+
+test('uninstall cannot race another installation administration operation',async()=>{
+ const {acquireAdministrationLock}=await import('../../src/install/administration.ts');
+ const root=mkdtempSync(join(tmpdir(),'sf-uninstall-admin-')),config=join(root,'config');mkdirSync(config,{mode:0o700});
+ const installation={schemaVersion:1 as const,id:'fixture',root,node:join(root,'node'),serviceEntry:join(root,'entry'),version:'0.1.0'};
+ const lock=await acquireAdministrationLock('different-installation',config);
+ try{await assert.rejects(uninstallInstallation(installation,{adminDirectory:config}),/administration/i);assert.equal(existsSync(join(root,'uninstall-pending.json')),false)}finally{lock.close();rmSync(root,{recursive:true,force:true})}
+});

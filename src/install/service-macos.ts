@@ -40,5 +40,10 @@ export class MacOSStartup {
   async start():Promise<void>{this.verify();const result=await this.command('print',`${this.domain}/${this.label}`);if(result.code===113){await this.requireCommand('bootstrap',this.domain,this.plistPath);return}if(result.code!==0)throw new Error('LaunchAgent status is unknown');if(!/\bstate\s*=\s*running\b/.test(result.output))await this.requireCommand('kickstart',`${this.domain}/${this.label}`)}
   async stop():Promise<void>{this.verify();await this.requireCommand('bootout',this.domain,this.plistPath)}
   async status():Promise<'running'|'stopped'>{this.verify();const result=await this.command('print',`${this.domain}/${this.label}`);if(result.code===113)return 'stopped';if(result.code!==0)throw new Error('LaunchAgent status is unknown');return /\bstate\s*=\s*running\b/.test(result.output)?'running':'stopped'}
-  async remove():Promise<void>{this.verify();if(await this.status()==='running')await this.requireCommand('bootout',this.domain,this.plistPath);this.verify();unlinkSync(this.plistPath)}
+  async remove():Promise<void>{
+    this.verify();const current=await this.command('print',`${this.domain}/${this.label}`);
+    if(current.code===0){await this.requireCommand('bootout',this.domain,this.plistPath);const after=await this.command('print',`${this.domain}/${this.label}`);if(after.code!==113)throw new Error('LaunchAgent removal is unconfirmed')}
+    else if(current.code!==113)throw new Error('LaunchAgent status is unknown');
+    this.verify();unlinkSync(this.plistPath);
+  }
 }

@@ -28,8 +28,9 @@ function writePrivate(path:string,value:string|Buffer):void {
 /** Apply only after explicit Install (Y/n). Unknown partial work remains owned for inspection. */
 export async function applyInstall(plan:InstallPlan,options:{docker?:DockerPort;locatorPath?:string;configHome?:string;systemctl?:string}={}):Promise<Installation> {
   if(!['linux','darwin','win32'].includes(process.platform))throw new Error('This platform does not yet have a protected installation adapter');
-  const locator=options.locatorPath??installationLocatorPath();if(await locateInstallation(locator))throw new Error('An installation already exists');
+  const locator=options.locatorPath??installationLocatorPath();
   const administration=await acquireAdministrationLock(plan.id,dirname(locator));try {
+  if(await locateInstallation(locator))throw new Error('An installation already exists');
   const credential=loadCompanionCredential(plan.stagedAuthRoot,{ref:'native-copilot',resource:'https://api.github.com',scopes:['read:user','user:email']});
   if(credential.account.id!==plan.account.id)throw new Error('Selected Copilot account changed since preview');
   const docker=options.docker??new ProcessDocker(plan.dockerExecutable??'docker');const state=inspectSelectedRoot(plan.directory);let created=false;let markerCreated=false;let bindConfirmed=false;

@@ -52,6 +52,8 @@ export interface Lifecycle {
   dispatchPending(dispatchKey?: string): Promise<{ kind: 'started'; attemptId: string } | null>;
   reconnect(): Promise<void>;
   waitForCI(attemptId: string): Promise<void>;
+  /** Persist a stop intent and require the existing composite writer proof before release. */
+  stopForMaintenance(attemptId: string): Promise<void>;
   /** Trusted C8 handoff: quiesce but retain writer lease for protected metadata operations. */
   prepareCloseout(attemptId: string, result: TaskResult): Promise<void>;
   finishCloseout(attemptId: string, result: TaskResult, outcome: CloseoutResult): Promise<void>;
@@ -365,6 +367,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       await dispatchPending();
     }),
     waitForCI: id => operation(() => pause(id, 'waiting_ci')),
+    stopForMaintenance: id => operation(() => pause(id, 'needs_attention', { kind: 'blocked', prompt: 'Factory maintenance', recovery: 'Resume the original session after maintenance completes' })),
   };
   function assertEffect(id: string, fence: number, token: string): void {
     const current = record(id);

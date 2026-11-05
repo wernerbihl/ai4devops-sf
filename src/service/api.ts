@@ -11,6 +11,7 @@ import { ApiFault, resultFor, routes, safeFailure } from './routes.ts';
 import type { Route } from './routes.ts';
 import { sanitize } from './snapshot.ts';
 import { eventStream } from './events.ts';
+import type { MaintenanceGate } from './maintenance-gate.ts';
 export type { FactorySnapshot } from '../contracts/domain.ts';
 export type { SessionPolicy, ProvisionedSession } from './session.ts';
 export type ApiFailureStatus = 400 | 401 | 403 | 404 | 409 | 429 | 503;
@@ -50,6 +51,7 @@ export interface PendingRequest { key: string; method: string; path: string }
 export type Reconciliation = { state: 'pending' } | { state: 'complete'; body: unknown }
   | { state: 'failed'; status: ApiFailureStatus; error: ApiError }; // proven definitive no-effect refusal only
 export interface ApiDeps {
+  maintenanceGate?: MaintenanceGate;
   store: FactoryStore; scheduler: Scheduler; session: SessionPolicy;
   lifecycle?: Pick<Lifecycle, 'requestTakeover' | 'returnControl' | 'resumeInput'>;
   auth?: AuthPort; recipes?: RecipePort; owner?: OwnerPort; clock?: Clock;
@@ -108,6 +110,7 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
   };
   const server = createServer(async (req, res) => {
     res.setHeader('access-control-allow-origin', 'null');
+    let releaseMaintenance: (() => void) | undefined;
     try {
       if (req.headers.host !== authority) throw new ApiFault(403, 'HOST_DENIED', 'Use the configured literal loopback API address');
       const origin = header(req, 'origin');
@@ -127,6 +130,7 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
       }
       const method = req.method ?? 'GET'; const mutation = method !== 'GET';
       sessions.authenticate(req, mutation);
+      if (mutation) releaseMaintenance = deps.maintenanceGate?.enter();
       res.setHeader('access-control-allow-origin', origin ?? `http://${authority}`); res.setHeader('access-control-allow-credentials', 'true'); res.setHeader('vary', 'Origin');
       // Restrict the request target; absolute-form targets and queries are not supported.
       const path = req.url ?? '';
@@ -197,7 +201,7 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
       }
       const failure = error instanceof SessionError ? { status: error.status, body: { code: error.status === 401 ? 'UNPAIRED' : 'FORBIDDEN', message: 'Session authorization required', recovery: 'Pair through the trusted local host and use its approved origin and CSRF token', retryable: false } } : safeFailure(error);
       send(res, failure.status, failure.body);
-    }
+    } finally { releaseMaintenance?.(); }
   });
   server.requestTimeout = 10000; server.headersTimeout = 10000; server.keepAliveTimeout = 1000;
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(input.listen?.port ?? 0, host, () => { server.off('error', reject); resolve(); }); });

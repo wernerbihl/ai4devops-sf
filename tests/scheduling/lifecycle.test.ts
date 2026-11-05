@@ -658,3 +658,17 @@ test('exact original history resolves a lost human turn acknowledgement before c
   await lifecycle.returnControl('repo-1');assert.equal(reconciled,true);assert.equal(x.f.store.getRepository('repo-1')!.controlMode,'factory');
  }finally{x.f.close()}
 });
+
+test('maintenance stop retains an unknown writer fence and releases only after composite quiescence', async () => {
+  const x = await fixture(); const { f } = x;
+  try {
+    x.setQuiet('unknown');
+    await assert.rejects(x.lifecycle.stopForMaintenance(x.attempt.id), { code: 'quiescence_unknown' });
+    assert.equal(f.store.getLifecycle(x.attempt.id).state.stopRequested, true);
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 1);
+    x.setQuiet('stopped'); x.setWorkflowQuiet('stopped');
+    await x.lifecycle.stopForMaintenance(x.attempt.id);
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 0);
+    assert.deepEqual(f.store.getLifecycle(x.attempt.id).reservation.attempt.native, x.native);
+  } finally { f.close(); }
+});

@@ -44,3 +44,15 @@ test('paused settings changes and stop/resume create only current admission oppo
   t.mock.timers.tick(49);await flush();assert.equal(admitted,2);t.mock.timers.tick(1);await flush();assert.equal(admitted,3);
  }finally{coordinator.stop()}
 });
+
+test('closing coordinator admission waits for an existing dispatch while deadline checks continue',async t=>{
+ t.mock.timers.enable({apis:['setInterval']});let release!:()=>void;let count=0;let checks=0;
+ const pending=new Promise<void>(resolve=>{release=resolve});
+ const coordinator=createCoordinator({taktMs:10,controlMs:5,dispatch:async()=>{count++;await pending},control:async()=>{checks++},reconcile:async()=>{}});
+ try {
+  coordinator.start();await flush();let settled=false;
+  const barrier=coordinator.closeAdmission().then(()=>{settled=true});
+  t.mock.timers.tick(50);await flush();assert.equal(count,1);assert.ok(checks>0);assert.equal(settled,false);
+  release();await barrier;await coordinator.dispatch('manual');assert.equal(count,1);
+ } finally {release();coordinator.stop()}
+});

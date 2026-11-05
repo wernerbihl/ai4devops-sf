@@ -426,3 +426,17 @@ test('invalid_explicit_failure_status_or_error_cannot_complete_a_pending_request
     const refused = await run(); assert.equal(refused.status, 400); assert.deepEqual(await refused.json(), error); assert.equal(calls, 1);
   } finally { await api.close(); fixture.close(); }
 });
+
+test('maintenance admission closes dashboard mutations while preserving read access', async () => {
+  const { MaintenanceGate } = await import('../../src/service/maintenance-gate.ts');
+  const fixture = createFixture(); const ports = fakePorts(fixture.store); const gate = new MaintenanceGate();
+  const api = await startApi({ ...ports.deps, maintenanceGate: gate });
+  try {
+    const session = api.sessions.provision(origin); await gate.close();
+    const headers = { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'content-type': 'application/json', 'idempotency-key': 'maintenance' };
+    const response = await fetch(api.url + '/v1/tasks', { method: 'POST', headers, body: JSON.stringify(fixture.request) });
+    assert.equal(response.status, 503);
+    assert.equal(ports.dispatches, 0);
+    assert.equal((await fetch(api.url + '/v1/snapshot', { headers })).status, 200);
+  } finally { await api.close(); fixture.close(); }
+});

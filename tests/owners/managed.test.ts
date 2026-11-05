@@ -92,3 +92,9 @@ test('managed stop proves detached writers gone and restart requires a live rese
         await rm(root, { recursive: true, force: true });
     }
 });
+test('unacknowledged native stop remains fenced across reconstruction',async()=>{
+ const {createManagedVsCodeLauncher}=await implementation();const root=await mkdtemp(join(tmpdir(),'sf-stop-unknown-'));const nativeState=await nativeStateFixture(root);
+ const options={nativeState,nativeStateOwnership:{installationId:'installation',root},containerId:'f'.repeat(64),runtimeOwnerId:'owned',image:'image@sha256:'+'a'.repeat(64),entrypoint:'/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js',entrypointSha256:'b'.repeat(64),userDataDir:nativeState.target+'/user-data',tokenFile:nativeState.target+'/connection-token',port:8081};let running=true,stops=0;
+ const docker={async command(args:string[]){if(args[0]==='container'&&args[1]==='stop'){stops++;running=false;throw Error('lost response')}if(args[0]==='container')return JSON.stringify([{Id:options.containerId,Config:{Labels:{'sf.runtime-owner':'owned'},User:'1000'},HostConfig:{RestartPolicy:{Name:'no'},AutoRemove:false},State:{Running:running,Paused:false,Pid:running?12:0,Status:running?'running':'exited'},Image:'image-id',Mounts:[{Source:nativeState.source,Destination:nativeState.target,RW:true,Type:'bind'}]}]);if(args[0]==='image')return JSON.stringify([{Id:'image-id',RepoDigests:[options.image]}]);throw Error('unexpected')}};
+ try {const launcher=createManagedVsCodeLauncher({...options,docker});await assert.rejects(launcher.stop!());const reopened=createManagedVsCodeLauncher({...options,docker});assert.equal(await reopened.stopped!(),false);await assert.rejects(reopened.stop!());assert.equal(stops,1)}finally{await rm(root,{recursive:true,force:true})}
+});

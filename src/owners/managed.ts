@@ -140,11 +140,14 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     async function stop() {
         assertSettled();
         const before = await stoppedContainer();
-        if (before.State?.Running)
+        if (before.State?.Running) {
+            await durableWrite(controlIntentPath, { schemaVersion: 1, mode: 'stop', containerId: options.containerId }, true);
             await docker.command(['container', 'stop', '--time', '10', options.containerId]);
+        }
         const after = await stoppedContainer();
-        assertSettled();
         ensure(after.State?.Running === false && after.State.Paused === false && after.State.Pid === 0 && after.State.Status === 'exited', 'owner_quiescence', 'All native container processes are not proven stopped');
+        if (before.State?.Running) await clearControlIntent();
+        else assertSettled();
     }
     async function controlledResume(start: NativeStart, assertCurrent: () => void, mode: 'factory' | 'human') {
         ensure(start.task.id === options.nativeState.taskId, 'owner_binding', 'Restart must retain the provisioned task');

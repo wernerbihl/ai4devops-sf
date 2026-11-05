@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "0.1.0",
-  "sourceCommit": "592c54c00d491b26fc5c6ff5a7f737df058f0cb0",
+  "sourceCommit": "2efa3b7a322ecbb310310df03bf3d6eca7f908b6",
   "sourceFiles": {
     "bin/ai4devops-sf.mjs": "3296bc9cb53d3f95160f05c7f0f16229da66cdb7bca9e992fd988c28d6f7caa3",
     "package-lock.json": "39898c9b2f34baf1c7abb82dadedf6a693ad53310efbce9c385e4e542ca4b83e",
@@ -40,7 +40,7 @@
     "scripts/package.ts": "bd01f0fadc1bcfb15979db7b972f470065c86fb6cb085320dec16b262689737d",
     "scripts/probe-bb.ts": "951ae7a33038f9507b51bad64b56877d6e9556f0ff6b76384f33557735dc6256",
     "scripts/probe-vscode.ts": "2ab4afdc13d3f9c373a46074529ead3502263e096b0faac9795dfa90822826cd",
-    "scripts/release-provenance.ts": "cbad9b42a3b292305d8e58b89d8d15f5d23853c77eb697544a06fdb3f21ad689",
+    "scripts/release-provenance.ts": "f68ba37a0a79c246e99cdd05410c40ff2cec52bb8a427633706778a22baf00f0",
     "scripts/verify-install.ts": "8baf95e11064e84e2bfc49e79098eba98b8392a99ada42b57fe2c038ccd877e2",
     "scripts/verify-package.ts": "69b07cf1e6343018c557dcb6bc5e55e375eb87aa1e6f7c7b505e6f6cd83953fa",
     "scripts/vscode-native-pipe-helper.mjs": "3e3d1e0f2390c610693bc72be99d3da756abf0020bd7d30cf7a8c173e0a40501",
@@ -2661,5 +2661,5 @@
     "node_modules/yaml/util.js": "2f1db26f6cc426ef698210b592f40cec49be1b6c4b34e7f2d61904786242bd85",
     "release/runtime-lock.json": "39898c9b2f34baf1c7abb82dadedf6a693ad53310efbce9c385e4e542ca4b83e"
   },
-  "releaseDigest": "0bbf475745e756c0e8cc93c40adcb0021aecd838191520c6ac4d4cf6d1b4e00b"
+  "releaseDigest": "494496f8f66a2dc5c6a0c679071c27804fb3e905f135e1ef6d419bfaa1f075f4"
 }

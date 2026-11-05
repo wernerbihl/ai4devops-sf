@@ -484,3 +484,28 @@ test('I3_durable_effect_guard_blocks_a_second_controller_while_send_is_inflight'
     assert.equal(f.store.getQuotaState().confirmed, 1);
   } finally { accepted.resolve(); await pending?.catch(() => {}); f.close(); }
 });
+
+test('ordinary_release_uses_persisted_metadata_guard_and_stale_state_cannot_remove_it', async () => {
+  const x = await fixture(); const { f } = x;
+  try {
+    const stale = f.store.getLifecycle(x.attempt.id).state;
+    const result = { attemptId: x.attempt.id, summary: 'Report', evidence: [], createdTaskIds: [], outcome: 'result' as const };
+    await x.lifecycle.prepareCloseout(x.attempt.id, result);
+    // Direct persistence regression: rejection must use current state, not caller's old patch.
+    assert.throws(() => f.store.updateLifecycle(x.attempt.id, x.attempt.fence,
+      { state: stale, status: 'waiting_ci', release: 'stopped' }), { code: 'closeout_inflight' });
+    // A prior accounting/pause snapshot cannot erase or downgrade the closeout phase in a
+    // separate non-release update and thereby make the next release appear safe.
+    f.store.updateLifecycle(x.attempt.id, x.attempt.fence, { state: stale });
+    f.store.updateLifecycle(x.attempt.id, x.attempt.fence,
+      { state: { ...stale, closeout: { phase: 'monitoring', fence: x.attempt.fence } } });
+    assert.equal(f.store.getLifecycle(x.attempt.id).state.closeout!.phase, 'metadata');
+    assert.throws(() => f.store.updateLifecycle(x.attempt.id, x.attempt.fence, { release: 'waiting' }), { code: 'closeout_inflight' });
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 1);
+    assert.equal(f.store.getLifecycle(x.attempt.id).reservation.lease.fence, x.attempt.fence);
+    // Only the deliberate trusted closeout path may advance its guard and release ownership.
+    await x.lifecycle.finishCloseout(x.attempt.id, result, { kind: 'completed', attemptId: x.attempt.id, headSha: 'a'.repeat(40) });
+    assert.equal(f.store.getTask(f.task.id)!.status, 'completed');
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 0);
+  } finally { f.close(); }
+});

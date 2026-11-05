@@ -13,6 +13,7 @@ import { createScheduler } from '../../src/scheduling/admission.ts';
 import { validateContract } from '../../src/contracts/schemas.ts';
 import { createLifecycle } from '../../src/scheduling/lifecycle.ts';
 import { createWorkspaceManager } from '../../src/workspaces/manager.ts';
+import { createLocalGit } from '../../src/workspaces/git.ts';
 import { FakeClock } from '../helpers/clock.ts';
 import { recipeFixture, grantFixture, materializeFixture } from '../helpers/fixtures.ts';
 import type { FinishPolicy, NativeIdentity, TaskResult } from '../../src/contracts/domain.ts';
@@ -377,4 +378,91 @@ test('a_proven_refusal_survives_later_readback_connection_loss', async () => {
     assert.equal((await f.closeout.finishTask(f.task, f.result)).kind, 'needs_attention');
     assert.equal(f.mergeRequests.length, 1);
   } finally { await f.close(); }
+});
+
+test('older_pause_proof_cannot_release_a_later_metadata_writer', async () => {
+  for (const pushOutcome of ['stopped', 'unknown'] as const) {
+    const f = await fixture('pr');
+    let releaseProof!: () => void; let proofEntered!: () => void;
+    let releasePush!: () => void; let pushEntered!: () => void;
+    const proof = new Promise<void>(resolve => { releaseProof = resolve; });
+    const proofStarted = new Promise<void>(resolve => { proofEntered = resolve; });
+    const push = new Promise<void>(resolve => { releasePush = resolve; });
+    const pushStarted = new Promise<void>(resolve => { pushEntered = resolve; });
+    let pause: Promise<unknown> | undefined; let closeout: Promise<unknown> | undefined;
+    try {
+      await f.edit(); let proofs = 0; let opens = 0;
+      f.owner.quiesce = async () => { if (++proofs === 1) { proofEntered(); await proof; } return 'stopped'; };
+      f.owner.open = async () => { opens++; return {}; };
+      f.setPushGate(async () => { pushEntered(); await push; });
+      f.setPushFailure(pushOutcome);
+      // Attach rejection handling immediately; the delayed proof must predate closeout's guard.
+      pause = f.lifecycle.waitForCI(f.attempt.id).then(() => undefined, error => error);
+      await proofStarted;
+      closeout = f.closeout.finishTask(f.task, f.result); await pushStarted;
+      releaseProof(); const pauseError = await pause;
+      assert.equal((pauseError as { code?: string } | undefined)?.code, 'closeout_inflight');
+      const held = f.store.getLifecycle(f.attempt.id);
+      assert.equal(held.reservation.lease.active, true); assert.equal(held.reservation.lease.fence, f.attempt.fence);
+      assert.equal(held.state.closeout!.phase, 'metadata');
+      f.store.createManualTasks({ recipeId: f.recipe.recipeId, repositoryIds: ['repo-1'], title: 'Competing', description: 'Must wait' }, 'competing');
+      let starts = 0;
+      const scheduler = createScheduler({ store: f.store, clock: f.clock, materialize: materializeFixture,
+        readiness: async () => { throw Error('Held repository must not prepare another workspace'); },
+        start: async () => { starts++; throw Error('Held repository must not start another writer'); } });
+      assert.equal((await scheduler.dispatch('manual')).kind, 'noop'); assert.equal(starts, 0);
+      await assert.rejects(f.lifecycle.requestTakeover(f.task.id), { code: 'closeout_inflight' }); assert.equal(opens, 0);
+      releasePush(); assert.equal((await closeout as { kind: string }).kind, 'needs_attention');
+      assert.equal(f.store.getLifecycle(f.attempt.id).reservation.lease.active, true);
+      assert.equal(f.store.getLifecycle(f.attempt.id).reservation.lease.fence, f.attempt.fence);
+      if (pushOutcome === 'unknown') {
+        const owner = JSON.parse(await readFile(join(f.root, 'factory/.workspace-manager.lock/owner.json'), 'utf8'));
+        assert.equal(owner.state, 'writer_completion_unknown');
+        await assert.rejects(f.manager.withTrustedMetadata(async () => {}));
+      }
+      assert.equal(f.createdPrCount, 0);
+    } finally { releaseProof(); releasePush(); await pause; await closeout; await f.close(); }
+  }
+});
+
+
+test('authority_changed_during_staging_prevents_a_new_commit_and_push', async () => {
+  for (const change of ['paused', 'revoked'] as const) {
+    const f = await fixture('pr');
+    let staged!: () => void; let release!: () => void;
+    const staging = new Promise<void>(resolve => { staged = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let pending: Promise<unknown> | undefined;
+    try {
+      await f.edit(); const originalHead = await f.git(f.workspace.path, ['rev-parse', 'HEAD']);
+      const localGit = createLocalGit(); let commits = 0; let pushes = 0;
+      const closeout = createCloseout({ store: f.store, clock: f.clock, lifecycle: f.lifecycle,
+        workspace: f.manager, github: f.backend.github,
+        git: { push: async input => { pushes++; await f.gitAuth.push(input); } },
+        localGit: async request => {
+          if (request.args.includes('commit')) commits++;
+          const result = await localGit(request);
+          if (request.args[0] === 'add') { staged(); await gate; }
+          return result;
+        },
+      });
+      pending = closeout.finishTask(f.task, f.result); await staging;
+      assert.equal(await f.git(f.workspace.path, ['diff', '--cached', '--name-only']), 'file.txt');
+      if (change === 'paused') f.store.patchSettings({ paused: true }, f.store.getSettings().revision);
+      else f.store.revokeGrant('grant-1');
+      release(); const outcome = await pending as { kind: string };
+      assert.equal(outcome.kind, 'needs_attention'); assert.equal(commits, 0); assert.equal(pushes, 0);
+      assert.equal(await f.git(f.workspace.path, ['rev-parse', 'HEAD']), originalHead);
+      assert.equal(await readFile(join(f.workspace.path, 'file.txt'), 'utf8'), 'feature\n');
+      assert.equal(await f.git(f.workspace.path, ['diff', '--cached', '--name-only']), 'file.txt');
+      const intent = f.store.getActionByKey(`closeout:${f.attempt.id}:commit`)!;
+      assert.equal(intent.payload.parent, originalHead); assert.equal(intent.completedAt, undefined);
+      assert.equal(f.store.getActionByKey(`closeout:${f.attempt.id}:head`), undefined);
+      assert.equal(f.store.getLifecycle(f.attempt.id).state.closeout!.phase, 'metadata');
+      assert.equal(f.store.getLifecycle(f.attempt.id).reservation.lease.active, true);
+      assert.equal(f.store.getLifecycle(f.attempt.id).reservation.lease.fence, f.attempt.fence);
+      assert.equal(f.createdPrCount, 0);
+      await f.manager.withTrustedMetadata(async () => {});
+    } finally { release(); await pending; await f.close(); }
+  }
 });

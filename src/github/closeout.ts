@@ -84,6 +84,7 @@ export function createCloseout(options: CloseoutOptions): Closeout {
             authority(task, attempt);
             try {
               await run(['add', '--all', '--', '.']);
+              authority(task, attempt);
               await run(['-c', 'user.name=Software Factory', '-c', 'user.email=software-factory@users.noreply.github.com', '-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-m', marker]);
             } catch (error) {
               if (!(error instanceof GitWriterFailure) || error.writerCompletion === 'unknown') throw error;

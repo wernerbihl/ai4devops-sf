@@ -63,6 +63,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     try { [native, workflow] = await Promise.all([deps.owner(r.attempt.native).quiesce(r.attempt.native), deps.workflow.quiesce(r.attempt, action.key)]); } catch { /* Unknown preserves the writer lease. */ }
     if (native === 'unknown' || workflow === 'unknown') throw new StoreError('quiescence_unknown', 'Prove both native and workflow execution stopped or waiting before release');
     const current = record(id);
+    ensure(closeout || current.state.closeout?.phase !== 'metadata', 'closeout_inflight', 'Trusted Git closeout began while proving quiescence; retain ownership');
     ensure(current.reservation.lease.fence === r.lease.fence, 'stale_fence', 'Quiescence belongs to an obsolete repository fence');
     ensure(!effectAtRequest || effectAtRequest.phase === 'accepted', 'effect_unresolved', 'Quiescence raced an external effect that may still accept');
     ensure(!current.state.effect || (current.state.effect.phase === 'accepted' && current.state.effect.token === effectAtRequest?.token), 'effect_unresolved', 'Execution changed while proving quiescence');

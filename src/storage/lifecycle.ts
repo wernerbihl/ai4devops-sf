@@ -39,7 +39,12 @@ export class LifecycleStorage {
     ensure(old.attemptIds.at(-1) === attemptId, 'stale_attempt', 'Only current attempt may change task state');
     ensure(!['completed', 'failed', 'cancelled'].includes(old.status), 'closed_task', 'Closed tasks cannot receive lifecycle events');
     ensure(r.status === 'confirmed' || (patch.status !== 'running' && !patch.release), 'unconfirmed_start', 'Unconfirmed retry keeps its capacity hold until native send is proven');
-    if (patch.release) ensure(patch.release !== 'unknown', 'quiescence_unknown', 'Only proven stopped or waiting execution releases a lease');
+    if (patch.release) {
+      // Check persisted state before applying any caller snapshot; only closeout() may advance
+      // this guard after trusted metadata completion and fresh native/workflow proof.
+      ensure(record.state.closeout?.phase !== 'metadata', 'closeout_inflight', 'Trusted Git closeout must finish before releasing ownership');
+      ensure(patch.release !== 'unknown', 'quiescence_unknown', 'Only proven stopped or waiting execution releases a lease');
+    }
     r.attempt = validateContract('Attempt', { ...r.attempt,
       ...(patch.status ? { status: patch.status } : {}), ...(patch.usage ? { usage: patch.usage } : {}),
       ...(patch.activeDurationMs !== undefined ? { activeDurationMs: Math.max(r.attempt.activeDurationMs, patch.activeDurationMs) } : {}),
@@ -50,6 +55,7 @@ export class LifecycleStorage {
     if (patch.release) { r.lease.active = false; this.db.sql.prepare('DELETE FROM actor_scopes WHERE attempt_id = ?').run(attemptId); }
     if (patch.state) record.state = { ...patch.state,
       ...(record.state.effect ? { effect: record.state.effect } : {}),
+      ...(record.state.closeout ? { closeout: record.state.closeout } : {}),
       stopRequested: !!record.state.stopRequested || !!patch.state.stopRequested,
     };
     if (patch.release) { record.state.quiescent = true; record.state.stopRequested = false; delete record.state.effect; }

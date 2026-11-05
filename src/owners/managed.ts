@@ -137,6 +137,10 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         const c = await stoppedContainer();
         return !controlPending && !existsSync(controlIntentPath) && c.State?.Running === false && c.State.Paused === false && c.State.Pid === 0 && c.State.Status === 'exited';
     }
+    async function readable() {
+        assertSettled();const c=await stoppedContainer();assertSettled();
+        return c.State?.Running===true&&c.State.Paused===false&&c.State.Pid>0;
+    }
     async function stop() {
         assertSettled();
         const before = await stoppedContainer();
@@ -189,7 +193,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     async function resume(start: NativeStart, gate: Pick<FactoryToolGate, 'nativeIdentity'>) { await controlledResume(start, () => { gate.nativeIdentity(start); }, 'factory'); }
     async function resumeHuman(start: NativeStart, assertCurrent: () => void) { await controlledResume(start, assertCurrent, 'human'); }
     const startNative = start;
-    return { options: Object.freeze({ ...options }), inspect, stop, stopped, pause, paused, resume, resumeHuman, controlIntentPath, pauseReceiptPath, async ensureStarted() {
+    return { options: Object.freeze({ ...options }), inspect, stop, stopped, pause, paused, readable, resume, resumeHuman, controlIntentPath, pauseReceiptPath, async ensureStarted() {
             assertSettled();
             if (!starting)
                 starting = start().finally(() => { starting = undefined; });

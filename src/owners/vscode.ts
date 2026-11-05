@@ -23,6 +23,8 @@ export interface ManagedOwnerLauncher {
     stopped?(): Promise<boolean>;
     pause?(): Promise<void>;
     paused?(): Promise<boolean>;
+    /** Read-only process-state check, with no start or unpause. */
+    readable?(): Promise<boolean>;
     ensureStarted(): Promise<AhpEndpoint | {
         connect: () => Promise<AhpTransport>;
     }>;
@@ -268,6 +270,17 @@ export class VsCodeOwner implements NativeOwner {
             await (await this.rpc()).request('fetchTurns', { channel: identity.chatId!, cursor: state.turnsNextCursor });
             state = await this.readChat(identity);
         }
+        return state;
+    }
+    /** Maintenance reconciliation may read an existing connection, never start or reconnect one. */
+    async readConnectedChat(identity:NativeIdentity):Promise<ChatState> {
+        const client=this.client;ensure(client&&this.root&&!this.closed,'owner_disconnected','Original native connection is unavailable');
+        if(this.options.launcher)ensure(this.options.launcher.readable&&await this.options.launcher.readable(),'owner_disconnected','Original native process is not readable without starting or resuming');
+        const current=()=>ensure(this.client===client&&!!this.root&&!this.closed,'owner_disconnected','Original native connection changed');
+        const read=async<T>(channel:string):Promise<T>=>{current();const {result,subscription}=await client.subscribe(channel);await subscription.close();current();ensure(result.snapshot?.resource===channel,'owner_snapshot','Missing or mismatched native snapshot');return result.snapshot.state as T};
+        const intent=this.journal.owned(identity);const session=await read<SessionState>(identity.sessionId);this.verifySession(intent,session);ensure(session.chats.some(chat=>chat.resource===identity.chatId),'owner_identity','Original native chat is missing');
+        const chatId=identity.chatId!;let state=await read<ChatState>(chatId);ensure(state.resource===chatId,'owner_identity','Native chat identity changed');const seen=new Set<string>();
+        while(state.turnsNextCursor){const cursor=state.turnsNextCursor;ensure(!seen.has(cursor),'owner_history','Native history pagination is incomplete');seen.add(cursor);current();await client.request('fetchTurns',{channel:chatId,cursor});current();state=await read<ChatState>(chatId);ensure(state.resource===chatId,'owner_identity','Native chat identity changed')}
         return state;
     }
     async readiness(required: RequiredCapabilities): Promise<OwnerReadiness> {

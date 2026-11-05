@@ -22,7 +22,7 @@ try {
   await createScheduler({store:f.store,clock:f.clock,materialize:materializeFixture,readiness:async()=>({ready:true,baseSha:'scratch',workspacePath:f.directory,profileId:'unsupported-live-native'}),start:async r=>({kind:'started',identity:{workflow:{executionId:r.attempt.id,namespace:'sf',flowId:'fixture',revision:'1'}}})}).dispatch('manual');
   const r = f.store.getReservations()[0]!; const broker = createAttemptBroker({store:f.store,clock:f.clock,signingKey:Buffer.alloc(32,42)});
   const handle: KestraHandle = {installationId:id,containerId:engine,transportContainerId:engine,journalDirectory:f.directory,brokerNetwork:{id:network,name:id,alias:'sf-broker',port:8080},request:async()=>{throw Error('Engine request unused');}};
-  bridge = await startPrivateBrokerBridge({installation:{id,root:f.directory,docker,secrets:{loadOrCreate:async()=>{throw Error('No secret store accessed');}}},kestra:handle,broker:await startWorkerBroker({broker}),streaming:new ProcessStreamingDocker(executable)});
+  bridge = await startPrivateBrokerBridge({installation:{id,root:f.directory,docker,secrets:{loadOrCreate:async()=>{throw Error('No secret store accessed');}}},kestra:handle,store:f.store,broker:await startWorkerBroker({broker}),streaming:new ProcessStreamingDocker(executable)});
   const token = broker.issueAttemptCapability(r.attempt.id,['grant-1'],['result.submit']); const scope = broker.authorizeAttempt(token,'result.submit',{});
   const proposal = {attemptId:r.attempt.id,summary:'fixed canary {{ raw < > }} 日本語',evidence:[],createdTaskIds:[],outcome:'result' as const};
   const body = encodeWorkerRequest({requestId:'fixed-live-result',idempotencyKey:'fixed-live-result',scope,operation:'result.submit',payload:proposal});

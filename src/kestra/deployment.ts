@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
 import { constants, closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { parse } from 'yaml';
 import { protectWindowsDirectoryAsync, readWindowsPrivateFile, readWindowsPrivateFileAsync, readWindowsSecretAsync, writeWindowsPrivateFile, writeWindowsPrivateFileAsync, writeWindowsSecretAsync } from '../platform/windows-private.ts';
 import { canonical, fingerprint } from '../storage/database.ts';
 import { check, KestraError, privateDirectory, privateDirectoryAsync } from './executions.ts';
 import type { EngineTransport } from './executions.ts';
+import type { FactoryStore, OutboxAction } from '../storage/store.ts';
 
 export interface DockerPort { command(args: string[], options?: { stdin?: string }): Promise<string>; }
 /** Configurable executable, shell:false, bounded output, errors never include argv/stdin/daemon secrets. */
@@ -92,7 +93,10 @@ export function createEngineTransport(docker: DockerPort, transportContainerId: 
   };
 }
 /** Mutating setup step; E7 calls only AFTER installation confirmation, never from preview. */
-export async function ensureKestra(installation: Installation): Promise<KestraHandle> {
+export async function ensureKestra(installation: Installation, options:{store:FactoryStore}): Promise<KestraHandle> {
+  const {store}=options;
+  check(!store.pendingActions().some(action=>['kestra.deployment','kestra.maintenance_stop'].includes(action.kind)), 'Original engine deployment or stop action is unresolved');
+  const begin=(operation:string,identity:string)=>store.enqueueAction({key:'kestra:deployment:'+randomUUID(),kind:'kestra.deployment',payload:{installationId:installation.id,operation,identity}});
   check(/^[A-Za-z0-9_-]{1,100}$/.test(installation.id), 'Invalid installation id');
   check(process.platform !== 'win32' || installation.secrets.protectRuntimeDirectory, 'Windows private runtime protector unavailable');
   const uid = process.platform === 'win32' ? 1000 : process.getuid!(); const gid = process.platform === 'win32' ? 1000 : process.getgid!();
@@ -122,17 +126,19 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
     const value = JSON.parse(await docker.command(['image', 'inspect', image]))[0];
     check(value.RepoDigests?.includes(image) && value.Os === 'linux' && value.Architecture === 'amd64', 'Pinned linux/amd64 image unavailable'); imageIds.set(image, value.Id); imageConfigs.set(image, value.Config);
   }
-  const networkName = prefix + '-engine'; let network = await inspect('network', networkName);
+  const networkName = prefix + '-engine'; let network = await inspect('network', networkName);let networkIntent:OutboxAction|undefined;
   if (!network) {
-    try { await docker.command(['network', 'create', '--internal', '--driver', 'bridge', ...labelArgs, networkName]); } catch { /* deterministic name, reconcile unknown creation */ }
+    networkIntent=begin('network-create',networkName);
+    await docker.command(['network', 'create', '--internal', '--driver', 'bridge', ...labelArgs, networkName]);
     network = await inspect('network', networkName);
   }
   check(network && network.Name === networkName && network.Internal === true && network.Driver === 'bridge' && Object.entries(labels).every(([k, v]) => network.Labels?.[k] === v) && Object.entries(network.Options ?? {}).every(([k, v]) => (k === 'com.docker.network.enable_ipv4' && v === 'true') || (k === 'com.docker.network.enable_ipv6' && v === 'false')), 'Owned internal network configuration mismatch');
+  if(networkIntent)store.completeAction(networkIntent.id);
   const ensureContainer = async (name: string, image: string, networkMode: string, mounts: { source: string; target: string; readOnly: boolean }[], env: string[], command: string[]): Promise<string> => {
-    let object = await inspect('container', name);
+    let object = await inspect('container', name);let createIntent:OutboxAction|undefined;
     if (!object) {
-      try { await docker.command(['create', '--name', name, ...labelArgs, ...effectiveRestrictions, '--network', networkMode, ...(image === pins.kestra.image ? ['--hostname', 'sf-kestra', '--add-host', 'sf-kestra:127.0.0.1'] : []), ...mounts.flatMap(m => ['--mount', dockerBind(m.source, m.target, m.readOnly)]), ...env.flatMap(e => ['--env', e]), image, ...command]); }
-      catch { /* exact owned config must reconcile, including after a lost create reply */ }
+      createIntent=begin('container-create',name);
+      await docker.command(['create', '--name', name, ...labelArgs, ...effectiveRestrictions, '--network', networkMode, ...(image === pins.kestra.image ? ['--hostname', 'sf-kestra', '--add-host', 'sf-kestra:127.0.0.1'] : []), ...mounts.flatMap(m => ['--mount', dockerBind(m.source, m.target, m.readOnly)]), ...env.flatMap(e => ['--env', e]), image, ...command]);
       object = await inspect('container', name);
     }
     check(object, 'Container creation outcome unknown');
@@ -153,19 +159,29 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
     const h = object.HostConfig; const c = object.Config; const base = imageConfigs.get(image);
     check(canonical(c.Entrypoint) === canonical(base.Entrypoint) && c.WorkingDir === base.WorkingDir, 'Container entrypoint configuration mismatch');
     check(object.Name === '/' + name && object.Image === imageIds.get(image) && c.Image === image && c.User === user && Object.entries(labels).every(([k, v]) => c.Labels?.[k] === v) && canonical(c.Cmd) === canonical(command), 'Owned container configuration mismatch');
-    check(h.NetworkMode === networkMode && h.ReadonlyRootfs && !h.Privileged && h.CapDrop?.includes('ALL') && !(h.CapAdd?.length) && h.SecurityOpt?.includes('no-new-privileges') && !Object.keys(h.PortBindings ?? {}).length && !(h.Binds?.length) && !h.PidMode && h.PidsLimit === 256 && h.Memory === 2147483648 && h.NanoCpus === 2000000000, 'Container restriction configuration mismatch');
+    check(h.NetworkMode === networkMode && h.ReadonlyRootfs && !h.Privileged && h.RestartPolicy?.Name==='no' && h.AutoRemove===false && h.CapDrop?.includes('ALL') && !(h.CapAdd?.length) && h.SecurityOpt?.includes('no-new-privileges') && !Object.keys(h.PortBindings ?? {}).length && !(h.Binds?.length) && !h.PidMode && h.PidsLimit === 256 && h.Memory === 2147483648 && h.NanoCpus === 2000000000, 'Container restriction configuration mismatch');
     check(object.Mounts.length === mounts.length && mounts.every(m => object.Mounts.some((a: any) => a.Type === 'bind' && a.Source === m.source && a.Destination === m.target && a.RW === !m.readOnly)), 'Container mount configuration mismatch');
     const envMap = (values: string[]) => Object.fromEntries(values.map(e => { const split = e.indexOf('='); return [e.slice(0, split), e.slice(split + 1)]; }));
     check(canonical(envMap(c.Env ?? [])) === canonical(envMap([...(base.Env ?? []), ...env])), 'Container environment configuration mismatch');
     check(h.IpcMode !== 'host' && h.UsernsMode !== 'host' && h.UTSMode !== 'host' && !(h.Devices?.length) && !(h.DeviceRequests?.length) && !(h.VolumesFrom?.length) && canonical(h.Tmpfs) === canonical({ '/tmp': tmpfs }), 'Container namespace/tmpfs restriction mismatch');
+    if(createIntent){const receipt=store.enqueueAction({key:'kestra:owner:'+name,kind:'kestra.owner',payload:{installationId:installation.id,name,containerId:object.Id,owner}});store.completeAction(receipt.id);store.completeAction(createIntent.id)}
     // Mutating setup adoption always rejoins an existing transport. The engine may have
     // restarted in another invocation, including a crash before sidecar reattachment.
     // Running flags, PIDs and timestamps cannot establish shared namespace freshness.
     if (object.State.Running && image === pins.worker.image) {
-      try { await docker.command(['restart', '--timeout', '1', object.Id]); } catch { /* reconcile namespace reattachment */ }
-      object = await inspect('container', name); check(object?.State.Running, 'Transport restart outcome unknown');
+      const priorId=object.Id;const intent=begin('container-restart',priorId);
+      await docker.command(['restart', '--timeout', '1', priorId]);
+      object = await inspect('container', name); check(object?.Id===priorId&&object.State.Running&&typeof object.State.StartedAt==='string'&&object.State.StartedAt, 'Transport restart outcome unknown');
+      verifyEffectiveNetworks(object,true);
+      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt}});store.completeAction(receipt.id);store.completeAction(intent.id);
     }
-    if (!object.State.Running) { try { await docker.command(['start', object.Id]); } catch { /* inspect start outcome */ } object = await inspect('container', name); check(object?.State.Running, 'Container start outcome unknown'); }
+    if (!object.State.Running) {
+      const priorId=object.Id;const intent=begin('container-start',priorId);
+      await docker.command(['start', priorId]);object=await inspect('container',name);
+      check(object?.Id===priorId&&object.State.Running&&typeof object.State.StartedAt==='string'&&object.State.StartedAt,'Container start outcome unknown');
+      verifyEffectiveNetworks(object,true);
+      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt}});store.completeAction(receipt.id);store.completeAction(intent.id);
+    }
     verifyEffectiveNetworks(object, true);
     return object.Id;
   };

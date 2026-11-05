@@ -11,6 +11,7 @@ import { createKestraAuthority } from '../broker/authority.ts';
 import { createAttemptBroker } from '../broker/operations.ts';
 import { startWorkerBroker } from '../broker/server.ts';
 import { startPrivateBrokerBridge, ProcessStreamingDocker } from '../broker/bridge.ts';
+import { inspectOwnedBrokerRelay, stopOwnedBrokerRelay } from '../broker/maintenance.ts';
 import { openStore } from '../storage/store.ts';
 import { canonical, ensure, fingerprint, systemClock } from '../storage/database.ts';
 import { recipeMaterializer } from '../recipes/materialize.ts';
@@ -29,6 +30,9 @@ import { startApi } from './api.ts';
 import { createCoordinator } from './coordinator.ts';
 import { MaintenanceGate } from './maintenance-gate.ts';
 import { inspectMaintenanceBlockers } from './maintenance-blockers.ts';
+import { inspectNativeInventory } from './native-inventory.ts';
+import { inspectOwnedKestra, stopOwnedKestra } from '../kestra/maintenance.ts';
+import { inspectProtectedMounts } from '../kestra/mount-survey.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
 import { createDispatchApi } from './dispatch-api.ts';
 import { acquireInstallationSingletonAsync } from './singleton.ts';
@@ -61,7 +65,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
     const config=await required(()=>(bootstrap.loadConfig??loadRuntimeConfigAsync)(installation.root,installation.id));
     const readKey=(ref:string)=>required(async()=>{const key=await (bootstrap.readSecret??readVaultSecretAsync)(installation.root,ref);ensure(key.length>=32,'runtime_secrets','Persistent protected broker/control keys required');return key});
     const signingKey=await readKey('broker-signing');const controlKey=await readKey('private-control');
-    let stopping=false;let engine:KestraClient|undefined;let engineReason='Protected workflow engine is unavailable';let fleet!:NativeFleet;let lifecycle!:Lifecycle;
+    let stopping=false;let engine:KestraClient|undefined;let relayBridge:Awaited<ReturnType<typeof startPrivateBrokerBridge>>|undefined;let engineReason='Protected workflow engine is unavailable';let fleet!:NativeFleet;let lifecycle!:Lifecycle;
     const requiredEmpty={paths:[],tools:[],credentialRefs:[],networkDestinations:[],allowedFinishPolicies:[]};
     const pendingInputs=new Map<string,{identity:NativeIdentity;input:NativeInput}>();
     const broker=createAttemptBroker({store,clock:systemClock,signingKey,pendingNativeInput:id=>pendingInputs.get(id),
@@ -194,14 +198,33 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
     clearInterval(bootstrapTimer);
     coordinator.start({admission:false});
     await coordinator.check();
-    if(!maintenance)try {const handle=await ensureKestra(installation);const journalProtection=await prepareExecutionJournal(handle.journalDirectory);const client=new KestraClient({...handle,...(journalProtection?{journalProtection}:{}),authority:createKestraAuthority({broker,store})});engine=client;cleanup.push(()=>client.close());const bridge=await startPrivateBrokerBridge({installation,kestra:handle,broker:await startWorkerBroker({broker,maintenanceGate}),...(installation.docker instanceof ProcessDocker?{streaming:new ProcessStreamingDocker(installation.docker.executable)}:{})});cleanup.push(()=>bridge.close());engineReason='';} catch {engine=undefined;engineReason='Pinned private Kestra deployment/transport is unavailable; inspect owned installation assets and bind support';}
+    if(!maintenance)try {const handle=await ensureKestra(installation,{store});const journalProtection=await prepareExecutionJournal(handle.journalDirectory);const client=new KestraClient({...handle,...(journalProtection?{journalProtection}:{}),authority:createKestraAuthority({broker,store})});engine=client;cleanup.push(()=>client.close());const bridge=await startPrivateBrokerBridge({installation,kestra:handle,store,broker:await startWorkerBroker({broker,maintenanceGate}),...(installation.docker instanceof ProcessDocker?{streaming:new ProcessStreamingDocker(installation.docker.executable)}:{})});relayBridge=bridge;cleanup.push(()=>bridge.close());engineReason='';} catch {engine=undefined;engineReason='Pinned private Kestra deployment/transport is unavailable; inspect owned installation assets and bind support';}
     if(engine)services.engine=engine;
     await refreshReadiness();
     if(!maintenance)lastReport=await reconcileInstallation(services);
     recovering=false;
     const lifecycleApi=createLifecycleApi(store,lifecycle);
     const dispatchApi=createDispatchApi(store,scheduler);
+    async function verifyMaintenanceNative(purpose:'reconfigure'|'uninstall') {
+      const template=config.native[0];
+      const items=await inspectNativeInventory({id:installation.id,root:installation.root,docker:installation.docker,store,images:{native:template?.nativeImage??'',worker:template?.workerImage??'',proxy:template?.proxy.image??''}});
+      for(const item of items){
+        ensure(!item.pending.length,'runtime_maintenance','Original native effects require reconciliation');
+        const native=item.containers.find(c=>c.role==='native')!;const worker=item.containers.find(c=>c.role==='worker')!;const proxy=item.containers.find(c=>c.role==='proxy')!;
+        if(purpose==='uninstall')ensure(native.stopped&&worker.stopped&&proxy.stopped,'runtime_maintenance','Original native resources remain live');
+        else {
+          if(!native.stopped){
+            ensure(native.frozen,'runtime_maintenance','Native writer is not stopped or frozen');
+            const attempts=store.getReservations().filter(r=>r.attempt.taskId===item.taskId&&r.attempt.native);
+            ensure(attempts.length>0,'runtime_maintenance','Original native identities are unavailable');
+            for(const r of attempts){const member=await fleet.member(fleet.startFor(r.attempt));ensure((await member.owner.stoppedReceipt(r.attempt.native!))?.mode==='paused','runtime_maintenance','Original native freeze receipt is unavailable')}
+          }
+          if(!worker.stopped){const receipt=worker.startedAt?store.getActionByKey('worker:pause:'+worker.id+':'+worker.startedAt):undefined;ensure(worker.frozen&&receipt?.kind==='worker.pause'&&receipt.completedAt,'runtime_maintenance','Worker freeze receipt is unavailable')}
+        }
+      }
+    }
     const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
+    let maintenanceJob:Promise<unknown>|undefined;
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();
       if(method==='GET'&&path==='/readiness')return{health:await health(),owners:await owners.list(requiredEmpty),reconciliation:lastReport};
@@ -209,6 +232,9 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         ensure(Object.keys(input).length===1&&(input.purpose==='uninstall'||input.purpose==='reconfigure'),'runtime_maintenance','Explicit maintenance purpose required');
         if(!maintenanceIntent){maintenanceIntent=store.enqueueAction({key:'maintenance:'+randomUUID(),kind:'maintenance.intent',payload:{installationId:installation.id,purpose:input.purpose}});maintenance=true;}
         ensure(store.pendingActions().filter(action=>action.kind==='maintenance.intent').length===1&&maintenanceIntent.payload.installationId===installation.id&&maintenanceIntent.payload.purpose===input.purpose,'runtime_maintenance','Original maintenance purpose must be recovered');
+        if(maintenanceJob)return maintenanceJob;
+        const purpose=input.purpose;
+        const job=(async()=>{
         const draining=maintenanceGate.close();
         const stopActive=()=>Promise.allSettled(store.getReservations().filter(r=>r.lease.active).map(r=>lifecycle.stopForMaintenance(r.attempt.id)));
         // Begin relay closure without waiting for another in-flight dispatch; then
@@ -216,8 +242,30 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         const relays=fleet.closeHumanAdmissions();
         await Promise.all([draining,coordinator.closeAdmission(),relays,stopActive()]);
         await fleet.closeHumanAdmissions();
+        await fleet.reconcileConnectedHumanEffects();
         await stopActive();
-        return {state:'admission_closed',blocked:await inspectMaintenanceBlockers(installation.root,store)};
+        let blocked=await inspectMaintenanceBlockers(installation.root,store);
+        if(blocked.length)return {state:'admission_closed',blocked};
+        try {
+          await verifyMaintenanceNative(purpose);
+          const engineResources=await inspectOwnedKestra(installation,store);
+          const relay={id:installation.id,networkId:engineResources.networkId,docker:installation.docker,store};
+          await inspectOwnedBrokerRelay(relay);
+          const mounted=await inspectProtectedMounts(installation.root,engineResources.containerId,installation.docker);
+          if(mounted.length)return {state:'admission_closed',blocked:mounted.map(identity=>({kind:'effect',identity}))};
+          relayBridge?.close();relayBridge=undefined;
+          await stopOwnedBrokerRelay(relay);
+          await stopOwnedKestra(installation,engineResources,store);
+          if(engine){engine.close();engine=undefined;engineReason='Engine stopped for maintenance'}
+          blocked=await inspectMaintenanceBlockers(installation.root,store);
+          await verifyMaintenanceNative(purpose);
+          ensure((await inspectOwnedBrokerRelay(relay)).stopped,'runtime_maintenance','Broker relay stop not proven');
+          ensure((await inspectProtectedMounts(installation.root,engineResources.containerId,installation.docker)).length===0,'runtime_maintenance','An unowned protected mount appeared');
+          if(blocked.length)return {state:'admission_closed',blocked};
+          return {state:'engine_stopped',blocked:[]};
+        } catch {return {state:'admission_closed',blocked:[{kind:'effect',identity:'native-or-engine-unverified'}]}}
+        })();maintenanceJob=job;
+        try{return await job}finally{if(maintenanceJob===job)maintenanceJob=undefined}
       }
       const release=maintenanceGate.enter();
       try {

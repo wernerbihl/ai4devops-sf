@@ -10,7 +10,7 @@ import type { DockerPort } from '../kestra/deployment.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
 
-export interface NativeInventoryItem { taskId:string; ownerId:string; pending:string[]; containers:{role:'native'|'worker'|'proxy';id:string;fingerprint:string;stopped:boolean}[]; networks:{id:string;fingerprint:string}[] }
+export interface NativeInventoryItem { taskId:string; ownerId:string; pending:string[]; containers:{role:'native'|'worker'|'proxy';id:string;fingerprint:string;stopped:boolean;frozen:boolean;startedAt?:string}[]; networks:{id:string;fingerprint:string}[] }
 /** Read-only inventory of retained task runtimes. No adoption, profile setup, authentication or starts. */
 export async function inspectNativeInventory(input:{id:string;root:string;docker:DockerPort;store:FactoryStore;images:{native:string;worker:string;proxy:string}}):Promise<NativeInventoryItem[]> {
   const {id,root,docker,store,images}=input;
@@ -45,7 +45,7 @@ export async function inspectNativeInventory(input:{id:string;root:string;docker
       const mounts=role==='native'?[{source,target:NATIVE_STATE_TARGET,writable:true}]:role==='worker'?workerMounts:[{source:policyPath,target:'/etc/software-factory/proxy.json',writable:false}];
       ensure(Array.isArray(c.Mounts)&&canonical(c.Mounts.map((m:any)=>({source:m.Source,target:m.Destination,writable:m.RW})))===canonical(mounts)&&c.Mounts.every((m:any)=>m.Type==='bind'),'native_inventory','Native runtime mount changed');
       ensure(c.State&&typeof c.State.Running==='boolean'&&typeof c.State.Paused==='boolean'&&typeof c.State.Pid==='number','native_inventory','Native runtime state unknown');
-      containers.push({role,id:c.Id,fingerprint:fingerprint({id:c.Id,image:c.Image,config:c.Config,host:c.HostConfig,mounts:c.Mounts}),stopped:c.State.Running===false&&c.State.Paused===false&&c.State.Pid===0&&c.State.Status==='exited'});
+      containers.push({role,id:c.Id,fingerprint:fingerprint({id:c.Id,image:c.Image,config:c.Config,host:c.HostConfig,mounts:c.Mounts}),stopped:c.State.Running===false&&c.State.Paused===false&&c.State.Pid===0&&c.State.Status==='exited',frozen:c.State.Running===true&&c.State.Paused===true&&c.State.Pid>0&&typeof c.State.StartedAt==='string'&&c.State.StartedAt.length>0,...(typeof c.State.StartedAt==='string'?{startedAt:c.State.StartedAt}:{})});
     }
     // Some effects are bound to a repository or container rather than an attempt. Keep
     // them visible for every inventory item instead of guessing their ownership scope.

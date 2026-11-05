@@ -5,6 +5,7 @@ import type { Installation, KestraHandle } from '../kestra/deployment.ts';
 import { kestraImagePins } from '../kestra/deployment.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
 import type { BrokerHttpRequest, BrokerHttpResponse, WorkerBroker } from './server.ts';
+import type { FactoryStore, OutboxAction } from '../storage/store.ts';
 import { WORKER_TRANSPORT_MAX_WIRE_BYTES } from '../contracts/worker-transport.ts';
 const maxFrame = WORKER_TRANSPORT_MAX_WIRE_BYTES * 2 + 65_536;
 /** Dedicated HTTP-to-stdio relay. Host/port are trusted launch configuration, never worker inputs. */
@@ -73,8 +74,9 @@ export function serveRelay(process: RelayProcess, handler: (request: BrokerHttpR
   return { close, ready };
 }
 /** Concrete cross-platform bridge: Docker argv/stdin only, no host binds, ports, sockets or credentials. */
-export async function startPrivateBrokerBridge(options: { installation: Installation; kestra: KestraHandle; broker: WorkerBroker; streaming?: StreamingDocker }) {
-  const { installation, kestra, broker } = options; const docker = installation.docker;
+export async function startPrivateBrokerBridge(options: { installation: Installation; kestra: KestraHandle; broker: WorkerBroker; store:FactoryStore; streaming?: StreamingDocker }) {
+  const { installation, kestra, broker, store } = options; const docker = installation.docker;
+  ensure(!store.pendingActions().some(a=>['broker.relay_create','broker.relay_start','broker.relay_stop'].includes(a.kind)), 'bridge_unknown', 'Original broker relay action remains unresolved');
   ensure(installation.id === kestra.installationId, 'bridge_owner', 'Installation mismatch');
   const network = JSON.parse(await docker.command(['network','inspect',kestra.brokerNetwork.id]))[0];
   ensure(network?.Id === kestra.brokerNetwork.id && network.Name === kestra.brokerNetwork.name && network.Internal === true && network.Driver === 'bridge'
@@ -85,9 +87,11 @@ export async function startPrivateBrokerBridge(options: { installation: Installa
   const labels = { 'sf.installation': installation.id, 'sf.component': 'attempt-broker', 'sf.network': network.Id };
   const command = ['node','-e','setInterval(()=>{},2147483647)'];
   const listed = (await docker.command(['container','ls','--all','--filter',`name=^${name}$`,'--format','{{.ID}}'])).trim();
+  let createIntent:OutboxAction|undefined;
   if (!listed) {
-    try { await docker.command(['create','--name',name,'--pull','never','--platform','linux/amd64','--user','1000:1000','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','64','--memory','256m','--cpus','1','--network',network.Id,'--network-alias','sf-broker',...Object.entries(labels).flatMap(([k,v])=>['--label',`${k}=${v}`]),image,...command]); }
-    catch { /* deterministic owned name; inspect uncertain creation, never blind recreate */ }
+    const claim=store.claimAction({key:'broker:relay:create:'+name,kind:'broker.relay_create',payload:{installationId:installation.id,name,networkId:network.Id}});
+    ensure(claim.fresh,'bridge_unknown','Original broker relay creation requires reconciliation');createIntent=claim.action;
+    await docker.command(['create','--name',name,'--pull','never','--platform','linux/amd64','--user','1000:1000','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','64','--memory','256m','--cpus','1','--network',network.Id,'--network-alias','sf-broker',...Object.entries(labels).flatMap(([k,v])=>['--label',`${k}=${v}`]),image,...command]);
   }
   async function inspect() {
     const c = JSON.parse(await docker.command(['container','inspect',name]))[0]; const h = c?.HostConfig; const nets = c?.NetworkSettings?.Networks;
@@ -98,7 +102,7 @@ export async function startPrivateBrokerBridge(options: { installation: Installa
       && canonical(c.Config.Env ?? []) === canonical(inspectedImage.Config.Env ?? [])
       && !h.DeviceRequests?.length && !h.ExtraHosts?.length && !h.Dns?.length && !h.Links?.length && !h.VolumesFrom?.length && !Object.keys(h.Sysctls ?? {}).length
       && canonical(h.SecurityOpt) === canonical(['no-new-privileges']) && h.NetworkMode === network.Id && !h.PidMode && (!h.IpcMode || h.IpcMode === 'private') && !h.Devices?.length
-      && !Object.keys(h.PortBindings ?? {}).length && !c.Mounts?.length && !h.Binds?.length && h.PidsLimit === 64
+      && !Object.keys(h.PortBindings ?? {}).length && !c.Mounts?.length && !h.Binds?.length && h.RestartPolicy?.Name==='no' && h.AutoRemove===false && h.PidsLimit === 64
       && h.Memory === 256*1024*1024 && h.NanoCpus === 1e9 && nets && Object.keys(nets).length === 1
       && Object.entries(nets).every(([name,n]: [string,any])=>name === network.Name && (n.NetworkID === network.Id || (!c.State?.Running && n.NetworkID === '')) && n.Aliases?.includes('sf-broker')), 'bridge_changed', 'Effective broker relay configuration changed');
     const liveNet = JSON.parse(await docker.command(['network','inspect',network.Id]))[0];
@@ -107,7 +111,13 @@ export async function startPrivateBrokerBridge(options: { installation: Installa
     return c;
   }
   let container = await inspect();
-  if (!container.State?.Running) { await docker.command(['start',name]); container = await inspect(); }
+  if(createIntent){const receipt=store.enqueueAction({key:'broker:relay:owner:'+name,kind:'broker.relay_owner',payload:{installationId:installation.id,containerId:container.Id,networkId:network.Id,name}});store.completeAction(receipt.id);store.completeAction(createIntent.id)}
+  if (!container.State?.Running) {
+    const start=store.enqueueAction({key:'broker:relay:start:'+randomUUID(),kind:'broker.relay_start',payload:{installationId:installation.id,containerId:container.Id,networkId:network.Id}});
+    await docker.command(['start',name]); container = await inspect();
+    ensure(container.State?.Running&&typeof container.State.StartedAt==='string'&&container.State.StartedAt.length>0,'bridge_stopped','Broker relay start is not confirmed');
+    const receipt=store.enqueueAction({key:'broker:relay:generation:'+container.Id+':'+container.State.StartedAt,kind:'broker.relay_generation',payload:{installationId:installation.id,containerId:container.Id,networkId:network.Id,startedAt:container.State.StartedAt}});store.completeAction(receipt.id);store.completeAction(start.id);
+  }
   ensure(container.State.Running, 'bridge_stopped', 'Broker relay is not running');
   const process = (options.streaming ?? new ProcessStreamingDocker()).open(['exec','-i',container.Id,'node','-e',relaySource]);
   const session = serveRelay(process, async request => { await inspect(); return broker.handle(request); });

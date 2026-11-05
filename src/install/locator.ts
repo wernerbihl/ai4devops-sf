@@ -1,7 +1,8 @@
-import { constants, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
 import { readPrivateFile } from '../service/config.ts';
+import { protectWindowsDirectory, writeWindowsPrivateFile } from '../platform/windows-private.ts';
 
 export interface Installation { schemaVersion:1; id:string; root:string; node:string; serviceEntry:string; version:string }
 export function installationLocatorPath(options:{platform?:NodeJS.Platform;home?:string;xdgConfigHome?:string;appData?:string}={}):string {
@@ -18,12 +19,14 @@ function validate(value:Installation):Installation {
   return value;
 }
 export async function locateInstallation(path=installationLocatorPath()):Promise<Installation|null> {
+  if(process.platform==='win32'&&!existsSync(path))return null;
   try{return validate(JSON.parse(readPrivateFile(path).toString()) as Installation)}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error}
 }
 /** Write only after confirmation; never replace another installation's locator. */
 export async function saveInstallation(installation:Installation,path=installationLocatorPath()):Promise<void> {
-  if(process.platform==='win32')throw new Error('Windows protected locator is unavailable');
-  validate(installation);if(resolve(path)!==path)throw new Error('Absolute locator path required');
+  validate(installation);
+  if(process.platform==='win32'){protectWindowsDirectory(dirname(path));writeWindowsPrivateFile(path,Buffer.from(JSON.stringify(installation)));return}
+  if(resolve(path)!==path)throw new Error('Absolute locator path required');
   const directory=dirname(path);mkdirSync(directory,{recursive:true,mode:0o700});
   const stat=lstatSync(directory);if(realpathSync(directory)!==directory||!stat.isDirectory()||stat.uid!==process.getuid!()||(stat.mode&0o077)!==0)throw new Error('Private locator directory required');
   let fd:number;try{fd=openSync(path,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600)}catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')throw new Error('An installation locator already exists');throw error}

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "packager": "@vscode/vsce@4.1.0",
   "vscodeHostCommit": "e576c7bbeb39772a1d1ebe472545def0d93e6d8b",
-  "extensionSha256": "f60d39662f286462368ac0aaac3e05ee7be87f60154ea4b7986691e6d9dd3ca1",
+  "extensionSha256": "a6a138610e600b7e95c654419cf85efd7812b7df016182a843baa75ff13d0fc6",
   "manifestSha256": "ffd188167eac6bd35076beb3862eb94fa215889dcbfb221f3d74d24978086307",
-  "vsixSha256": "89af849a72baafdcdee35aa0abfa87ab9062c534e49481316925a3a3e3fa4a36"
+  "vsixSha256": "703b7392471d6e4b43f8ac6d00e9436d44ed638687fa95aa5c671f94c67617bc"
 }

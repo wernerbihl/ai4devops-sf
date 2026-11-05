@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { accessSync, constants, existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { assertWindowsPrivateDirectory } from '../platform/windows-private.ts';
 import { ProcessDocker, type DockerPort } from '../kestra/deployment.ts';
 import { loadCompanionCredential } from './companion-auth.ts';
 import { checkDockerPreflight } from './docker-preflight.ts';
@@ -17,11 +18,11 @@ export async function planInstall(answers:SetupAnswers,options:{docker?:DockerPo
   const executable=realpathSync(answers.codeExecutable);if(!lstatSync(executable).isFile())throw new Error('VS Code executable unavailable');accessSync(executable,constants.X_OK);
   let dockerExecutable=answers.dockerExecutable;
   if(dockerExecutable===undefined&&!options.docker){
-    for(const directory of (process.env.PATH??'').split(':')){const candidate=resolve(directory||'.','docker');try{accessSync(candidate,constants.X_OK);dockerExecutable=realpathSync(candidate);break}catch{}}
+    for(const directory of (process.env.PATH??'').split(process.platform==='win32'?';':':')){const candidate=resolve(directory||'.',process.platform==='win32'?'docker.exe':'docker');try{accessSync(candidate,constants.X_OK);dockerExecutable=realpathSync(candidate);break}catch{}}
     if(!dockerExecutable)throw new Error('Docker executable unavailable; select its absolute path');
   }
   if(dockerExecutable!==undefined){if(resolve(dockerExecutable)!==dockerExecutable)throw new Error('Select an absolute Docker executable');dockerExecutable=realpathSync(dockerExecutable);accessSync(dockerExecutable,constants.X_OK)}
-  const staging=lstatSync(answers.stagedAuthRoot);if(realpathSync(answers.stagedAuthRoot)!==answers.stagedAuthRoot||!staging.isDirectory()||process.platform==='win32'||staging.uid!==process.getuid!()||(staging.mode&0o077)!==0)throw new Error('Protected staged provider authentication is unavailable');
+  if(process.platform==='win32')assertWindowsPrivateDirectory(answers.stagedAuthRoot);else {const staging=lstatSync(answers.stagedAuthRoot);if(realpathSync(answers.stagedAuthRoot)!==answers.stagedAuthRoot||!staging.isDirectory()||staging.uid!==process.getuid!()||(staging.mode&0o077)!==0)throw new Error('Protected staged provider authentication is unavailable');}
   const credential=loadCompanionCredential(answers.stagedAuthRoot,{ref:'native-copilot',resource:'https://api.github.com',scopes:['read:user','user:email']});
   const id=randomUUID();const docker=options.docker??new ProcessDocker(dockerExecutable??'docker');const check=await checkDockerPreflight(answers.directory,docker,id);
   return {...answers,...(dockerExecutable?{dockerExecutable}:{}),codeExecutable:executable,id,account:credential.account,...check,notices:[...(check.bindProof==='pending'?['Selected-root Docker bind proof is pending and will run immediately after confirmation']:[]),...(answers.providers.includes('codex')?['Codex execution remains unavailable until its host capability is verified']:[])]};

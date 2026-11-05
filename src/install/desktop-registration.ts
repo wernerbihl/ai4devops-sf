@@ -2,8 +2,9 @@ import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants, closeSync, fstatSync, fsyncSync, lstatSync, openSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { assertWindowsPrivateDirectory, writeWindowsPrivateFile } from '../platform/windows-private.ts';
 import { readPrivateFile } from '../service/config.ts';
-function privateDir(path:string):void {if(process.platform==='win32')throw new Error('Windows protected desktop registration is unavailable');const s=lstatSync(path);if(resolve(path)!==path||realpathSync(path)!==path||!s.isDirectory()||s.uid!==process.getuid!()||(s.mode&0o077)!==0)throw new Error('Private desktop directory required')}
+function privateDir(path:string):void {if(process.platform==='win32'){assertWindowsPrivateDirectory(path);return}const s=lstatSync(path);if(resolve(path)!==path||realpathSync(path)!==path||!s.isDirectory()||s.uid!==process.getuid!()||(s.mode&0o077)!==0)throw new Error('Private desktop directory required')}
 /** One-use private IPC request to the locally installed VS Code companion. */
 export async function startDesktopRegistration(options:{requestDir:string;profileRoot:string;installationId:string;runtimeOwnerId:string;address:string;capability:string;expiresAt:number}) {
  privateDir(options.requestDir);privateDir(options.profileRoot);const marker=JSON.parse(readPrivateFile(join(options.profileRoot,'owner.json')).toString());
@@ -18,8 +19,9 @@ export async function startDesktopRegistration(options:{requestDir:string;profil
  let requestPath='';let identity:{dev:number;ino:number}|undefined;
  try{
   await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)});const address=server.address();if(!address||typeof address==='string')throw Error('Private registration listener unavailable');
-  requestPath=join(options.requestDir,'companion-request.json');const fd=openSync(requestPath,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);
-  try{const s=fstatSync(fd);identity={dev:s.dev,ino:s.ino};writeFileSync(fd,JSON.stringify({schemaVersion:1,action:'register',url:`http://127.0.0.1:${address.port}/registration`,bearer,nonce,expiresAt:options.expiresAt,settingsPath,runtimeOwnerId:options.runtimeOwnerId,address:options.address,capability:options.capability}));fsyncSync(fd)}finally{closeSync(fd)}
+  requestPath=join(options.requestDir,'companion-request.json');const request=JSON.stringify({schemaVersion:1,action:'register',url:`http://127.0.0.1:${address.port}/registration`,bearer,nonce,expiresAt:options.expiresAt,settingsPath,runtimeOwnerId:options.runtimeOwnerId,address:options.address,capability:options.capability});
+  if(process.platform==='win32'){writeWindowsPrivateFile(requestPath,Buffer.from(request));const s=lstatSync(requestPath);identity={dev:s.dev,ino:s.ino}}else {const fd=openSync(requestPath,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);
+  try{const s=fstatSync(fd);identity={dev:s.dev,ino:s.ino};writeFileSync(fd,request);fsyncSync(fd)}finally{closeSync(fd)}}
   const timer=setTimeout(()=>{if(!finished){finished=true;fail(new Error('Desktop registration expired'))}},Math.max(1,options.expiresAt-Date.now()));timer.unref();
   return {requestPath,completed,async close(){if(closed)return;closed=true;clearTimeout(timer);if(!finished){finished=true;fail(new Error('Desktop registration cancelled'))}await new Promise<void>(resolve=>{server.close(()=>resolve());server.closeAllConnections()});try{const s=lstatSync(requestPath);if(identity&&s.dev===identity.dev&&s.ino===identity.ino)unlinkSync(requestPath)}catch{}}};
  }catch(error){server.close();if(identity&&requestPath){try{const s=lstatSync(requestPath);if(s.dev===identity.dev&&s.ino===identity.ino)unlinkSync(requestPath)}catch{}}throw error}

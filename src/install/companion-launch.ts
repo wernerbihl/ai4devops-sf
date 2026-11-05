@@ -2,24 +2,26 @@ import { spawn } from 'node:child_process';
 import { accessSync, constants, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { readPrivateFile } from '../service/config.ts';
+import { assertWindowsPrivateDirectory, protectWindowsDirectory, writeWindowsPrivateFile } from '../platform/windows-private.ts';
 import { verifyCompanionPackage } from './companion-package.ts';
 
 export interface CompanionProfile { root:string; userDataDir:string; extensionsDir:string }
 function privateDir(path:string):void {
-  if(process.platform==='win32')throw new Error('Windows protected companion profiles are unavailable');
+  if(process.platform==='win32'){assertWindowsPrivateDirectory(path);return}
   const s=lstatSync(path);if(resolve(path)!==path||realpathSync(path)!==path||!s.isDirectory()||s.uid!==process.getuid!()||(s.mode&0o077)!==0)throw new Error('Private owned companion profile required');
 }
 function ownedProfile(root:string,id:string):CompanionProfile {
   if(!/^[A-Za-z0-9_-]{1,100}$/.test(id))throw new Error('Invalid installation identity');
   privateDir(root);const profileRoot=join(root,'vscode-profile');const marker=join(profileRoot,'owner.json');let created=false;
   try{mkdirSync(profileRoot,{mode:0o700});created=true}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}
+  if(created&&process.platform==='win32')protectWindowsDirectory(profileRoot);
   privateDir(profileRoot);const expected={schemaVersion:1,installationId:id,component:'companion-profile'};
-  if(created)writeFileSync(marker,JSON.stringify(expected),{mode:0o600,flag:'wx'});
+  if(created){if(process.platform==='win32')writeWindowsPrivateFile(marker,Buffer.from(JSON.stringify(expected)));else writeFileSync(marker,JSON.stringify(expected),{mode:0o600,flag:'wx'})}
   else if(JSON.stringify(JSON.parse(readPrivateFile(marker).toString()))!==JSON.stringify(expected))throw new Error('Existing companion profile ownership mismatch');
   const userDataDir=join(profileRoot,'user-data');const extensionsDir=join(profileRoot,'extensions');
-  for(const directory of [userDataDir,extensionsDir]){try{mkdirSync(directory,{mode:0o700})}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}privateDir(directory)}
-  const user=join(userDataDir,'User');try{mkdirSync(user,{mode:0o700})}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}privateDir(user);
-  const settings=join(user,'settings.json');try{writeFileSync(settings,JSON.stringify({'settingsSync.ignoredSettings':['chat.remoteAgentHosts','chat.workspaceRemoteAgentHosts']}),{mode:0o600,flag:'wx'})}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;readPrivateFile(settings)}
+  for(const directory of [userDataDir,extensionsDir]){let created=false;try{mkdirSync(directory,{mode:0o700});created=true}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}if(created&&process.platform==='win32')protectWindowsDirectory(directory);privateDir(directory)}
+  const user=join(userDataDir,'User');let createdUser=false;try{mkdirSync(user,{mode:0o700});createdUser=true}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}if(createdUser&&process.platform==='win32')protectWindowsDirectory(user);privateDir(user);
+  const settings=join(user,'settings.json');if(process.platform==='win32'&&(()=>{try{readPrivateFile(settings);return true}catch{return false}})())return {root:profileRoot,userDataDir,extensionsDir};try{const data=JSON.stringify({'settingsSync.ignoredSettings':['chat.remoteAgentHosts','chat.workspaceRemoteAgentHosts']});if(process.platform==='win32')writeWindowsPrivateFile(settings,Buffer.from(data));else writeFileSync(settings,data,{mode:0o600,flag:'wx'})}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;readPrivateFile(settings)}
   return {root:profileRoot,userDataDir,extensionsDir};
 }
 function executable(path:string):string {

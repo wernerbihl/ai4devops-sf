@@ -9,8 +9,8 @@ function quote(value:string):string {
 }
 export function windowsServiceDefinition(spec:LinuxServiceSpec):{taskName:string;executable:string;arguments:string} {
   if (![spec.node,spec.entry,spec.root].every(win32.isAbsolute) || !/^[A-Za-z0-9_-]{1,100}$/.test(spec.id)) throw new Error('Absolute service paths and an installation ID are required');
-  if (spec.dockerExecutable) throw new Error('Windows Docker executable override requires a protected startup entry');
-  return {taskName:`AI4DevOps-SF-${spec.id}`,executable:spec.node,arguments:[spec.entry,spec.id,spec.root].map(quote).join(' ')};
+  if(spec.dockerExecutable&&!win32.isAbsolute(spec.dockerExecutable))throw new Error('Absolute Docker executable required');
+  return {taskName:`AI4DevOps-SF-${spec.id}`,executable:spec.node,arguments:[spec.entry,spec.id,spec.root,...(spec.dockerExecutable?[spec.dockerExecutable]:[])].map(quote).join(' ')};
 }
 
 // The existing task is compared with the complete definition before any control operation.

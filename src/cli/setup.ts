@@ -3,6 +3,7 @@ import { accessSync, constants, mkdirSync, mkdtempSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { protectWindowsDirectory } from '../platform/windows-private.ts';
 import { ProcessDocker, type DockerPort } from '../kestra/deployment.ts';
 import { authenticateViaCompanion } from '../install/companion-launch.ts';
 import { checkDockerPreflight } from '../install/docker-preflight.ts';
@@ -13,8 +14,8 @@ import { applyInstall } from '../install/install.ts';
 
 export interface SetupIo {out(text:string):void;err(text:string):void;ask(prompt:string):Promise<string>}
 function defaultCode():string {
-  for(const directory of (process.env.PATH??'').split(':'))for(const name of ['code','code-insiders']){const path=resolve(directory||'.',name);try{accessSync(path,constants.X_OK);return path}catch{}}
-  return '/usr/bin/code';
+  for(const directory of (process.env.PATH??'').split(process.platform==='win32'?';':':'))for(const name of (process.platform==='win32'?['Code.exe','Code - Insiders.exe']:['code','code-insiders'])){const path=resolve(directory||'.',name);try{accessSync(path,constants.X_OK);return path}catch{}}
+  return process.platform==='win32'?join(process.env.LOCALAPPDATA??homedir(),'Programs','Microsoft VS Code','Code.exe'):'/usr/bin/code';
 }
 export async function runSetup(io:SetupIo,options:{docker?:DockerPort;defaultsPath?:string;locatorPath?:string;sourceRoot?:string;tempParent?:string;authenticate?:typeof authenticateViaCompanion}={}):Promise<number> {
   const saved=loadDefaults(options.defaultsPath);const defaults:SetupDefaults=saved??{directory:join(homedir(),'.ai4devops-sf'),taktSeconds:60,ownerId:'vscode',providers:['copilot'],codeExecutable:defaultCode()};
@@ -30,14 +31,14 @@ export async function runSetup(io:SetupIo,options:{docker?:DockerPort;defaultsPa
   const dockerExecutable=dockerText==='docker'?undefined:dockerText;
   const docker=options.docker??new ProcessDocker(dockerExecutable??'docker');
   await checkDockerPreflight(directory,docker,'preview-'+randomUUID());
-  const stage=mkdtempSync(join(options.tempParent??tmpdir(),'sf-setup-'));mkdirSync(join(stage,'vault'),{mode:0o700});mkdirSync(join(stage,'request'),{mode:0o700});
+  const stage=mkdtempSync(join(options.tempParent??tmpdir(),'sf-setup-'));if(process.platform==='win32')protectWindowsDirectory(stage);mkdirSync(join(stage,'vault'),{mode:0o700});mkdirSync(join(stage,'request'),{mode:0o700});if(process.platform==='win32'){protectWindowsDirectory(join(stage,'vault'));protectWindowsDirectory(join(stage,'request'))}
   let launcher:{stop():void}|undefined;
   try {
     io.out('Sign in to the selected Copilot account in the private VS Code profile.\n');
     const auth=await (options.authenticate??authenticateViaCompanion)({root:stage,requestDir:join(stage,'request'),installationId:'preview-'+randomUUID(),codeExecutable,interactive:true});launcher=auth.launcher;
     const answers:SetupAnswers={directory,taktSeconds:takt,ownerId:'vscode',providers,stagedAuthRoot:stage,codeExecutable,sourceRoot:options.sourceRoot??resolve(fileURLToPath(new URL('../../',import.meta.url))),...(dockerExecutable?{dockerExecutable}:{})};
     const plan=await planInstall(answers,{docker});
-    const serviceName=process.platform==='darwin'?`ai4devops-sf.${plan.id}`:`ai4devops-sf-${plan.id}`;
+    const serviceName=process.platform==='darwin'?`ai4devops-sf.${plan.id}`:process.platform==='win32'?`AI4DevOps-SF-${plan.id}`:`ai4devops-sf-${plan.id}`;
     io.out(`Installation: ${plan.directory}\nRuntime: ${join(plan.directory,'runtime')}\nVault: ${join(plan.directory,'vault')}\nLogin service: ${serviceName}\nProvider: VS Code / Copilot (${plan.account.label})\nTakt: ${plan.taktSeconds} seconds\nLimits: 1 active run, 30 active minutes, 100 starts/day, 2 transient retries\nCopilot grants: read:user, user:email; repository capabilities require separate approval\nLocal API origin: http://127.0.0.1:43117\n${plan.notices.join('\n')}${plan.notices.length?'\n':''}A second sign-in in the installed private profile may be required for refresh.\n`);
     const answer=(await io.ask('Install (Y/n): ')).trim().toLowerCase();if(answer&&answer!=='y'&&answer!=='yes'){io.out('Installation cancelled.\n');return 0}
     const installed=await applyInstall(plan,{docker,...(options.locatorPath?{locatorPath:options.locatorPath}:{})});

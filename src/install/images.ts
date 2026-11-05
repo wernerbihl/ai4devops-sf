@@ -4,6 +4,7 @@ import { constants, copyFileSync, createReadStream, mkdtempSync, openSync, close
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DockerPort } from '../kestra/deployment.ts';
+import { writeWindowsPrivateFile } from '../platform/windows-private.ts';
 import { privateDirectory } from '../kestra/executions.ts';
 
 /** Microsoft update metadata for the exact inspected source commit, not a mutable tag. */
@@ -52,8 +53,8 @@ export interface OwnedImageBuild {
 }
 
 function createPrivateRecord(root: string, name: string, value: object): void {
-  if (process.platform === 'win32') throw new Error('Windows protected image-build records are unavailable');
   const directory = privateDirectory(root);
+  if(process.platform==='win32'){writeWindowsPrivateFile(join(directory,name),Buffer.from(JSON.stringify(value)));return}
   const fd = openSync(join(directory,name), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
   try { writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd); }
   finally { closeSync(fd); }

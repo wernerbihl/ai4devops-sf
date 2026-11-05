@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { win32 } from 'node:path';
 
-type Operation = 'protect-directory'|'check-directory'|'protect-file'|'check-file'|'write-secret'|'replace-secret'|'read-secret'|'write-private'|'replace-private'|'read-private';
+type Operation = 'protect-directory'|'check-directory'|'protect-file'|'check-file'|'write-secret'|'replace-secret'|'read-secret'|'write-private'|'replace-private'|'read-private'|'check-owned-file';
 // Constant script only. Paths and data enter via stdin; errors and stdout are never logged.
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -62,6 +62,11 @@ if ($r.operation -eq 'protect-directory') {
   $parent = [IO.Path]::GetDirectoryName($path); AssertPrivate $parent $true; CheckNoReparse $path
   $old=Get-Acl -LiteralPath $path; if ($old.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $user.Value) { throw 'Foreign owner' }
   ApplyPrivate $path $false; AssertPrivate $path $false
+} elseif ($r.operation -eq 'check-owned-file') {
+  CheckNoReparse $path; $item=Get-Item -LiteralPath $path -Force; if ($item.PSIsContainer) { throw 'Wrong object type' }
+  $acl=Get-Acl -LiteralPath $path; if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $user.Value) { throw 'Unsafe owner' }
+  $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])); if ($rules.Count -ne 2) { throw 'Unexpected ACL' }; $seen=@{}
+  foreach ($rule in $rules) { $id=$rule.IdentityReference.Value; if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or ($id -ne $user.Value -and $id -ne $system.Value) -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl) { throw 'Unexpected ACL' }; $seen[$id]=$true }; if (!$seen.ContainsKey($user.Value) -or !$seen.ContainsKey($system.Value)) { throw 'Incomplete ACL' }
 } elseif ($r.operation -eq 'check-file') {
   $parent = [IO.Path]::GetDirectoryName($path); AssertPrivate $parent $true; AssertPrivate $path $false
 } elseif ($r.operation -eq 'write-secret' -or $r.operation -eq 'write-private' -or $r.operation -eq 'replace-secret' -or $r.operation -eq 'replace-private') {
@@ -120,3 +125,5 @@ export function readWindowsSecret(path:string):Buffer{return execute('read-secre
 export function writeWindowsPrivateFile(path:string,data:Buffer):void{execute('write-private',path,data)}
 export function replaceWindowsPrivateFile(path:string,data:Buffer):void{execute('replace-private',path,data)}
 export function readWindowsPrivateFile(path:string):Buffer{return execute('read-private',path)}
+
+export function assertWindowsOwnedFile(path:string):void{execute('check-owned-file',path)}

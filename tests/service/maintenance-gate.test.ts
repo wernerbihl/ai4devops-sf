@@ -12,3 +12,4 @@ test('maintenance closes admission synchronously and waits for all admitted oper
   second(); await closing; assert.equal(drained, true);
   assert.throws(() => gate.enter());
 });
+test('a verified activation may reopen only a fully drained admission gate',async()=>{const gate=new MaintenanceGate();const finish=gate.enter();const closing=gate.close();assert.throws(()=>gate.reopen());finish();await closing;gate.reopen();const release=gate.enter();release()});

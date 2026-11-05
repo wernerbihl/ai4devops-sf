@@ -13,6 +13,10 @@ export class MaintenanceGate {
       if (--this.active === 0) for (const resolve of this.waiters.splice(0)) resolve();
     };
   }
+  reopen():void {
+    if(!this.closed||this.active!==0)throw new Error('Maintenance admission is not drained');
+    this.closed=false;
+  }
   async close(): Promise<void> {
     this.closed = true;
     if (this.active) await new Promise<void>(resolve => this.waiters.push(resolve));

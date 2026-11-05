@@ -1,0 +1,22 @@
+import { createHash } from 'node:crypto';
+import { createReadStream, lstatSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { readPrivateFileAsync } from './config.ts';
+import { assertWindowsOwnedFileAsync } from '../platform/windows-private.ts';
+import { ensure } from '../storage/database.ts';
+import type { FactoryStore, OutboxAction } from '../storage/store.ts';
+
+async function hashRuntimeFile(root:string,path:string):Promise<string>{
+ const rel=relative(join(root,'runtime'),path);ensure(resolve(path)===path&&rel!==''&&rel!=='..'&&!rel.startsWith('..'+sep)&&!isAbsolute(rel)&&realpathSync(path)===path,'reconfigure_candidate','Candidate must be inside the original runtime');const s=lstatSync(path);ensure(s.isFile()&&!s.isSymbolicLink(),'reconfigure_candidate','Candidate file is unsafe');if(process.platform==='win32')await assertWindowsOwnedFileAsync(path);else ensure(s.uid===process.getuid!()&&(s.mode&0o022)===0,'reconfigure_candidate','Candidate file is unsafe');const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk as Buffer);const after=lstatSync(path);ensure(after.dev===s.dev&&after.ino===s.ino&&after.size===s.size&&after.mtimeMs===s.mtimeMs,'reconfigure_candidate','Candidate file changed');return hash.digest('hex');
+}
+export async function prepareCandidate(input:{id:string;root:string;store:FactoryStore;intent:OutboxAction;node:string;entry:string;taktSeconds:number;closeReceiptId:string}):Promise<OutboxAction>{
+ const {id,root,store,intent,node,entry,taktSeconds,closeReceiptId}=input;ensure(intent.kind==='maintenance.intent'&&!intent.completedAt&&intent.payload.installationId===id&&intent.payload.purpose==='reconfigure'&&Number.isSafeInteger(taktSeconds)&&taktSeconds>=1&&taktSeconds<=86400,'reconfigure_candidate','Original reconfiguration intent required');const backup=store.getActionByKey('maintenance:backup:'+intent.id),receipt=store.getActionByKey('maintenance:backup:'+intent.id+':result');ensure(backup?.kind==='maintenance.backup'&&backup.completedAt&&receipt?.kind==='maintenance.backup_result'&&receipt.completedAt&&receipt.payload.intentId===backup.id&&typeof receipt.payload.directory==='string','reconfigure_candidate','Verified backup is unavailable');const nodeHash=await hashRuntimeFile(root,node),entryHash=await hashRuntimeFile(root,entry);const key='maintenance:candidate:'+intent.id;ensure(!store.getActionByKey(key),'reconfigure_candidate','Candidate already exists; recover original action');return store.enqueueAction({key,kind:'maintenance.candidate',payload:{installationId:id,maintenanceIntentId:intent.id,backupId:backup.id,backupDirectory:receipt.payload.directory,closeReceiptId,node,entry,nodeHash,entryHash,taktSeconds,settingsRevision:store.getSettings().revision}});
+}
+export async function readCandidate(input:{id:string;root:string;store:FactoryStore;intent:OutboxAction;node:string;entry:string}):Promise<OutboxAction|undefined>{
+ try{const {id,root,store,intent,node,entry}=input;const action=store.getActionByKey('maintenance:candidate:'+intent.id);ensure(action?.kind==='maintenance.candidate'&&!action.completedAt&&intent.kind==='maintenance.intent'&&!intent.completedAt&&intent.payload.installationId===id&&intent.payload.purpose==='reconfigure'&&action.payload.installationId===id&&action.payload.maintenanceIntentId===intent.id&&action.payload.node===node&&action.payload.entry===entry&&action.payload.nodeHash===await hashRuntimeFile(root,node)&&action.payload.entryHash===await hashRuntimeFile(root,entry),'reconfigure_candidate','Candidate identity mismatch');return action}catch{return undefined}
+}
+
+/** A launch receipt is written only while the original service is stopped and singleton held. */
+export async function readLaunchCandidate(input:{id:string;root:string;store:FactoryStore;intent:OutboxAction;node:string;entry:string}):Promise<OutboxAction|undefined>{
+ try{const candidate=await readCandidate(input);ensure(candidate,'reconfigure_candidate','Original candidate unavailable');const marker=JSON.parse((await readPrivateFileAsync(join(input.root,'reconfigure-launch.json'))).toString());ensure(marker.schemaVersion===1&&marker.installationId===input.id&&marker.root===input.root&&marker.candidateId===candidate.id,'reconfigure_candidate','Launch receipt mismatch');return candidate}catch{return undefined}
+}

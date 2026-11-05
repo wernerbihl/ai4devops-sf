@@ -249,6 +249,9 @@ export class FactoryStore {
     }));
   }
   completeAction(id: string): void { this.db.transaction(() => this.outbox.complete(id)); }
+  /** Commit only the original prepared candidate and its settings in one durable transaction. */
+  commitReconfiguration(intentId:string,candidateId:string,installationId:string):void {this.db.transaction(()=>{const intent=this.outbox.find(intentId),candidate=this.outbox.find(candidateId);ensure(intent?.kind==='maintenance.intent'&&!intent.completedAt&&intent.payload.installationId===installationId&&intent.payload.purpose==='reconfigure'&&candidate?.kind==='maintenance.candidate'&&!candidate.completedAt&&candidate.payload.installationId===installationId&&candidate.payload.maintenanceIntentId===intentId&&typeof candidate.payload.taktSeconds==='number'&&typeof candidate.payload.settingsRevision==='number','reconfigure_candidate','Original candidate is unavailable');this.patchSettings({taktSeconds:candidate.payload.taktSeconds},candidate.payload.settingsRevision);this.outbox.complete(candidate.id);this.outbox.complete(intent.id)})}
+
   /** Trusted service only: the callback must be synchronous, returning a sanitized public DTO. */
   runApiMutation(key: string, input: unknown, mutate: () => ApiRequestResult) {
     return this.db.transaction(() => {

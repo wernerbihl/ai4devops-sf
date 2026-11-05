@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyInstall } from './verify-install.ts';
@@ -15,7 +15,12 @@ export async function verifyPackage(tarball:string,scratchRoot:string):Promise<P
   execFileSync(process.execPath,['--input-type=module','-e',`const {verifyReleaseProvenance}=await import(${JSON.stringify(verifier)});verifyReleaseProvenance(${JSON.stringify(root)});`],{cwd:project,env:{...process.env,NODE_PATH:''}});
   const commands=['setup','next','uninstall'];
   for(const command of commands){const output=execFileSync(process.execPath,[join(root,'bin/ai4devops-sf.mjs'),command,'--help'],{cwd:project,encoding:'utf8'});if(!output.includes('setup|next|uninstall'))throw Error('Missing public command');}
-  const install=await verifyInstall({packageRoot:root,scratchRoot});
+  const privateParent=join(scratchRoot,'private runtime');mkdirSync(privateParent,{mode:0o700});
+  const copied=join(privateParent,'release');
+  const copyScript=join(scratchRoot,'copy-runtime.mjs');
+  writeFileSync(copyScript,`const {copyRuntime}=await import(${JSON.stringify(pathToFileURL(join(root,'dist/install/runtime-copy.js')).href)});${process.platform==='win32'?`const {protectWindowsDirectory}=await import(${JSON.stringify(pathToFileURL(join(root,'dist/platform/windows-private.js')).href)});protectWindowsDirectory(${JSON.stringify(privateParent)});`:''}console.log(JSON.stringify(await copyRuntime({sourceRoot:${JSON.stringify(root)},target:${JSON.stringify(copied)}})));`);
+  const copiedRuntime=JSON.parse(execFileSync(process.execPath,[copyScript],{cwd:project,encoding:'utf8',env:{...process.env,NODE_PATH:''}}));
+  const install=await verifyInstall({packageRoot:copied,scratchRoot,node:copiedRuntime.node});
   return {artifact:tarball,version:manifest.version,platform:process.platform,node:process.versions.node,requiresSiblingCheckout:false,requiresBun:false,commands,privateDaemon:install.privateDaemon,install};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)console.log(JSON.stringify(await verifyPackage(process.argv[2]!,process.argv[3]!),null,2));

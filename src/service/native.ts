@@ -1,7 +1,7 @@
 import { mkdirSync, existsSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import type { Attempt, NativeIdentity, NativeStart, OwnerEvent, RequiredCapabilities, TaskSpec } from '../contracts/domain.ts';
 import type { NativeOwner } from '../contracts/owner.ts';
@@ -30,6 +30,7 @@ import { readPrivateFileAsync } from './config.ts';
 import { refreshCompanionCredential } from '../install/companion-launch.ts';
 import { loadCompanionCredentialAsync } from '../install/companion-auth.ts';
 import { navigationCommits } from '../owners/navigation.ts';
+import { humanActionObserved } from '../owners/human-reconcile.ts';
 import { createDesktopNavigation } from '../owners/desktop.ts';
 export const isolatedProfileId = 'vscode-copilot-isolated-worker-v2';
 const workerEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','LANG=C.UTF-8'];
@@ -166,10 +167,12 @@ export function createNativeFleet(options: { installation: Installation; config:
     const worker = new IsolatedToolWorker({ config:{containerId:workerContainer.Id,image:t.workerImage,runtimeOwnerId:ownerId,nativeContainerId:native.Id,mountTargets:targets},docker,store,gate });
     let boundary!: ReturnType<typeof createIsolatedNativeBoundary>; let verify!: ReturnType<typeof createProfileVerifier>;
     let desktop:Awaited<ReturnType<typeof createDesktopNavigation>>|undefined;
-    const closeDesktop=async()=>{const previous=desktop;desktop=undefined;await previous?.close()};
+    const assertNoHumanEffect=()=>ensure(!store.pendingActions().some(a=>a.kind==='human.relay'&&a.payload.attemptId===start.attemptId),'human_effect_unknown','Human native action outcome is unresolved; retain original control and history');
+    let desktopClosing:Promise<void>=Promise.resolve();
+    const closeDesktop=async()=>{const previous=desktop;desktop=undefined;if(previous)desktopClosing=desktopClosing.then(()=>previous.close());await desktopClosing};
     const prepareDesktop=async(identity:NativeIdentity,assertCurrent:()=>void)=>{
-      assertCurrent();await closeDesktop();assertCurrent();
-      const next=await createDesktopNavigation({root:installation.root,installationId:installation.id,runtimeOwnerId:ownerId,identity,assertCurrent,launcher});
+      assertCurrent();await closeDesktop();assertNoHumanEffect();assertCurrent();
+      const next=await createDesktopNavigation({root:installation.root,installationId:installation.id,runtimeOwnerId:ownerId,identity,assertCurrent,beforeHumanAction(action){assertCurrent();const key='human-relay:'+start.attemptId+':'+randomUUID();const proof=action.type==='chat/turnStarted'&&typeof action.turnId==='string'&&action.message&&typeof action.message==='object'?{type:action.type,turnId:action.turnId,messageHash:fingerprint(action.message)}:{type:typeof action.type==='string'?action.type:'unknown'};store.enqueueAction({key,kind:'human.relay',payload:{attemptId:start.attemptId,repositoryId:start.task.repositoryId,proof}});return key},humanActionAcknowledged(key){const action=store.getActionByKey(key);ensure(action&&action.kind==='human.relay'&&action.payload.attemptId===start.attemptId,'human_effect_unknown','Human action receipt does not match');store.completeAction(action.id)},launcher});
       try{assertCurrent();desktop=next}catch(error){await next.close();throw error}
     };
     const journalPath=join(parent,'owner.sqlite');const journalProtection=await prepareOwnerJournal(journalPath);
@@ -182,7 +185,8 @@ export function createNativeFleet(options: { installation: Installation; config:
     boundary = createIsolatedNativeBoundary({owner,gate,worker,launcher,docker,modelProxy:proxyControl,image:t.nativeImage,networks:[internal.Id],protectedPaths});
     verify = createProfileVerifier({profiles:[{id:isolatedProfileId,ownerId:'vscode',providerId:'copilot',image:t.nativeImage,networks:[internal.Id],protectedPaths,boundary,mountTargets:targets,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot}}]});
     const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const startup=JSON.parse((await readPrivateFileAsync(join(installation.root,'startup.json'))).toString());ensure(startup.installationId===installation.id&&typeof startup.codeExecutable==='string'&&startup.requestDir===join(installation.root,'auth-request'),'native_auth','Private companion configuration unavailable');await refreshCompanionCredential({root:installation.root,requestDir:startup.requestDir,installationId:installation.id,codeExecutable:startup.codeExecutable});const expiresIn=ref.expiresAt===undefined?undefined:Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn===undefined||expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:(await loadCompanionCredentialAsync(installation.root,ref)).token,...(expiresIn===undefined?{}:{expiresIn}),scopes:ref.scopes})};
-    return {owner,worker,gate,launcher,boundary,verify,authenticate,prepareDesktop,closeDesktop};
+    const reconcileHumanEffects=async(identity:NativeIdentity)=>{const actions=store.pendingActions().filter(a=>a.kind==='human.relay'&&a.payload.attemptId===start.attemptId);if(!actions.length)return;const chat=await owner.chat(identity);for(const action of actions){if(humanActionObserved(action.payload.proof as Record<string,unknown>,chat))store.completeAction(action.id)}};
+    return {owner,worker,gate,launcher,boundary,verify,authenticate,prepareDesktop,closeDesktop,reconcileHumanEffects,assertNoHumanEffect};
   }
   type Member = Awaited<ReturnType<typeof compose>>;
   function member(start: NativeStart, create = false): Promise<Member> {
@@ -204,12 +208,12 @@ export function createNativeFleet(options: { installation: Installation; config:
     ensureSession:async start=>(await member(start)).owner.ensureSession(start),
     snapshot:async identity=>(await member(startFor(find(identity)))).owner.snapshot(identity),
     send:async(identity,input,key)=>(await member(startFor(find(identity)))).owner.send(identity,input,key),
-    quiesce:async identity=>{const m=await member(startFor(find(identity)));await m.closeDesktop();m.gate.suspend();const [native,worker]=await Promise.all([m.owner.quiesce(identity),m.worker.pause()]);return native==='unknown'||worker==='unknown'?'unknown':native},
+    quiesce:async identity=>{const m=await member(startFor(find(identity)));m.gate.suspend();let closed=true;try{await m.closeDesktop();await m.reconcileHumanEffects(identity)}catch{closed=false}const [native,worker]=await Promise.all([m.owner.quiesce(identity),m.worker.pause()]);try{m.assertNoHumanEffect()}catch{closed=false}return !closed||native==='unknown'||worker==='unknown'?'unknown':native},
     open:async identity=>(await member(startFor(find(identity)))).owner.open(identity),
     subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener)},
   };
   return { owner:fleetOwner,provisionability,templateReadiness,startFor,member,
-    async prepare(start:NativeStart) {ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted');ensure(store.getLifecycle(start.attemptId).reservation.status==='confirmed','native_unconfirmed','Confirm actual engine execution before native provisioning');const m=await member(start,true);await m.closeDesktop();ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted during provisioning');await m.boundary.prepare(start,start.idempotencyKey,m.authenticate);return m.verify.requireVerifiedProfile(start)},
+    async prepare(start:NativeStart) {ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted');ensure(store.getLifecycle(start.attemptId).reservation.status==='confirmed','native_unconfirmed','Confirm actual engine execution before native provisioning');const m=await member(start,true);await m.closeDesktop();m.assertNoHumanEffect();ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted during provisioning');await m.boundary.prepare(start,start.idempotencyKey,m.authenticate);return m.verify.requireVerifiedProfile(start)},
     async reconcile(start:NativeStart){return (await member(start)).owner.reconcile(start)},
     async close(){for(const promise of members.values()){try{const m=await promise;await m.closeDesktop();await m.owner.close()}catch{}}members.clear()},
   };

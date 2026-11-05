@@ -25,6 +25,7 @@ export interface LifecycleDeps {
    * prepare runs under the acquired writer fence and active effect accounting; it must restore only the
    * original runtime/state, authenticate, rebind tools, verify containment and reconcile original history. */
   managedHumanOpen?: {prepare(attempt:Attempt,key:string,context:HumanOpenContext):Promise<void>};
+  reconcileHumanEffects?(repositoryId:string):Promise<void>;
   managedContinuation?: {
     preflight(attempt: Attempt): Promise<PreparedStart | UnavailableStart | undefined>;
     prepare(attempt: Attempt, key: string): Promise<void>;
@@ -291,7 +292,10 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     returnControl: repositoryId => operation(async () => {
       const repo = store.getRepository(repositoryId); ensure(repo, 'not_found', 'Repository not found');
       ensure(repo.controlMode === 'human', 'control_mode', 'Repository is not under human control');
+      const assertNoHumanEffect=()=>ensure(!store.pendingActions().some(a=>a.kind==='human.relay'&&a.payload.repositoryId===repositoryId),'human_effect_unknown','A human native action has an unresolved outcome; retain human control and reconcile its original history');
       ensure(!store.pendingActions().some(a=>a.kind==='lifecycle.human_open'&&a.payload.repositoryId===repositoryId),'human_open_pending','Human native control start/open is pending or unknown; reconcile before return');
+      if(store.pendingActions().some(a=>a.kind==='human.relay'&&a.payload.repositoryId===repositoryId))await deps.reconcileHumanEffects?.(repositoryId);
+      assertNoHumanEffect();
       const attempts = store.getReservations().filter(r => r.lease.repositoryId === repositoryId && r.status === 'confirmed');
       // Terminal history can still own a human/background writer after an explicit native open.
       // Stop every latest owned runtime before restoring repository automation.
@@ -303,6 +307,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
         ensure(store.getAdmissionState().token === token, 'admission_changed', 'Policy changed while returning control');
       }
       ensure(!store.pendingActions().some(a=>a.kind==='lifecycle.human_open'&&a.payload.repositoryId===repositoryId),'human_open_pending','Human native control start/open began during return; reconcile before release');
+      assertNoHumanEffect();
       store.returnLifecycleControl(repositoryId, repo.revision, store.getAdmissionState().token);
       for (const r of attempts.filter(r => store.getTask(r.attempt.taskId)?.attemptIds.at(-1) === r.attempt.id)) {
         const task = store.getTask(r.attempt.taskId)!;

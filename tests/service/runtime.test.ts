@@ -94,7 +94,7 @@ test('arbitrary proxy digest cannot make an unprovisioned runtime ready',async()
  }finally{f.close()}
 });
 
-for(const boundary of ['native-recovery','engine-adoption'])test(`runtime observes retained deadlines before stalled initial ${boundary} and keeps admission disabled`, async () => {
+for(const boundary of ['native-recovery','engine-adoption','config-stall','config-fail','vault-stall','vault-fail','vault-control-stall','vault-control-fail','pairing-stall','pairing-fail','listener-stall','listener-fail'])test(`runtime observes retained deadlines before stalled initial ${boundary} and keeps admission disabled`, async () => {
  const {openStore}=await import('../../src/storage/store.ts');
  const {recipeMaterializer}=await import('../../src/recipes/materialize.ts');
  const {RecipeRegistry,recipePayloadHash}=await import('../../src/recipes/registry.ts');
@@ -126,13 +126,16 @@ for(const boundary of ['native-recovery','engine-adoption'])test(`runtime observ
   const broker=createAttemptBroker({store:f.store,clock:f.clock,signingKey:Buffer.alloc(32,7)});
   const r=reservations[0]!;const start=broker.nativeStart(r.attempt.id,'retained-start');
   f.store.broker.claim({attemptId:r.attempt.id,fence:r.lease.fence,key:'retained-start',payload:{operation:'native.start',payload:start,idempotencyKey:'retained-start'}});
+  f.store.bindLifecycleIdentity(r.attempt.id,{ownerId:'vscode',providerId:'copilot',sessionId:'ahp-session:/retained',chatId:'ahp-chat:/retained'});
   const owner='rt-'+fingerprint({installation:'fixture',task:start.task.id}).slice(0,24);
   const parent=join(f.directory,'native-state',owner);mkdirSync(join(parent,'data'),{recursive:true,mode:0o700});
   writeFileSync(join(parent,'owner.json'),JSON.stringify({schemaVersion:1,installationId:'fixture',runtimeOwnerId:owner,taskId:start.task.id,source:join(parent,'data')}),{mode:0o600});
   mkdirSync(join(f.directory,'vault'),{mode:0o700});
   for(const name of ['broker-signing','private-control'])writeFileSync(join(f.directory,'vault',name),Buffer.alloc(32,7),{mode:0o600});
   writeFileSync(join(f.directory,'runtime.json'),JSON.stringify({schemaVersion:1,installationId:'fixture',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[{ref:'provider',providerId:'copilot',resource:'https://api.github.com',expiresAt:'2099-01-01T00:00:00Z',scopes:[]}],native:[{kind:'vscode-isolated-worker-v2',nativeImage:'native@sha256:'+'a'.repeat(64),workerImage:'worker@sha256:'+'b'.repeat(64),entrypoint:'/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js',entrypointSha256:'c'.repeat(64),hostCommit:'e576c7bbeb39772a1d1ebe472545def0d93e6d8b',pristineDirectory:'/workspaces/task',emptyHome:'/opt/software-factory/empty-home',credentialRef:'provider',proxy:{image:'proxy@sha256:'+'d'.repeat(64),entrypoint:'/opt/sf/proxy.cjs',entrypointSha256:'e'.repeat(64),allowedAuthorities:['api.githubcopilot.com:443']}}]}),{mode:0o600});
-  const pending=startRuntime({id:'fixture',root:f.directory,docker:{async command(args){if((boundary==='native-recovery'&&args[0]==='network'&&args[1]==='inspect'&&args[2]===owner+'-internal')||(boundary==='engine-adoption'&&args[0]==='image'&&args[1]==='inspect')){entered();await stalled;}throw Error('Fixture has no provisioned images')}},secrets:{async loadOrCreate(){return{username:'fixture',password:'nonsecret-fixture-password-000000000',encryptionKey:Buffer.alloc(32,11).toString('base64')}}}});
+  const configModule=await import('../../src/service/config.ts');const pairingModule=await import('../../src/owners/bridge-rpc.ts');let failed=false;
+  async function boundaryWait(name:string){if(boundary!==name+'-stall'&&boundary!==name+'-fail')return;if(boundary.endsWith('-fail')&&!failed){failed=true;throw Error('fixture early dependency failure')}entered();await stalled}
+  const pending=startRuntime({id:'fixture',root:f.directory,docker:{async command(args){if((boundary==='native-recovery'&&args[0]==='network'&&args[1]==='inspect'&&args[2]===owner+'-internal')||(boundary==='engine-adoption'&&args[0]==='image'&&args[1]==='inspect')){entered();await stalled;}throw Error('Fixture has no provisioned images')}},secrets:{async loadOrCreate(){return{username:'fixture',password:'nonsecret-fixture-password-000000000',encryptionKey:Buffer.alloc(32,11).toString('base64')}}}},{async loadConfig(root,id){await boundaryWait('config');return configModule.loadRuntimeConfigAsync(root,id)},async readSecret(root,ref){if(ref==='broker-signing')await boundaryWait('vault');if(ref==='private-control')await boundaryWait('vault-control');return configModule.readVaultSecretAsync(root,ref)},async pair(directory,id){await boundaryWait('pairing');return pairingModule.createOwnerPairing(directory,id,'bb')},async listen(options){await boundaryWait('listener');return pairingModule.listenBbOwner(options)}});
   await Promise.race([recoveryEntered,new Promise((_,reject)=>setTimeout(()=>reject(Error('recovery did not reach external inspection')),2000))]);
   let stopped=false;
   for(let i=0;i<20;i++){

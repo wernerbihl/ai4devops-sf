@@ -622,3 +622,39 @@ test('unknown original native navigation is never reissued by reconnect or same-
   assert.equal(opens,1,'reconnect must not repeat uncertain OS navigation');
  }finally{x.f.close()}
 });
+
+test('unresolved durable human relay action prevents return and factory admission after restart',async()=>{
+ const x=await fixture();try{
+  await x.lifecycle.requestTakeover(x.f.task.id);
+  x.f.store.enqueueAction({key:'human-relay:'+x.attempt.id,kind:'human.relay',payload:{attemptId:x.attempt.id,repositoryId:'repo-1'}});
+  x.reopen();await assert.rejects(x.lifecycle.returnControl('repo-1'),{code:'human_effect_unknown'});
+  assert.equal(x.f.store.getRepository('repo-1')!.controlMode,'human');assert.equal(x.sent.length,0);
+ }finally{x.f.close()}
+});
+
+test('in-flight human relay send retains return-control exclusion across restart without replay',async()=>{
+ const {startHumanRelay}=await import('../../src/owners/human-relay.ts');const {default:WebSocket}=await import('ws');
+ const x=await fixture();let release!:()=>void;let started!:()=>void;const pending=new Promise<void>(r=>release=r);const entered=new Promise<void>(r=>started=r);let calls=0;
+ const identity={...x.native,sessionId:'ahp-session:/original',chatId:'ahp-chat:/original'};let end!:()=>void;const receiving=new Promise<null>(r=>{end=()=>r(null)});
+ const relay=await startHumanRelay({runtimeOwnerId:'fixture',identity,assertCurrent(){},beforeHumanAction(){x.f.store.enqueueAction({key:'human-relay:'+x.attempt.id,kind:'human.relay',payload:{attemptId:x.attempt.id,repositoryId:'repo-1'}})},async connect(){return {async send(value:unknown){if(typeof value==='string'&&value.includes('turnStarted')){calls++;started();await pending}},recv(){return receiving},close(){end()}}}});
+ try{
+  await x.lifecycle.requestTakeover(x.f.task.id);const ws=new WebSocket(`ws://${relay.address}/?tkn=${relay.token}`,{origin:'vscode-file://vscode-app'});await new Promise<void>((resolve,reject)=>{ws.once('open',resolve);ws.once('error',reject)});
+  ws.send(JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{channel:'ahp-root://',clientId:'desktop'}}));const action=JSON.stringify({jsonrpc:'2.0',method:'dispatchAction',params:{clientSeq:1,channel:identity.chatId,action:{type:'chat/turnStarted'}}});ws.send(action);await entered;ws.send(action);
+  await assert.rejects(x.lifecycle.returnControl('repo-1'),{code:'human_effect_unknown'});const closed=relay.close();release();await closed;x.reopen();await assert.rejects(x.lifecycle.returnControl('repo-1'),{code:'human_effect_unknown'});assert.equal(calls,1);assert.equal(x.f.store.getRepository('repo-1')!.controlMode,'human');assert.equal(x.sent.length,0);
+ }finally{release();await relay.close();x.f.close()}
+});
+
+test('acknowledged human relay action permits composite quiescence and return to factory',async()=>{
+ const {startHumanRelay}=await import('../../src/owners/human-relay.ts');const {default:WebSocket}=await import('ws');const x=await fixture();
+ const identity={...x.native,sessionId:'ahp-session:/original',chatId:'ahp-chat:/original'};let deliver!:(v:any)=>void;let recorded!:string;let acked!:()=>void;const acknowledged=new Promise<void>(r=>acked=r);
+ const relay=await startHumanRelay({runtimeOwnerId:'fixture',identity,assertCurrent(){},beforeHumanAction(){recorded='human-relay:ack';x.f.store.enqueueAction({key:recorded,kind:'human.relay',payload:{attemptId:x.attempt.id,repositoryId:'repo-1'}});return recorded},humanActionAcknowledged(key){const a=x.f.store.getActionByKey(key)!;x.f.store.completeAction(a.id);acked()},async connect(){return {send(){},recv(){return new Promise<any>(r=>deliver=r)},close(){deliver(null)}}}});
+ try{await x.lifecycle.requestTakeover(x.f.task.id);const ws=new WebSocket(`ws://${relay.address}/?tkn=${relay.token}`,{origin:'vscode-file://vscode-app'});await new Promise<void>((resolve,reject)=>{ws.once('open',resolve);ws.once('error',reject)});ws.send(JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{channel:'ahp-root://',clientId:'desktop'}}));const action={type:'chat/turnStarted',turnId:'t1',message:{text:'hello'}};ws.send(JSON.stringify({jsonrpc:'2.0',method:'dispatchAction',params:{channel:identity.chatId,clientSeq:3,action}}));await new Promise(r=>setTimeout(r,20));deliver({kind:'text',text:JSON.stringify({jsonrpc:'2.0',method:'action',params:{channel:identity.chatId,serverSeq:1,origin:{clientId:'desktop',clientSeq:3},action}})});await acknowledged;await relay.close();await x.lifecycle.returnControl('repo-1');assert.equal(x.f.store.getRepository('repo-1')!.controlMode,'factory');assert.equal(x.f.store.pendingActions().some(a=>a.kind==='human.relay'),false)}finally{await relay.close();x.f.close()}
+});
+
+test('exact original history resolves a lost human turn acknowledgement before composite return',async()=>{
+ const {humanActionObserved}=await import('../../src/owners/human-reconcile.ts');const {fingerprint}=await import('../../src/storage/database.ts');const x=await fixture();
+ try{await x.lifecycle.requestTakeover(x.f.task.id);const message={text:'fixture'};const a=x.f.store.enqueueAction({key:'human-relay:lost',kind:'human.relay',payload:{attemptId:x.attempt.id,repositoryId:'repo-1',proof:{type:'chat/turnStarted',turnId:'t1',messageHash:fingerprint(message)}}});let reconciled=false;
+  const deps=x.deps();const lifecycle=createLifecycle({...deps,async reconcileHumanEffects(){assert.equal(humanActionObserved(a.payload.proof as Record<string,unknown>,{turns:[{id:'t1',message}]}),true);x.f.store.completeAction(a.id);reconciled=true}});
+  await lifecycle.returnControl('repo-1');assert.equal(reconciled,true);assert.equal(x.f.store.getRepository('repo-1')!.controlMode,'factory');
+ }finally{x.f.close()}
+});

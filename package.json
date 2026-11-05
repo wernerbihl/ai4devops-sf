@@ -17,7 +17,8 @@
     "probe:kestra": "node probes/kestra.ts",
     "probe:isolation": "node probes/isolation.ts",
     "gates:check": "node scripts/check-gates.ts",
-    "companion:package": "node scripts/package-companion.mjs"
+    "companion:package": "node scripts/package-companion.mjs",
+    "pretest": "npm run build"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",
@@ -32,5 +33,8 @@
     "@types/ws": "8.18.1",
     "@vscode/vsce": "4.1.0",
     "typescript": "5.9.3"
+  },
+  "bin": {
+    "ai4devops-sf": "bin/ai4devops-sf.mjs"
   }
 }

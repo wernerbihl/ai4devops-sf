@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, writeFileSync, unlinkSync, openSync, closeSync, fsyncSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync, unlinkSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -49,6 +49,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     resume(start: NativeStart, gate: Pick<FactoryToolGate, 'nativeIdentity'>): Promise<void>;
     resumeHuman(start: NativeStart, assertCurrent: () => void): Promise<void>;
     readonly controlIntentPath: string;
+    readonly pauseReceiptPath: string;
 } {
     ensure(/^[a-f0-9]{64}$/.test(options.containerId) && /^[\w./:-]+@sha256:[a-f0-9]{64}$/.test(options.image) && /^[a-f0-9]{64}$/.test(options.entrypointSha256), 'owner_managed', 'Pinned managed container, image and entrypoint digest are required');
     ensure(options.entrypoint.startsWith('/') && options.entrypoint.endsWith('/out/vs/platform/agentHost/node/agentHostServerMain.js') && options.tokenFile.startsWith('/') && options.userDataDir.startsWith('/') && Number.isInteger(options.port) && options.port > 1024 && options.port < 65536, 'owner_managed', 'Unsupported native standalone launch configuration');
@@ -56,15 +57,19 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     const docker = options.docker ?? new ProcessDocker(options.dockerExecutable);
     let starting: Promise<void> | undefined;
     const controlIntentPath = join(dirname(options.nativeState.markerPath), 'control-start.json');
-    const syncControlDirectory = () => { const fd = openSync(dirname(controlIntentPath), 'r'); try {
-        fsyncSync(fd);
-    }
-    finally {
-        closeSync(fd);
-    } };
+    const pauseReceiptPath = join(dirname(options.nativeState.markerPath), 'control-pause.json');
+    const syncControlDirectory = () => {
+        const fd = openSync(dirname(controlIntentPath), 'r');
+        try {
+            fsyncSync(fd);
+        }
+        finally {
+            closeSync(fd);
+        }
+    };
     const clearControlIntent = () => { unlinkSync(controlIntentPath); syncControlDirectory(); };
     const assertSettled = () => ensure(!existsSync(controlIntentPath), 'owner_control_unknown', 'Native control start is pending or outcome unknown; retain exclusion');
-    async function processes() { const state = await verifyNativeStateMount(options.nativeState, options.nativeState.taskId, options.nativeStateOwnership); const c = JSON.parse(await docker.command(['container', 'inspect', options.containerId]))[0]; const image = JSON.parse(await docker.command(['image', 'inspect', options.image]))[0]; ensure(c?.Id === options.containerId && c.State?.Running && c.Config?.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId && c.Config.User && !/^(0|root)(:|$)/.test(c.Config.User) && image?.Id === c.Image && image.RepoDigests?.includes(options.image), 'owner_managed', 'Native runtime ownership/image changed'); ensure(c.Mounts?.some((m: any) => m.Type === 'bind' && m.Source === state.source && m.Destination === state.target && m.RW === true), 'owner_managed', 'Actual persistent native state mount is missing'); const value = JSON.parse(await docker.command(['exec', options.containerId, 'node', '-e', inspectProgram, JSON.stringify({ entrypoint: options.entrypoint, userDataDir: options.userDataDir, tokenFile: options.tokenFile, port: options.port })])); ensure(value.entrypointHash === options.entrypointSha256 && Array.isArray(value.processes) && value.processes.length <= 1, 'owner_managed', 'Native entrypoint digest or process identity mismatch'); return value.processes as NativeProcess[]; }
+    async function processes() { const state = await verifyNativeStateMount(options.nativeState, options.nativeState.taskId, options.nativeStateOwnership); const c = JSON.parse(await docker.command(['container', 'inspect', options.containerId]))[0]; const image = JSON.parse(await docker.command(['image', 'inspect', options.image]))[0]; ensure(c?.Id === options.containerId && c.State?.Running && !c.State.Paused && c.Config?.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId && c.Config.User && !/^(0|root)(:|$)/.test(c.Config.User) && image?.Id === c.Image && image.RepoDigests?.includes(options.image), 'owner_managed', 'Native runtime ownership/image changed'); ensure(c.Mounts?.some((m: any) => m.Type === 'bind' && m.Source === state.source && m.Destination === state.target && m.RW === true), 'owner_managed', 'Actual persistent native state mount is missing'); const value = JSON.parse(await docker.command(['exec', options.containerId, 'node', '-e', inspectProgram, JSON.stringify({ entrypoint: options.entrypoint, userDataDir: options.userDataDir, tokenFile: options.tokenFile, port: options.port })])); ensure(value.entrypointHash === options.entrypointSha256 && Array.isArray(value.processes) && value.processes.length <= 1, 'owner_managed', 'Native entrypoint digest or process identity mismatch'); return value.processes as NativeProcess[]; }
     async function start() {
         const before = await processes();
         if (before.length)
@@ -87,8 +92,46 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         ensure(c.HostConfig?.RestartPolicy?.Name === 'no' && c.HostConfig.AutoRemove === false, 'owner_quiescence', 'Managed runtime must disable automatic restart and removal');
         return c;
     }
-    async function stopped() { if (existsSync(controlIntentPath))
-        return false; const c = await stoppedContainer(); return !existsSync(controlIntentPath) && c.State?.Running === false && c.State.Paused === false && c.State.Pid === 0 && c.State.Status === 'exited'; }
+    const durableWrite = (path: string, value: unknown, exclusive = false) => { const fd = openSync(path, exclusive ? 'wx' : 'w', 0o600); try {
+        writeFileSync(fd, JSON.stringify(value));
+        fsyncSync(fd);
+    }
+    finally {
+        closeSync(fd);
+    } syncControlDirectory(); };
+    async function pausedProof() {
+        assertSettled();
+        if (!existsSync(pauseReceiptPath))
+            return undefined;
+        const c = await stoppedContainer();
+        assertSettled();
+        const proof = JSON.parse(readFileSync(pauseReceiptPath, 'utf8'));
+        if (!c.State?.Paused)
+            return undefined;
+        ensure(c.State.Running === true && c.State.Pid > 0 && c.State.StartedAt && proof.schemaVersion === 1 && proof.runtimeId === options.containerId && proof.containerPid === c.State.Pid && proof.startedAt === c.State.StartedAt && proof.processIdentity === nativeProcessIdentity(proof.native), 'owner_quiescence', 'Frozen runtime/process identity changed');
+        return proof;
+    }
+    async function paused() { if (existsSync(controlIntentPath))
+        return false; return !!await pausedProof(); }
+    async function pause() {
+        if (await paused())
+            return;
+        const process = await inspect();
+        const before = await stoppedContainer();
+        ensure(before.State?.Running === true && before.State.Paused === false && before.State.Pid > 0 && before.State.StartedAt, 'owner_quiescence', 'Owned running container state required before freeze');
+        durableWrite(controlIntentPath, { schemaVersion: 1, mode: 'pause', containerId: options.containerId }, true);
+        await docker.command(['container', 'pause', options.containerId]);
+        const after = await stoppedContainer();
+        ensure(after.State?.Running === true && after.State.Paused === true && after.State.Pid === before.State.Pid && after.State.StartedAt === before.State.StartedAt, 'owner_quiescence', 'Kernel container pause was not proven');
+        durableWrite(pauseReceiptPath, { schemaVersion: 1, ...process, containerPid: after.State.Pid, startedAt: after.State.StartedAt });
+        clearControlIntent();
+    }
+    async function stopped() {
+        if (existsSync(controlIntentPath))
+            return false;
+        const c = await stoppedContainer();
+        return !existsSync(controlIntentPath) && c.State?.Running === false && c.State.Paused === false && c.State.Pid === 0 && c.State.Status === 'exited';
+    }
     async function stop() {
         assertSettled();
         const before = await stoppedContainer();
@@ -102,8 +145,9 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         ensure(start.task.id === options.nativeState.taskId, 'owner_binding', 'Restart must retain the provisioned task');
         assertCurrent();
         assertSettled();
+        const frozen = await pausedProof();
         const c = await stoppedContainer();
-        ensure(c.State?.Running === false && c.State.Paused === false && c.State.Pid === 0 && c.State.Status === 'exited', 'owner_quiescence', 'Restart requires a fully stopped native runtime');
+        ensure(frozen || c.State?.Running === false && c.State.Paused === false && c.State.Pid === 0 && c.State.Status === 'exited', 'owner_quiescence', 'Resume requires a fully stopped or independently frozen native runtime');
         assertCurrent();
         const fd = openSync(controlIntentPath, 'wx', 0o600);
         try {
@@ -118,11 +162,20 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         let settled = false;
         try {
             assertCurrent();
-            await docker.command(['container', 'start', options.containerId]);
-            await startNative();
+            await docker.command(['container', frozen ? 'unpause' : 'start', options.containerId]);
+            if (frozen) {
+                const processesNow = await processes();
+                ensure(processesNow.length === 1 && nativeProcessIdentity(processesNow[0]!) === frozen.processIdentity, 'owner_quiescence', 'Resumed native process differs from the frozen question owner');
+            }
+            else
+                await startNative();
             settled = true;
             assertCurrent();
             clearControlIntent();
+            if (existsSync(pauseReceiptPath)) {
+                unlinkSync(pauseReceiptPath);
+                syncControlDirectory();
+            }
         }
         catch (error) {
             if (settled) {
@@ -135,7 +188,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     async function resume(start: NativeStart, gate: Pick<FactoryToolGate, 'nativeIdentity'>) { await controlledResume(start, () => { gate.nativeIdentity(start); }, 'factory'); }
     async function resumeHuman(start: NativeStart, assertCurrent: () => void) { await controlledResume(start, assertCurrent, 'human'); }
     const startNative = start;
-    return { options: Object.freeze({ ...options }), inspect, stop, stopped, resume, resumeHuman, controlIntentPath, async ensureStarted() {
+    return { options: Object.freeze({ ...options }), inspect, stop, stopped, pause, paused, resume, resumeHuman, controlIntentPath, pauseReceiptPath, async ensureStarted() {
             assertSettled();
             if (!starting)
                 starting = start().finally(() => { starting = undefined; });

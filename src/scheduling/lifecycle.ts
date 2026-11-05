@@ -1,3 +1,4 @@
+import {createRequire} from 'node:module';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { Attempt, Clock, CloseoutResult, NativeIdentity, OwnerEvent, TaskResult, TaskSpec, NativeStart } from '../contracts/domain.ts';
 import type { NativeOwner } from '../contracts/owner.ts';
@@ -10,6 +11,8 @@ import { accountActive } from './leases.ts';
 import type { Quiescence } from './leases.ts';
 import { hasCapabilityGrants } from './eligibility.ts';
 import { lifecycleActionKinds, verifySnapshot } from './recovery.ts';
+
+const answerValidator=new Ajv2020({strict:false});(createRequire(import.meta.url)('ajv-formats') as typeof import('ajv-formats').default)(answerValidator);
 
 export interface TransientFailure { transient: boolean; reason: string }
 export interface HumanOpenContext { readonly start:NativeStart; assertCurrent():void }
@@ -177,8 +180,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     return null;
   }
   async function openNative(identity:NativeIdentity,key:string):Promise<{uri?:string}> {
-    const r=store.getReservations().find(r=>r.attempt.native&&fingerprint(r.attempt.native)===fingerprint(identity));
-    ensure(r,'identity_missing','Original native identity is not owned by this factory');
+    const matches=store.getReservations().filter(r=>r.attempt.native&&fingerprint(r.attempt.native)===fingerprint(identity)&&store.getTask(r.attempt.taskId)?.attemptIds.at(-1)===r.attempt.id);
+    ensure(matches.length===1,'identity_missing','Native identity must match one current reservation');
+    const r=matches[0]!;
     const task=store.getTask(r.attempt.taskId)!;const repo=store.getRepository(task.spec.repositoryId)!;
     const assertCurrent=()=>{const current=store.getTask(task.spec.id);const repository=store.getRepository(repo.id);const actual=record(r.attempt.id).reservation;
       ensure(repository?.controlMode==='human'&&repository.revision===repo.revision&&current?.revision===task.revision&&current.status!=='cancelled'&&current.attemptIds.at(-1)===r.attempt.id&&fingerprint(actual.attempt.native)===fingerprint(identity)&&!store.getAdmissionState().activeLeases.some(l=>l.repositoryId===repo.id),'human_open_unadmitted','Human navigation admission changed; retain original runtime');};
@@ -201,7 +205,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     if (repo.controlMode !== 'human') store.setRepositoryControl(repo.id, 'human', repo.revision);
     const id = task.attemptIds.at(-1); ensure(id, 'identity_missing', 'No started native identity to open');
     const r = record(id).reservation;
-    const action = store.enqueueAction({ key: `lifecycle:takeover:${taskId}:${id}`, kind: 'lifecycle.takeover', payload: { taskId, attemptId: id } });
+    const humanRevision=store.getRepository(repo.id)!.revision;
+    const action = store.enqueueAction({ key: `lifecycle:takeover:${taskId}:${id}:${humanRevision}`, kind: 'lifecycle.takeover', payload: { taskId, attemptId: id, humanRevision } });
+    if(action.completedAt)return;
     // Repository ownership applies to every native writer, including a different task than the one opened.
     for (const current of store.getReservations().filter(value => value.lease.repositoryId === repo.id && value.lease.active)) {
       await pause(current.attempt.id, 'needs_attention', undefined, true);
@@ -251,6 +257,12 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       if(store.getRepository(task.spec.repositoryId)?.controlMode==='human'||task.controlMode==='human'||!r.lease.active)return;
       const pendingInput = event.type === 'input' ? event.input : event.type === 'snapshot' && event.snapshot.state === 'waiting' ? event.snapshot.inputs[0] : undefined;
       if (pendingInput) {
+        // Fresh snapshots during an admitted reply may still contain that exact unanswered request.
+        // Its persisted, validated response is already queued; do not freeze it again before send.
+        const sameOpen=store.snapshot().attention.find(a=>a.taskId===r.attempt.taskId&&a.nativeInputId===pendingInput.id&&a.status==='open');
+        if(sameOpen&&record(id).state.stopRequested)return;
+        const answered=store.snapshot().attention.find(a=>a.taskId===r.attempt.taskId&&a.nativeInputId===pendingInput.id&&a.status==='responded');
+        if(answered&&store.pendingActions().some(a=>a.kind==='lifecycle.send'&&a.payload.attemptId===id&&a.payload.requestId===answered.id))return;
         await pause(id, 'waiting_input', { kind: 'input', prompt: pendingInput.prompt, recovery: 'Answer this request to continue the original native session', inputSchema: pendingInput.schema, nativeInputId: pendingInput.id }); return;
       }
       if (event.type === 'connection_lost' || (event.type === 'snapshot' && event.snapshot.state === 'lost')) {
@@ -286,7 +298,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       const request = store.snapshot().attention.find(a => a.id === requestId);
       ensure(request, 'not_found', 'Attention request not found');
       let valid = false;
-      try { valid = new Ajv2020({ strict: false }).compile(request.inputSchema)(value) as boolean; } catch { /* Malformed schemas cannot admit input. */ }
+      try { valid = answerValidator.compile(request.inputSchema)(value) as boolean; } catch { /* Malformed schemas cannot admit input. */ }
       ensure(valid, 'invalid_answer', 'Answer does not match the trusted native input schema');
       const action = store.queueLifecycleReply(requestId, value, key);
       if (!action.completedAt) { try { await runAction(action); } catch (error) { if (!(error instanceof StoreError)) throw error; } }

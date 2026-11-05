@@ -14,6 +14,7 @@ import type { FactoryToolGate } from './tools.ts';
 import { nativeProcessIdentity, type createManagedVsCodeLauncher, type NativeProcess } from './managed.ts';
 import { MODEL_PROXY_URL, inspectModelProxy, type NativeModelProxyControl, type ModelProxyInspection } from './model-proxy.ts';
 import { nativeCanaryProgram } from './canary.ts';
+import { nativePolicyIdle } from './input.ts';
 import { nativeToolAllowlist } from './toolkits.ts';
 interface CanaryResult {
     nonce: string;
@@ -53,6 +54,8 @@ export function createVsCodeNativeToolBoundary(options: {
     } | undefined;
     const { owner, gate, launcher } = options;
     ensure(options.protectedPaths.some(p => pathContains(p, owner.metadataDirectory)), 'owner_boundary', 'Owner journal metadata directory must be protected');
+    if (launcher.pauseReceiptPath)
+        ensure(options.protectedPaths.some(p => pathContains(p, launcher.pauseReceiptPath)), 'owner_boundary', 'Managed frozen-process receipt must be protected');
     if (launcher.controlIntentPath)
         ensure(options.protectedPaths.some(p => pathContains(p, launcher.controlIntentPath)), 'owner_boundary', 'Managed control-start metadata must be protected');
     async function root() { const { result, subscription } = await (await owner.rpc()).subscribe('ahp-root://'); await subscription.close(); ensure(result.snapshot?.resource === 'ahp-root://', 'owner_boundary', 'Missing native root snapshot'); return result.snapshot.state as RootState; }
@@ -102,12 +105,14 @@ export function createVsCodeNativeToolBoundary(options: {
         }
     }
     async function challenge(start: NativeStart, nonce: string, protectedPaths: readonly string[], humanGuard?: () => void) {
-        const assertBinding = () => { if (humanGuard) {
-            humanGuard();
-            ensure(gate.isSuspended(), 'owner_binding', 'Factory client gate must stay closed during human control');
-        }
-        else
-            ensure(canonical({ ...gate.currentStart(), idempotencyKey: '' }) === canonical({ ...start, idempotencyKey: '' }), 'owner_binding', 'Native boundary is bound to another reservation'); };
+        const assertBinding = () => {
+            if (humanGuard) {
+                humanGuard();
+                ensure(gate.isSuspended(), 'owner_binding', 'Factory client gate must stay closed during human control');
+            }
+            else
+                ensure(canonical({ ...gate.currentStart(), idempotencyKey: '' }) === canonical({ ...start, idempotencyKey: '' }), 'owner_binding', 'Native boundary is bound to another reservation');
+        };
         assertBinding();
         await assertPolicy(start);
         const before = await launcher.inspect();
@@ -154,7 +159,7 @@ export function createVsCodeNativeToolBoundary(options: {
         const identity = human?.identity ?? gate.nativeIdentity?.(start);
         if (identity && !human) {
             const state = await owner.chat(identity);
-            ensure(!state.activeTurn && !state.backgroundWork?.length && !state.queuedMessages?.length && !(state.status & 8), 'owner_binding', 'Native runtime must be quiescent before model transport preparation');
+            ensure(nativePolicyIdle(state), 'owner_binding', 'Native runtime must be quiescent before model transport preparation');
         }
         const config = (await root()).config;
         ensure(config?.schema.properties['http.proxy']?.type === 'string' && config.schema.properties['http.noProxy']?.type === 'array' && config.schema.properties.systemProxyEnabled?.type === 'boolean', 'owner_model_proxy', 'Native host did not advertise supported proxy configuration');
@@ -212,7 +217,7 @@ export function createVsCodeNativeToolBoundary(options: {
             const identity = gate.nativeIdentity?.(start);
             if (identity) {
                 const state = await owner.chat(identity);
-                ensure(!state.activeTurn && !state.backgroundWork?.length && !state.queuedMessages?.length && !(state.status & 8), 'owner_binding', 'Native runtime must already be quiescent before rebinding');
+                ensure(nativePolicyIdle(state), 'owner_binding', 'Native runtime must already be quiescent before rebinding');
             }
             const state = await root();
             ensure(state.config?.schema.properties.modelCapabilityOverrides?.type === 'object' && state.config.schema.properties['http.proxy']?.type === 'string' && state.config.schema.properties['http.noProxy']?.type === 'array' && state.config.schema.properties.systemProxyEnabled?.type === 'boolean', 'owner_boundary', 'Native provider did not advertise the required tool control');

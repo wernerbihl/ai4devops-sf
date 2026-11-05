@@ -18,7 +18,7 @@ export const digest = (value: unknown) => createHash('sha256').update(canonical(
 /** Protected runner metadata; never mounted into native workspaces. Intent precedes wire I/O. */
 export class OwnerJournal {
     private db: DatabaseSync;
-    constructor(path: string) { mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); this.db = new DatabaseSync(path); chmodSync(path, 0o600); this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS sessions (task_key TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS actions (key TEXT PRIMARY KEY, hash TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS stopped (identity TEXT PRIMARY KEY, stopped_at TEXT NOT NULL);'); }
+    constructor(path: string) { mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); this.db = new DatabaseSync(path); chmodSync(path, 0o600); this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS sessions (task_key TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS actions (key TEXT PRIMARY KEY, hash TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS stopped (identity TEXT PRIMARY KEY, stopped_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS paused (identity TEXT PRIMARY KEY, paused_at TEXT NOT NULL);'); }
     session(start: NativeStart, directory: string): {
         intent: SessionIntent;
         fresh: boolean;
@@ -52,6 +52,11 @@ export class OwnerJournal {
         identity: NativeIdentity;
         stoppedAt: string;
     } | undefined { this.owned(identity); const row = this.db.prepare('SELECT stopped_at FROM stopped WHERE identity=?').get(canonical(identity)); return row ? { identity, stoppedAt: String(row.stopped_at) } : undefined; }
+    paused(identity: NativeIdentity): {
+        identity: NativeIdentity;
+        stoppedAt: string;
+    } | undefined { this.owned(identity); const row = this.db.prepare('SELECT paused_at FROM paused WHERE identity=?').get(canonical(identity)); return row ? { identity, stoppedAt: String(row.paused_at) } : undefined; }
+    recordPaused(identity: NativeIdentity) { this.owned(identity); this.db.prepare('INSERT OR REPLACE INTO paused(identity,paused_at) VALUES (?,?)').run(canonical(identity), new Date().toISOString()); }
     recordStopped(identity: NativeIdentity) { this.owned(identity); this.db.prepare('INSERT OR REPLACE INTO stopped(identity,stopped_at) VALUES (?,?)').run(canonical(identity), new Date().toISOString()); }
     close() { this.db.close(); }
 }

@@ -7,6 +7,7 @@ const now = '2026-11-04T00:00:00.000Z';
 export function fakeHost(options: {
     providers?: string[];
     noModels?: boolean;
+    inputQuestions?: ChatInputRequest['questions'];
     dropCreate?: boolean;
     hideCatalog?: boolean;
     provisional?: boolean;
@@ -171,7 +172,7 @@ export function fakeHost(options: {
                         await emit(p.channel, tool);
                     }
                     if (action.type === 'chat/turnStarted' && actions.filter(a => a === 'chat/turnStarted').length === 1) {
-                        chats.set(p.channel, chatReducer(chats.get(p.channel)!, { type: 'chat/inputRequested' as ActionType.ChatInputRequested, request: { id: 'question-1', message: 'Ready?', questions: options.inputBehavior?.endsWith('answer') ? [{ kind: 'text', id: 'response', message: 'Continue?', required: true }] : [], _meta: { purpose: 'askUser' } } as ChatInputRequest }));
+                        chats.set(p.channel, chatReducer(chats.get(p.channel)!, { type: 'chat/inputRequested' as ActionType.ChatInputRequested, request: { id: 'question-1', message: 'Ready?', questions: options.inputQuestions ?? (options.inputBehavior?.endsWith('answer') ? [{ kind: 'text', id: 'response', message: 'Continue?', required: true }] : []), _meta: { purpose: 'askUser' } } as ChatInputRequest }));
                     }
                     await emit(p.channel, action, { clientId: 'probe', clientSeq: p.clientSeq });
                     if (action.type === 'chat/inputCompleted' && options.completedToolAfterInput) {

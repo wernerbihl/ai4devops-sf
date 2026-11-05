@@ -58,6 +58,7 @@ test('controlled stop admits C4 continuation from durable receipt, resumes only 
         const identity = await owner.ensureSession(start);
         f.store.bindLifecycleIdentity(attempt.id, identity);
         await owner.send(identity, { text: 'First' }, 'first');
+        await owner.send(identity, { requestId: 'question-1', response: 'accept' }, 'answer-before-stop');
         const lifecycle = createLifecycle({ store: f.store, clock: f.clock, owner: () => owner, readiness: async () => running ? prepared : { ready: false, code: 'stopped', recovery: 'Acquire current lease before restart' }, workspace: async () => true, workflow: { snapshot: async () => 'present', quiesce: async () => 'waiting', resume: async () => { } }, managedContinuation: { async preflight(a) { return await owner.stoppedReceipt(a.native!) ? prepared : undefined; }, async prepare(a, key) { const s = broker.nativeStart(a.id, key); await launcher.resume(s, gate); assert.equal((await owner.reconcile(s)).state, 'done'); } } });
         await lifecycle.waitForCI(attempt.id);
         assert.equal(running, false);

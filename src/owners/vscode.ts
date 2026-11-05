@@ -2,12 +2,13 @@ import { pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AhpClient, RpcError, type AhpTransport } from '@microsoft/agent-host-protocol/client';
-import { MessageKind, type ActionType, type ChatInputAnswer, type ChatInputResponseKind, type ChatState, type RootState, type SessionState, type ToolDefinition } from '@microsoft/agent-host-protocol';
+import { MessageKind, type ActionType, type ChatState, type RootState, type SessionState, type ToolDefinition } from '@microsoft/agent-host-protocol';
 import type { NativeOwner } from '../contracts/owner.ts';
 import type { CapabilityReport, NativeIdentity, NativeSnapshot, NativeStart, OwnerEvent, OwnerReadiness, ProfileEvidence, ProviderId, RequiredCapabilities } from '../contracts/domain.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { canonical, ensure } from '../storage/database.ts';
 import { requireVerifiedProfile } from '../isolation/verify.ts';
+import { nativeInputSchema, nativeInputReply, pendingNativeInput } from './input.ts';
 import { connectAhp, type AhpEndpoint } from './ahp.ts';
 import { OwnerJournal, digest, type SessionIntent } from './journal.ts';
 import { createNativeNavigation, nativeOpenUri, navigationCommits, type NativeNavigation } from './navigation.ts';
@@ -20,6 +21,8 @@ export interface ManagedOwnerLauncher {
     /** Must stop every contained process and inspect the kernel runtime state. */
     stop?(): Promise<void>;
     stopped?(): Promise<boolean>;
+    pause?(): Promise<void>;
+    paused?(): Promise<boolean>;
     ensureStarted(): Promise<AhpEndpoint | {
         connect: () => Promise<AhpTransport>;
     }>;
@@ -159,11 +162,19 @@ export class VsCodeOwner implements NativeOwner {
     private scheduleObserve(identity: NativeIdentity, source: AhpClient) {
         const key = identity.chatId!;
         const previous = this.processing.get(key) ?? Promise.resolve();
-        const next = previous.then(async () => { if (this.client !== source)
-            return; const state = await this.readChat(identity); if (this.client !== source)
-            return; await this.processTools(identity, state, source); if (this.client === source)
-            this.publish(identity, state); }).catch(() => { if (this.client === source)
-            this.emit({ type: 'connection_lost', identity, reason: 'Native observation failed; reconcile before continuing', at: new Date().toISOString() }); });
+        const next = previous.then(async () => {
+            if (this.client !== source)
+                return;
+            const state = await this.readChat(identity);
+            if (this.client !== source)
+                return;
+            await this.processTools(identity, state, source);
+            if (this.client === source)
+                this.publish(identity, state);
+        }).catch(() => {
+            if (this.client === source)
+                this.emit({ type: 'connection_lost', identity, reason: 'Native observation failed; reconcile before continuing', at: new Date().toISOString() });
+        });
         this.processing.set(key, next);
         void next.finally(() => {
             if (this.processing.get(key) === next)
@@ -226,12 +237,15 @@ export class VsCodeOwner implements NativeOwner {
         const p = input as {
             text?: string;
             requestId?: string;
-            response?: string;
-            answers?: Record<string, ChatInputAnswer>;
+            response?: unknown;
+            answers?: unknown;
         };
         if (p.requestId) {
             const part = [...(state.activeTurn?.responseParts ?? []), ...state.turns.flatMap(t => t.responseParts)].find(p2 => p2.kind === 'inputRequest' && p2.request.id === p.requestId);
-            return part?.kind === 'inputRequest' && part.response === (p.response ?? 'accept') && Object.entries(p.answers ?? {}).every(([id, value]) => canonical(part.request.answers?.[id]) === canonical(value)) ? 'done' : 'unknown';
+            if (part?.kind !== 'inputRequest')
+                return 'unknown';
+            const reply = nativeInputReply(part.request, p);
+            return part.response === reply.response && Object.entries(reply.answers).every(([id, value]) => canonical(part.request.answers?.[id]) === canonical(value)) ? 'done' : 'unknown';
         }
         const turnId = digest([identity, key]);
         const turn = state.activeTurn?.id === turnId ? state.activeTurn : state.turns.find(t => t.id === turnId);
@@ -329,11 +343,7 @@ export class VsCodeOwner implements NativeOwner {
         });
     }
     private publish(identity: NativeIdentity, state: ChatState): NativeSnapshot {
-        const inputs = state.activeTurn?.responseParts.flatMap(p => p.kind === 'inputRequest' && !p.response ? [{ id: p.request.id, prompt: p.request.message ?? 'Native input', schema: { questions: p.request.questions ?? [], ...((p.request as {
-                        _meta?: object;
-                    })._meta ? { meta: (p.request as {
-                            _meta?: object;
-                        })._meta } : {}) } }] : []) ?? [];
+        const inputs = state.activeTurn?.responseParts.flatMap(p => p.kind === 'inputRequest' && !p.response ? [{ id: p.request.id, prompt: p.request.message ?? 'Native input', schema: nativeInputSchema(p.request) }] : []) ?? [];
         const snapshot: NativeSnapshot = { identity, state: inputs.length ? 'waiting' : nativeActive(state) ? 'active' : 'idle', inputs };
         const at = new Date().toISOString();
         this.emit({ type: 'snapshot', identity, snapshot, at });
@@ -360,23 +370,22 @@ export class VsCodeOwner implements NativeOwner {
             const payload = input as {
                 text?: string;
                 requestId?: string;
-                response?: string;
-                answers?: Record<string, ChatInputAnswer>;
+                response?: unknown;
+                answers?: unknown;
             };
             const client = await this.rpc();
             const receipt = this.journal.claim(identity, idempotencyKey, input);
             if (receipt.done)
                 return;
             if (payload.requestId) {
-                const response = payload.response ?? 'accept';
-                ensure(['accept', 'decline', 'cancel'].includes(response), 'owner_input', 'Unsupported input response');
-                ensure(Object.values(payload.answers ?? {}).every(a => a.state === 'submitted'), 'owner_input', 'Native answers must be submitted');
                 const find = (state: ChatState) => [...(state.activeTurn?.responseParts ?? []), ...state.turns.flatMap(t => t.responseParts)].find(p => p.kind === 'inputRequest' && p.request.id === payload.requestId);
                 const part = find(current);
                 ensure(part?.kind === 'inputRequest', 'owner_input', 'Native input request not found');
+                const { response, answers } = nativeInputReply(part.request, payload);
+                ensure(part.response || current.activeTurn?.responseParts.includes(part), 'owner_input', 'Original question is no longer active; cannot restore cancelled history');
                 if (!part.response && receipt.fresh)
-                    client.dispatch(identity.chatId!, { type: 'chat/inputCompleted' as ActionType.ChatInputCompleted, requestId: payload.requestId, response: response as ChatInputResponseKind, ...(payload.answers ? { answers: payload.answers } : {}) });
-                await this.wait(async () => { const p = find(await this.chat(identity)); return p?.kind === 'inputRequest' && p.response === response && Object.entries(payload.answers ?? {}).every(([key, value]) => canonical(p.request.answers?.[key]) === canonical(value)); }, 'Exact native input completion was not observed; outcome unknown');
+                    client.dispatch(identity.chatId!, { type: 'chat/inputCompleted' as ActionType.ChatInputCompleted, requestId: payload.requestId, response, answers });
+                await this.wait(async () => { const p = find(await this.chat(identity)); return p?.kind === 'inputRequest' && p.response === response && Object.entries(answers).every(([key, value]) => canonical(p.request.answers?.[key]) === canonical(value)); }, 'Exact native input completion was not observed; outcome unknown');
             }
             else {
                 ensure(typeof payload.text === 'string' && payload.text.length > 0, 'owner_input', 'Native message text is required');
@@ -396,17 +405,34 @@ export class VsCodeOwner implements NativeOwner {
     async stoppedReceipt(identity: NativeIdentity): Promise<{
         identity: NativeIdentity;
         stoppedAt: string;
+        mode: 'paused' | 'stopped';
     } | undefined> {
+        const frozen = this.journal.paused(identity);
+        if (frozen && await this.options.launcher?.paused?.())
+            return { ...frozen, mode: 'paused' };
         const receipt = this.journal.stopped(identity);
-        return receipt && await this.options.launcher?.stopped?.() ? receipt : undefined;
+        return receipt && await this.options.launcher?.stopped?.() ? { ...receipt, mode: 'stopped' } : undefined;
     }
     async quiesce(identity: NativeIdentity): Promise<'stopped' | 'waiting' | 'unknown'> {
         try {
             this.journal.owned(identity);
-            if (await this.stoppedReceipt(identity))
-                return 'stopped';
+            const receipt = await this.stoppedReceipt(identity);
+            if (receipt)
+                return receipt.mode === 'paused' ? 'waiting' : 'stopped';
             try {
                 const state = await this.chat(identity);
+                if (pendingNativeInput(state)) {
+                    if (!this.options.launcher?.pause)
+                        return 'unknown';
+                    try {
+                        await this.options.launcher.pause();
+                        this.journal.recordPaused(identity);
+                        return 'waiting';
+                    }
+                    catch {
+                        return 'unknown';
+                    }
+                }
                 if (state.activeTurn)
                     (await this.rpc()).dispatch(identity.chatId!, { type: 'chat/turnCancelled' as ActionType.ChatTurnCancelled, turnId: state.activeTurn.id, duration: 0 });
                 await this.wait(async () => !nativeActive(await this.chat(identity)), 'Native cancellation was not observed');

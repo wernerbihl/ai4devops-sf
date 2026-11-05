@@ -34,7 +34,7 @@ async function fixture(deferIdentity = false) {
   const readiness = async () => available ? { ready: true as const, baseSha: 'base', workspacePath: '/original/worktree', profileId: 'profile' }
     : { ready: false as const, code: 'unavailable', recovery: 'Restore assigned owner' };
   const scheduler = createScheduler({ store: f.store, clock, materialize: materializeFixture, readiness,
-    start: async () => ({ kind: 'started', identity: { ...(deferIdentity ? {} : { native }), workflow: { executionId: 'original-workflow', namespace: 'sf', flowId: 'quality', revision: '1' } } }),
+    start: async r => ({ kind: 'started', identity: { ...(deferIdentity ? {} : { native: r.task.spec.id===f.task.id?native:{...native,sessionId:`session-${r.task.spec.id}`,chatId:`chat-${r.task.spec.id}`} }), workflow: { executionId: 'original-workflow', namespace: 'sf', flowId: 'quality', revision: '1' } } }),
   });
   const started = await scheduler.dispatch('manual'); assert.equal(started.kind, 'started');
   const attempt = f.store.snapshot().attempts[0]!;
@@ -508,4 +508,15 @@ test('ordinary_release_uses_persisted_metadata_guard_and_stale_state_cannot_remo
     assert.equal(f.store.getTask(f.task.id)!.status, 'completed');
     assert.equal(f.store.getAdmissionState().activeLeases.length, 0);
   } finally { f.close(); }
+});
+
+test('E4 I3 retry opens the unique current reservation retaining native identity',async()=>{
+ const x=await fixture();try{const retry=await x.lifecycle.retryTransient(x.attempt.id,{transient:true,reason:'retry'});assert.ok(retry);assert.deepEqual(retry.native,x.native);await x.lifecycle.requestTakeover(x.f.task.id);assert.deepEqual(x.opened,[x.native]);}finally{x.f.close();}
+});
+test('E4 I4 separate human control cycles each open once and same handoff replay is idempotent',async()=>{
+ const x=await fixture();try{await x.lifecycle.requestTakeover(x.f.task.id);await x.lifecycle.requestTakeover(x.f.task.id);assert.equal(x.opened.length,1);await x.lifecycle.returnControl('repo-1');await x.lifecycle.requestTakeover(x.f.task.id);await x.lifecycle.requestTakeover(x.f.task.id);assert.equal(x.opened.length,2);}finally{x.f.close();}
+});
+
+test('E4 I3 rejects a native identity ambiguous across distinct current tasks',async()=>{
+ const x=await fixture();try{await x.event({type:'input',input});x.f.store.createManualTasks(x.f.request,'ambiguous-other');await createScheduler({store:x.f.store,clock:x.clock,materialize:materializeFixture,readiness:async()=>({ready:true,baseSha:'base',workspacePath:'/original/worktree',profileId:'profile'}),start:async()=>({kind:'started',identity:{native:x.native,workflow:{executionId:'other',namespace:'sf',flowId:'quality',revision:'1'}}})}).dispatch('manual');await assert.rejects(x.lifecycle.requestTakeover(x.f.task.id),/one current reservation/);assert.equal(x.opened.length,0);}finally{x.f.close();}
 });

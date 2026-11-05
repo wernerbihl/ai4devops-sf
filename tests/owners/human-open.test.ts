@@ -11,7 +11,7 @@ import { createFactoryToolGate } from '../../src/owners/tools.ts';
 import { createManagedVsCodeLauncher } from '../../src/owners/managed.ts';
 import { createVsCodeOwner } from '../../src/owners/vscode.ts';
 import { fakeHost } from './ahp-fixture.ts';
-for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'focus-race', 'completed', 'failed'] as const)
+for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'focus-race', 'completed', 'failed', 'cycles'] as const)
     test(`actual C4 human takeover ${scenario} preserves admission and original native identity`, async () => {
         const f = createFixture();
         const summary = f.store.snapshot().recipes[0]!;
@@ -23,7 +23,7 @@ for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'foc
         const start = broker.nativeStart(attempt.id, 'start');
         const gate = createFactoryToolGate({ store: f.store, broker });
         const nativeState = await nativeStateFixture(f.directory, start.task.id);
-        let running = true, native = true;
+        let running = true, native = true, paused = false;
         let restartChecks = 0;
         const nativeDescriptor = { pid: 12, startTime: '0', netNamespace: 'net', mountNamespace: 'mnt', pidNamespace: 'pid', bootId: 'boot', entrypoint: '/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js' };
         const host = fakeHost({ canary: { native: nativeDescriptor, defaultDnsDenied: true } });
@@ -34,6 +34,14 @@ for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'foc
         let auths = 0;
         const options = { nativeState, nativeStateOwnership: { installationId: 'installation', root: f.directory }, containerId: 'd'.repeat(64), runtimeOwnerId: 'owned', image: 'image@sha256:' + 'a'.repeat(64), entrypoint: '/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js', entrypointSha256: 'b'.repeat(64), userDataDir: nativeState.target + '/user-data', tokenFile: nativeState.target + '/connection-token', port: 8081 };
         const docker = { async command(args: string[]) {
+                if (args[0] === 'container' && args[1] === 'pause') {
+                    paused = true;
+                    return '';
+                }
+                if (args[0] === 'container' && args[1] === 'unpause') {
+                    paused = false;
+                    return '';
+                }
                 if (args[0] === 'container' && args[1] === 'stop') {
                     running = false;
                     native = false;
@@ -69,7 +77,7 @@ for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'foc
                     return '';
                 }
                 if (args[0] === 'container')
-                    return JSON.stringify([{ Id: options.containerId, Config: { Labels: { 'sf.runtime-owner': 'owned' }, User: '1000' }, HostConfig: { RestartPolicy: { Name: 'no' }, AutoRemove: false }, State: { Running: running, Paused: false, Pid: running ? 12 : 0, Status: running ? 'running' : 'exited' }, Image: 'image-id', Mounts: [{ Source: nativeState.source, Destination: nativeState.target, RW: true, Type: 'bind' }] }]);
+                    return JSON.stringify([{ Id: options.containerId, Config: { Labels: { 'sf.runtime-owner': 'owned' }, User: '1000' }, HostConfig: { RestartPolicy: { Name: 'no' }, AutoRemove: false }, State: { Running: running, Paused: paused, Pid: running ? 12 : 0, StartedAt: 'container-original', Status: running ? 'running' : 'exited' }, Image: 'image-id', Mounts: [{ Source: nativeState.source, Destination: nativeState.target, RW: true, Type: 'bind' }] }]);
                 if (args[0] === 'image')
                     return JSON.stringify([{ Id: 'image-id', RepoDigests: [options.image] }]);
                 if (args[1] === '-d') {
@@ -87,25 +95,49 @@ for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'foc
             const { fingerprint } = await import('../../src/storage/database.ts');
             const policy = { schemaVersion: 1 as const, kind: 'copilot-model-connect' as const, listenPort: 3128 as const, nativeRuntimeId: options.containerId, internalNetworkId: 'internal', allowedAuthorities: ['api.githubcopilot.com:443'] };
             const modelProxy = { policy, async inspect() { return { runtimeId: 'proxy', processIdentity: 'proxy', image: 'proxy@sha256:' + 'b'.repeat(64), policySha256: fingerprint(policy), nativeRuntimeId: options.containerId, internalNetworkId: 'internal', egressNetworkId: 'egress' }; } };
-            const boundary = createVsCodeNativeToolBoundary({ owner, gate, launcher, modelProxy, protectedPaths: [owner.metadataDirectory, nativeState.markerPath, launcher.controlIntentPath, '/host-auth', '/var/run/docker.sock'] });
+            const boundary = createVsCodeNativeToolBoundary({ owner, gate, launcher, modelProxy, protectedPaths: [owner.metadataDirectory, nativeState.markerPath, launcher.controlIntentPath, launcher.pauseReceiptPath, '/host-auth', '/var/run/docker.sock'] });
             const authenticate = async () => { auths++; await owner.authenticateProvider('copilot', { resource: 'https://api.github.com', token: 'fixture-native-auth', expiresIn: 300 }); };
             await authenticate();
             await boundary.prepareBinding(start, 'initial');
             const identity = await owner.ensureSession(start);
             f.store.bindLifecycleIdentity(attempt.id, identity);
-            const lifecycle = createLifecycle({ store: f.store, clock: f.clock, owner: () => owner, readiness: async () => {assert.ok(scenario!=='completed'&&scenario!=='failed','Terminal history must not undergo continuation readiness');return prepared;}, workspace: async () => true, workflow: { snapshot: async () => 'present', quiesce: async () => 'waiting', resume: async () => { } }, managedContinuation: { async preflight(a) {assert.ok(scenario!=='completed'&&scenario!=='failed','Terminal history must not undergo continuation preflight'); return await owner.stoppedReceipt(a.native!) ? prepared : undefined; }, async prepare() { throw Error('unused'); } }, managedHumanOpen: createManagedHumanOpen({ owner, launcher, boundary, authenticate }) });
+            const lifecycle = createLifecycle({ store: f.store, clock: f.clock, owner: () => owner, readiness: async () => { assert.ok(scenario !== 'completed' && scenario !== 'failed', 'Terminal history must not undergo continuation readiness'); return prepared; }, workspace: async () => true, workflow: { snapshot: async () => 'present', quiesce: async () => 'waiting', resume: async () => { } }, managedContinuation: { async preflight(a) { assert.ok(scenario !== 'completed' && scenario !== 'failed', 'Terminal history must not undergo continuation preflight'); return await owner.stoppedReceipt(a.native!) ? prepared : undefined; }, async prepare() { throw Error('unused'); } }, managedHumanOpen: createManagedHumanOpen({ owner, launcher, boundary, authenticate }) });
             await assert.rejects(owner.open(identity), /admitted/);
             assert.equal(restartChecks, 0);
             assert.equal(opens.length, 0);
-            if(scenario==='completed'||scenario==='failed'){
-                assert.equal(await owner.quiesce(identity),'stopped');
-                f.store.updateLifecycle(attempt.id,attempt.fence,{status:scenario,release:'stopped'});
-                const repo=f.store.getRepository('repo-1')!;f.store.setRepositoryControl(repo.id,'human',repo.revision);
-                await lifecycle.openNative(identity,'terminal-history');assert.equal(running,true);assert.equal(opens.length,1);
+            if (scenario === 'completed' || scenario === 'failed') {
+                assert.equal(await owner.quiesce(identity), 'stopped');
+                f.store.updateLifecycle(attempt.id, attempt.fence, { status: scenario, release: 'stopped' });
+                const repo = f.store.getRepository('repo-1')!;
+                f.store.setRepositoryControl(repo.id, 'human', repo.revision);
+                await lifecycle.openNative(identity, 'terminal-history');
+                assert.equal(running, true);
+                assert.equal(opens.length, 1);
                 await lifecycle.returnControl('repo-1');
-                assert.equal(running,false,'Returning terminal history to factory control must stop its human runtime');
-                assert.equal(f.store.getRepository('repo-1')!.controlMode,'factory');assert.equal(f.store.getTask(start.task.id)!.status,scenario);
-                assert.equal(host.creates,1);assert.equal(host.actions.filter(a=>a==='chat/turnStarted').length,0);assert.equal(f.store.getAdmissionState().activeLeases.length,0);
+                assert.equal(running, false, 'Returning terminal history to factory control must stop its human runtime');
+                assert.equal(f.store.getRepository('repo-1')!.controlMode, 'factory');
+                assert.equal(f.store.getTask(start.task.id)!.status, scenario);
+                assert.equal(host.creates, 1);
+                assert.equal(host.actions.filter(a => a === 'chat/turnStarted').length, 0);
+                assert.equal(f.store.getAdmissionState().activeLeases.length, 0);
+                return;
+            }
+            if (scenario === 'cycles') {
+                await lifecycle.requestTakeover(start.task.id);
+                assert.equal(opens.length, 1);
+                await lifecycle.requestTakeover(start.task.id);
+                assert.equal(running, true);
+                assert.equal(opens.length, 1);
+                assert.equal(restartChecks, 1);
+                await lifecycle.returnControl('repo-1');
+                assert.equal(running, false);
+                await lifecycle.requestTakeover(start.task.id);
+                await lifecycle.requestTakeover(start.task.id);
+                assert.equal(running, true);
+                assert.equal(opens.length, 2);
+                assert.equal(restartChecks, 2);
+                assert.equal(host.creates, 1);
+                assert.equal(host.actions.filter(a => a === 'chat/turnStarted').length, 0);
                 return;
             }
             const taking = lifecycle.requestTakeover(start.task.id);
@@ -178,7 +210,13 @@ for (const scenario of ['success', 'lost', 'changed', 'pending', 'unknown', 'foc
                 const before = JSON.stringify(f.store.getLifecycle(attempt.id));
                 await lifecycle.applyOwnerEvent(attempt.id, { type: 'connection_lost', identity, reason: 'Late human generation', at: new Date().toISOString() });
                 assert.equal(JSON.stringify(f.store.getLifecycle(attempt.id)), before);
-                assert.equal(running, false);
+                assert.equal(paused, true);
+                const originalQuestion = host.chats.get(identity.chatId!)!.activeTurn!.id;
+                await lifecycle.requestTakeover(start.task.id);
+                assert.equal(paused, false);
+                assert.equal(opens.length, 3);
+                assert.equal(host.chats.get(identity.chatId!)!.activeTurn!.id, originalQuestion);
+                assert.equal(host.actions.filter(a => a === 'chat/turnStarted').length, 1);
             }
             assert.equal(f.store.getAdmissionState().activeLeases.length, 0);
         }

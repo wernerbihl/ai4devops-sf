@@ -1,0 +1,22 @@
+kestra:
+  repository:
+    type: h2
+  queue:
+    type: h2
+  storage:
+    type: local
+    local:
+      base-path: /app/data
+  variables:
+    recursive-rendering: false
+  plugins:
+    auto-install:
+      enabled: false
+  anonymousUsageReport:
+    enabled: false
+datasources:
+  h2:
+    url: jdbc:h2:file:/app/data/database;TIME ZONE=UTC;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;LOCK_TIMEOUT=30000
+    username: sa
+    password: ""
+    driverClassName: org.h2.Driver

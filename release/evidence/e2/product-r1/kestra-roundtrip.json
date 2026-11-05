@@ -1,0 +1,31 @@
+{
+  "owner": "sf-e2-8416bb88-dbc1-47e2-8f0d-e9e00416bf9f",
+  "engine": "kestra/kestra@sha256:d7bb1af55f4b5730247e5c8c852e2c912ccd36a58c7846ac96d2d749295ba365",
+  "worker": "node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c",
+  "platform": "linux/amd64",
+  "productionClient": true,
+  "deployment": "owned-volume fixture; product bind paths not exercised",
+  "native": "fixture broker only",
+  "assertions": [
+    "basic-auth-wrong-credentials-rejected",
+    "production-client-lost-start-reply-single-execution",
+    "current-three-task-graph",
+    "native-body-rawtags-expressions-unicode-exact",
+    "native-reply-rawtags-expressions-unicode-exact",
+    "h2-pause-survives-restart",
+    "same-pinned-revision-after-client-restart",
+    "fresh-fence-result-capability",
+    "result-body-and-reply-exact",
+    "resume-key-idempotency",
+    "one-native-start-one-result",
+    "h2-file-present"
+  ],
+  "identity": {
+    "executionId": "3cTmSvpONtC28f2zjDi6Pn",
+    "namespace": "sf.managed",
+    "flowId": "r_e578953aa40d230b0f1f18d1c9474a4e31f33a9a",
+    "revision": "5bc9ce89-16d9-419d-b038-82c37ceb21b8"
+  },
+  "status": "passed",
+  "cleanup": "complete"
+}

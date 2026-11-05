@@ -1,0 +1,26 @@
+# Documentation of the managed topology. ensureKestra uses verified Docker argv,
+# protected configuration files, and owned identity reconciliation, not compose up.
+services:
+  kestra:
+    image: kestra/kestra@sha256:d7bb1af55f4b5730247e5c8c852e2c912ccd36a58c7846ac96d2d749295ba365
+    platform: linux/amd64
+    command: [server, local]
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges]
+    environment:
+      MICRONAUT_CONFIG_FILES: /app/confs/application.yaml
+      KESTRA_PLUGINS_AUTO_INSTALL_ENABLED: "false"
+    volumes:
+      - type: bind
+        source: ${SF_KESTRA_DATA:?installation data directory}
+        target: /app/data
+      - type: bind
+        source: ${SF_KESTRA_CONFIG:?private configuration directory}
+        target: /app/confs
+        read_only: true
+    networks: [engine]
+networks:
+  engine:
+    internal: true

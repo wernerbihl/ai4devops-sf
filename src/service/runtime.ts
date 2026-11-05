@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
@@ -236,7 +237,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       }
       return items;
     }
-    const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,readiness:()=>owners.list(requiredEmpty),catalog:repositoryPolicy,secrets:()=>backend.secrets(),reconcileRequest:async request=>{if(request.method==='POST'&&request.path==='/v1/repository-selections'){const receipt=repositoryPolicy.reconcile(request.key);return receipt?{state:'complete',body:receipt}:{state:'pending'}}const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
+    const api=await startApi({dashboard:{root:existsSync(new URL('../runtime/dashboard/provenance.json',import.meta.url))?fileURLToPath(new URL('../runtime/dashboard/',import.meta.url)):fileURLToPath(new URL('../../release/dashboard/',import.meta.url))},store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,readiness:()=>owners.list(requiredEmpty),catalog:repositoryPolicy,secrets:()=>backend.secrets(),reconcileRequest:async request=>{if(request.method==='POST'&&request.path==='/v1/repository-selections'){const receipt=repositoryPolicy.reconcile(request.key);return receipt?{state:'complete',body:receipt}:{state:'pending'}}const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
     let maintenanceJob:{kind:'maintenance'|'backup'|'cleanup'|'activation'|'prepare';promise:Promise<unknown>}|undefined;
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();
@@ -370,7 +371,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       }
       const release=maintenanceGate.enter();
       try {
-      if(method==='POST'&&path==='/pair'){ensure(typeof input.origin==='string','pair_origin','Exact approved UI origin required');return{apiUrl:api.url,...api.sessions.issuePairing(input.origin)}}
+      if(method==='POST'&&path==='/pair'){ensure(Object.keys(input).every(key=>key==='origin')&&(input.origin===undefined||typeof input.origin==='string'),'pair_origin','Exact approved UI origin required');const origin=typeof input.origin==='string'?input.origin:(config.allowedOrigins.includes(api.url)?api.url:config.allowedOrigins[0]!);return{apiUrl:api.url,origin,...api.sessions.issuePairing(origin)}}
       if(method==='POST'&&(path==='/next'||path==='/dispatch-status')){
         ensure(typeof input.key==='string' && /^[A-Za-z0-9_-]{1,100}$/.test(input.key),'dispatch_key','A stable dispatch key is required');
         if(path==='/next'){await refreshReadiness();await dispatchApi.scheduler.dispatch('manual',input.key)}

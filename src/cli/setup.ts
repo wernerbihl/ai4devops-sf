@@ -12,6 +12,7 @@ import { clearStagedCredential } from '../install/staging-cleanup.ts';
 import { planInstall, type SetupAnswers } from '../install/plan.ts';
 import { applyInstall } from '../install/install.ts';
 import { locateInstallation } from '../install/locator.ts';
+import { openInstalledDashboard } from '../install/dashboard.ts';
 import { reconfigureInstallation } from '../install/reconfigure.ts';
 
 export interface SetupIo {out(text:string):void;err(text:string):void;ask(prompt:string):Promise<string>}
@@ -19,10 +20,13 @@ function defaultCode():string {
   for(const directory of (process.env.PATH??'').split(process.platform==='win32'?';':':'))for(const name of (process.platform==='win32'?['Code.exe','Code - Insiders.exe']:['code','code-insiders'])){const path=resolve(directory||'.',name);try{accessSync(path,constants.X_OK);return path}catch{}}
   return process.platform==='win32'?join(process.env.LOCALAPPDATA??homedir(),'Programs','Microsoft VS Code','Code.exe'):'/usr/bin/code';
 }
-export async function runSetup(io:SetupIo,options:{docker?:DockerPort;defaultsPath?:string;locatorPath?:string;sourceRoot?:string;tempParent?:string;authenticate?:typeof authenticateViaCompanion;systemctl?:string}={}):Promise<number> {
+export async function runSetup(io:SetupIo,options:{docker?:DockerPort;defaultsPath?:string;locatorPath?:string;sourceRoot?:string;tempParent?:string;authenticate?:typeof authenticateViaCompanion;systemctl?:string;openDashboard?:typeof openInstalledDashboard}={}):Promise<number> {
   const saved=loadDefaults(options.defaultsPath);const defaults:SetupDefaults=saved??{directory:join(homedir(),'.ai4devops-sf'),taktSeconds:60,ownerId:'vscode',providers:['copilot'],codeExecutable:defaultCode()};
   const ask=async(label:string,value:string)=>{const answer=(await io.ask(`${label} [${value}]: `)).trim();return answer||value};
   const existing=await locateInstallation(options.locatorPath);if(existing){
+    const action=(await ask('Open dashboard or reconfigure (open/reconfigure)','open')).toLowerCase();
+    if(action==='open'){await (options.openDashboard??openInstalledDashboard)(existing,options);io.out('Opened a fresh paired dashboard. Reloaded or expired tabs must be reopened through setup.\n');return 0}
+    if(action!=='reconfigure')throw new Error('Choose open or reconfigure');
     const directory=await ask('Installation directory',existing.root);const taktSeconds=Number(await ask('Takt seconds',String(defaults.taktSeconds)));if(!Number.isSafeInteger(taktSeconds)||taktSeconds<1||taktSeconds>86400)throw new Error('Takt must be between 1 and 86400 seconds');
     io.out(`Reconfigure installation ${existing.id} at ${directory}; existing native sessions and data are retained. Takt: ${taktSeconds} seconds.\n`);const answer=(await io.ask('Reconfigure (Y/n): ')).trim().toLowerCase();if(answer&&answer!=='y'&&answer!=='yes'){io.out('Reconfiguration cancelled.\n');return 0}
     const result=await reconfigureInstallation(existing,{directory,sourceRoot:options.sourceRoot??resolve(fileURLToPath(new URL('../../',import.meta.url))),taktSeconds},{...(options.locatorPath?{locatorPath:options.locatorPath}:{}),...(options.docker?{docker:options.docker}:{}),...(options.systemctl?{systemctl:options.systemctl}:{})});io.out(`Reconfigured installation: ${result.root}\n`);return 0;
@@ -50,6 +54,7 @@ export async function runSetup(io:SetupIo,options:{docker?:DockerPort;defaultsPa
     const answer=(await io.ask('Install (Y/n): ')).trim().toLowerCase();if(answer&&answer!=='y'&&answer!=='yes'){io.out('Installation cancelled.\n');return 0}
     const installed=await applyInstall(plan,{docker,...(options.locatorPath?{locatorPath:options.locatorPath}:{})});
     const nextDefaults:SetupDefaults={directory,taktSeconds:takt,ownerId:'vscode',providers,codeExecutable,...(dockerExecutable?{dockerExecutable}:{})};saveDefaults(nextDefaults,options.defaultsPath);
+    await (options.openDashboard??openInstalledDashboard)(installed,options);
     io.out(`Installation files are at ${installed.root}; user-service startup was requested. Desktop connection, provider isolation and repository activation still require verification.\n`);return 0;
   } finally {
     launcher?.stop();

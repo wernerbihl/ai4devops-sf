@@ -5,3 +5,15 @@ tests/.scratch/
 logs/
 *.log
 .superpowers/
+
+# Embedded compatible production dashboard, verified during build.
+release/dashboard/*
+!release/dashboard/canvas.html
+!release/dashboard/canvas.js
+!release/dashboard/channel.js
+!release/dashboard/factory-ui.css
+!release/dashboard/factory-ui.js
+!release/dashboard/index.html
+!release/dashboard/openapi.json
+!release/dashboard/standalone.js
+!release/dashboard/provenance.json

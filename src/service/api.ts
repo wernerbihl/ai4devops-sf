@@ -5,6 +5,7 @@ import type { FactoryStore } from '../storage/store.ts';
 import type { Scheduler } from '../scheduling/admission.ts';
 import type { Lifecycle } from '../scheduling/lifecycle.ts';
 import { validateContract } from '../contracts/schemas.ts';
+import { createDashboardAssets } from './dashboard-assets.ts';
 import { SessionError, Sessions } from './session.ts';
 import type { SessionPolicy } from './session.ts';
 import { ApiFault, resultFor, routes, safeFailure } from './routes.ts';
@@ -51,6 +52,7 @@ export interface PendingRequest { key: string; method: string; path: string }
 export type Reconciliation = { state: 'pending' } | { state: 'complete'; body: unknown }
   | { state: 'failed'; status: ApiFailureStatus; error: ApiError }; // proven definitive no-effect refusal only
 export interface ApiDeps {
+  dashboard?: { root: string };
   catalog?: { list(): Promise<import('../github/auth.ts').RepositoryCatalogEntry[]>; select(githubId: string, key: string): Promise<import('../contracts/domain.ts').Repository>; allows?(id: string): boolean };
   maintenanceGate?: MaintenanceGate;
   store: FactoryStore; scheduler: Scheduler; session: SessionPolicy;
@@ -105,6 +107,7 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
     validateFailureStatus(status);
     return { status, body: validateContract('ApiError', sanitize(error, deps.secrets?.())) };
   };
+  const dashboard = input.dashboard ? createDashboardAssets(input.dashboard.root) : undefined;
   const table = routes(deps); const streams = new Set<() => void>(); let authority = '';
   const send = (res: ServerResponse, status: number, value: unknown) => {
     if (res.destroyed) return;
@@ -116,6 +119,7 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
     let releaseMaintenance: (() => void) | undefined;
     try {
       if (req.headers.host !== authority) throw new ApiFault(403, 'HOST_DENIED', 'Use the configured literal loopback API address');
+      if (dashboard?.(req, res)) return;
       const origin = header(req, 'origin');
       // Preflight never provisions a session or executes a route.
       if (req.method === 'OPTIONS') {

@@ -44,7 +44,9 @@ export async function copyRuntime(input:{sourceRoot:string;target:string;install
   const nodeSha256=createHash('sha256').update(readFileSync(node)).digest('hex');
   writeFileSync(join(target,'package.json'),JSON.stringify({name:pkg.name,version,type:'module',bin:{'ai4devops-sf':'bin/ai4devops-sf.mjs'},dependencies:pkg.dependencies}),{flag:'wx',mode:0o600});
   const serviceEntry=join(target,'dist','service','main.js');if(!existsSync(serviceEntry))throw new Error('Built private service entry is unavailable');
-  const ready=JSON.stringify({schemaVersion:1,state:'ready',version,nodeSha256,packages:packages.map(([name,entry])=>({name,version:entry.version}))});
+  const dashboardHost=join(target,'dist','install','dashboard-host.js');
+  const dashboardHostSha256=existsSync(dashboardHost)?createHash('sha256').update(readFileSync(dashboardHost)).digest('hex'):undefined;
+  const ready=JSON.stringify({schemaVersion:1,state:'ready',version,nodeSha256,...(dashboardHostSha256?{dashboardHostSha256}:{}),packages:packages.map(([name,entry])=>({name,version:entry.version}))});
   if(process.platform==='win32'){assertWindowsOwnedFile(serviceEntry);replaceWindowsPrivateFile(record,Buffer.from(ready))}else {const readyFd=openSync(record,constants.O_WRONLY|constants.O_TRUNC|constants.O_NOFOLLOW);
   try{writeFileSync(readyFd,ready);fsyncSync(readyFd)}finally{closeSync(readyFd)}
   const dirFd=openSync(target,constants.O_RDONLY);try{fsyncSync(dirFd)}finally{closeSync(dirFd)}}

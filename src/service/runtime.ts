@@ -77,7 +77,8 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
     const signingKey=await readKey('broker-signing');const controlKey=await readKey('private-control');
     const maintenanceReader=maintenance?await createMaintenanceWorkflowReader({id:installation.id,root:installation.root,docker:installation.docker,store}):undefined;
     let stopping=false;let engine:KestraClient|undefined;let relayBridge:Awaited<ReturnType<typeof startPrivateBrokerBridge>>|undefined;let engineReason='Protected workflow engine is unavailable';let fleet!:NativeFleet;let lifecycle!:Lifecycle;
-    const requiredEmpty={paths:[],tools:[],credentialRefs:[],networkDestinations:[],allowedFinishPolicies:[]};
+    // Global read-only facts use a valid non-writing baseline; task starts re-verify their own requirements.
+    const requiredEmpty={paths:[],tools:[],credentialRefs:[],networkDestinations:[],allowedFinishPolicies:['result' as const]};
     const pendingInputs=new Map<string,{identity:NativeIdentity;input:NativeInput}>();
     const broker=createAttemptBroker({store,clock:systemClock,signingKey,pendingNativeInput:id=>pendingInputs.get(id),
       profiles:{async requireVerifiedProfile(start){const until=Date.now()+20_000;while(store.getLifecycle(start.attemptId).reservation.status==='pending'&&Date.now()<until&&!stopping)await delay(10);ensure(!stopping,'runtime_stopping','Runtime is stopping');return fleet.prepare(start)}},
@@ -240,7 +241,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       }
       return items;
     }
-    const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
+    const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,readiness:()=>owners.list(requiredEmpty),secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
     let maintenanceJob:{kind:'maintenance'|'backup'|'cleanup'|'activation'|'prepare';promise:Promise<unknown>}|undefined;
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();

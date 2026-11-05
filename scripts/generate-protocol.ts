@@ -38,6 +38,7 @@ function route(method: Method, path: string, response: ContractName | object, op
   (paths[path] ??= {})[method] = operation;
 }
 route('get', '/v1/health', 'Health');
+route('get', '/v1/readiness', array('OwnerReadiness'), { description: 'Sanitized read-only global owner support and provider-specific profile proof. Read-only result-policy baseline facts never qualify a recipe or attempt; actual start re-verifies its current boundary.' });
 route('get', '/v1/snapshot', 'FactorySnapshot');
 route('get', '/v1/events', 'FactoryEvent', { events: true });
 route('get', '/v1/settings', 'Settings');

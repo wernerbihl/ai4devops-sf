@@ -39,6 +39,7 @@ export function routes(deps: ApiDeps): Route[] {
     return attempt.native;
   };
   return [
+    { method: 'GET', path: '/v1/readiness', output: 'OwnerReadiness', array: true, run: () => deps.readiness?.() ?? unavailable('native owner readiness') },
     { method: 'GET', path: '/v1/health', output: 'Health', run: async () => (await factorySnapshot(deps)).health },
     { method: 'GET', path: '/v1/snapshot', output: 'FactorySnapshot', run: () => factorySnapshot(deps) },
     { method: 'GET', path: '/v1/settings', output: 'Settings', run: () => s.getSettings() },

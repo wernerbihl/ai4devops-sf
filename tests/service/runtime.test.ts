@@ -62,6 +62,13 @@ test('real runtime opens API and private control honestly unavailable without pr
     assert.equal((await runtime.health()).ready,false);
     assert.ok(runtime.api.url.startsWith('http://127.0.0.1:'));
     const before=commands;
+    const session=runtime.api.sessions.provision('http://127.0.0.1:4000');
+    const readiness=await fetch(runtime.api.url+'/v1/readiness',{headers:{origin:'http://127.0.0.1:4000',cookie:session.cookie}});
+    assert.equal(readiness.status,200,'real registry baseline must satisfy canonical capabilities');
+    const facts=await readiness.json();assert.deepEqual(facts.map((owner:{ownerId:string})=>owner.ownerId),['vscode','bb']);
+    assert.ok(facts.every((owner:{ready:boolean;verifiedProfileIds:string[]})=>!owner.ready&&owner.verifiedProfileIds.length===0));
+    assert.equal(commands,before,'reading global readiness must not provision or start native/worker resources');
+    assert.equal(runtime.store.getReservations().length,0);
     await assert.rejects(m.startRuntime(installation),/controller|lock/);
     assert.equal(commands,before,'singleton must precede any mutating engine deployment');
     const denied=await fetch(runtime.controlUrl+'/health'); assert.equal(denied.status,401);

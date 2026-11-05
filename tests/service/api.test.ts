@@ -8,6 +8,24 @@ import type { ApiFailureStatus, Reconciliation } from '../../src/service/api.ts'
 import { createFixture } from '../helpers/store.ts';
 import { fakePorts, fakeRuntime } from '../helpers/fake-ports.ts';
 const origin = 'http://127.0.0.1:5173';
+/** Read complete SSE frames until expected payload; independent of network chunk boundaries. */
+async function readFrames(response: Response, expected: (frame: string) => boolean): Promise<string> {
+  const reader = response.body!.getReader(); const decoder = new TextDecoder();
+  let pending = ''; let complete = ''; let bytes = 0;
+  const timer = setTimeout(() => { void reader.cancel('SSE fixture deadline'); }, 2000);
+  try {
+    while (true) {
+      const chunk = await reader.read(); assert.equal(chunk.done, false, 'SSE ended before expected payload');
+      bytes += chunk.value!.byteLength; assert.ok(bytes <= 1024 * 1024, 'SSE fixture bounded to 1 MiB');
+      pending += decoder.decode(chunk.value, { stream: true });
+      let end: number;
+      while ((end = pending.indexOf('\n\n')) >= 0) {
+        const frame = pending.slice(0, end); pending = pending.slice(end + 2); complete += frame + '\n\n';
+        if (expected(frame)) return complete;
+      }
+    }
+  } finally { clearTimeout(timer); await reader.cancel().catch(() => {}); reader.releaseLock(); }
+}
 async function setup() {
   const fixture = createFixture(); const ports = fakePorts(fixture.store); const api = await startApi(ports.deps);
   const session = api.sessions.provision(origin);
@@ -38,7 +56,7 @@ test('manual_create_dispatches_and_sse_reconnect_refreshes', async () => {
     const controller = new AbortController();
     const events = await fetch(f.api.url + '/v1/events', { headers: { ...f.headers, 'last-event-id': String(before) }, signal: controller.signal });
     assert.equal(events.status, 200);
-    const reader = events.body!.getReader(); const text = new TextDecoder().decode((await reader.read()).value); controller.abort();
+    const text = await readFrames(events, frame => frame.includes('data: ')); controller.abort();
     const ids = [...text.matchAll(/^id: (\d+)$/gm)].map(m => Number(m[1]));
     assert.ok(ids.length > 0); assert.equal(new Set(ids).size, ids.length); assert.ok(ids.every(id => id > before));
     assert.equal((await f.call('/v1/events', 'GET', undefined, { 'last-event-id': '999999999' })).status, 409);
@@ -272,7 +290,7 @@ test('snapshots_events_and_errors_redact_broker_values_and_provider_token_patter
     const cursor = fixture.store.snapshot().cursor;
     fixture.store.patchTask(fixture.task.id, { title: 'fake-credential-secret' }, 1);
     const controller = new AbortController(); const event = await fetch(api.url + '/v1/events', { headers: { ...headers, 'last-event-id': cursor }, signal: controller.signal });
-    const text = new TextDecoder().decode((await event.body!.getReader().read()).value); controller.abort();
+    const text = await readFrames(event, frame => frame.includes('event: task\n')); controller.abort();
     assert.equal(text.includes('fake-credential-secret'), false); assert.equal(text.includes('opaque-value'), false); assert.equal(text.includes('ghp_abcdefghijk1234'), false);
   } finally { await api.close(); fixture.close(); }
 });
@@ -287,7 +305,7 @@ test('sse_reconnect_delivers_each_later_cursor_once_and_manual_dispatch_maps_rea
     let cursor = x.fixture.store.snapshot().cursor;
     const read = async () => {
       const controller = new AbortController(); const response = await fetch(api.url + '/v1/events', { headers: { ...headers, 'last-event-id': cursor }, signal: controller.signal });
-      const text = new TextDecoder().decode((await response.body!.getReader().read()).value); controller.abort();
+      const text = await readFrames(response, frame => frame.includes('event: tag\n')); controller.abort();
       return [...text.matchAll(/^id: (\d+)$/gm)].map(m => m[1]!);
     };
     x.fixture.store.createTag({ displayName: 'one' }); const first = await read(); assert.equal(first.length, 1); cursor = first[0]!;
@@ -392,11 +410,9 @@ test('schema_field_identifiers_survive_http_snapshot_events_answers_and_journal_
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 1000);
     try {
       const response = await fetch(api.url + '/v1/events', { headers: { ...headers, 'last-event-id': cursor }, signal: controller.signal }); assert.equal(response.status, 200);
-      const reader = response.body!.getReader(); const decoder = new TextDecoder(); let pending = ''; let event;
-      while (!event) {
-        const chunk = await reader.read(); assert.equal(chunk.done, false); pending += decoder.decode(chunk.value, { stream: true });
-        let end; while ((end = pending.indexOf('\n\n')) >= 0) { const frame = pending.slice(0, end); pending = pending.slice(end + 2); if (frame.includes('event: attention\n')) event = JSON.parse(frame.split('\n').find(line => line.startsWith('data: '))!.slice(6)); }
-      }
+      const text = await readFrames(response, frame => frame.includes('event: attention\n'));
+      const frame = text.split('\n\n').find(frame => frame.includes('event: attention\n'))!;
+      const event = JSON.parse(frame.split('\n').find(line => line.startsWith('data: '))!.slice(6));
       assertSchema(event.data.inputSchema); assertNoInstanceSecrets(event);
     } finally { clearTimeout(timer); controller.abort(); }
     const answered = await fetch(api.url + `/v1/attention/${attention.id}/respond`, { method: 'POST', headers: { ...headers, 'idempotency-key': 'schema-answer', 'if-match': String(attention.revision) }, body: JSON.stringify({ input: answer }) });
@@ -439,4 +455,22 @@ test('maintenance admission closes dashboard mutations while preserving read acc
     assert.equal(ports.dispatches, 0);
     assert.equal((await fetch(api.url + '/v1/snapshot', { headers })).status, 200);
   } finally { await api.close(); fixture.close(); }
+});
+
+test('public_readiness_is_session_scoped_sanitized_and_does_not_qualify_or_dispatch', async () => {
+  const f = await setup(); await f.api.close();
+  let reads = 0;
+  const api = await startApi({ ...f.ports.deps, readiness: async () => { reads++; return [{ ownerId: 'vscode', ready: false, reasons: ['Per-attempt verification required'], supportedProviders: ['copilot'], verifiedProfileIds: [], version: 'fixture', providers: [{ providerId: 'copilot', ready: false, reasons: ['fake-credential-secret'], verifiedProfileIds: [] }] }]; } });
+  try {
+    assert.equal((await fetch(api.url + '/v1/readiness', { headers: { origin } })).status, 401);
+    const session = api.sessions.provision(origin);
+    assert.equal((await fetch(api.url + '/v1/readiness', { headers: { origin: 'https://evil.test', cookie: session.cookie } })).status, 403);
+    assert.equal(reads, 0);
+    const response = await fetch(api.url + '/v1/readiness', { headers: { origin, cookie: session.cookie } });
+    assert.equal(response.status, 200); const result = await response.json();
+    assert.equal(result[0].ownerId, 'vscode'); assert.equal(result[0].providers[0].ready, false);
+    assert.equal(JSON.stringify(result).includes('fake-credential-secret'), false);
+    assert.equal(f.ports.dispatches, 0); assert.equal(reads, 1);
+    assert.equal((await fetch(api.url + '/readiness', { headers: { origin, cookie: session.cookie } })).status, 404);
+  } finally { await api.close(); f.fixture.close(); }
 });

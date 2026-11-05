@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ApiError, AuthState, Clock, DeviceFlow, Health, NativeIdentity, NativeOpenResult, RecipeCreate, RecipePatch, RecipeSummary, RecipeRevision, RecipeValidation } from '../contracts/domain.ts';
+import type { ApiError, AuthState, Clock, DeviceFlow, Health, OwnerReadiness, NativeIdentity, NativeOpenResult, RecipeCreate, RecipePatch, RecipeSummary, RecipeRevision, RecipeValidation } from '../contracts/domain.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import type { Scheduler } from '../scheduling/admission.ts';
 import type { Lifecycle } from '../scheduling/lifecycle.ts';
@@ -56,6 +56,8 @@ export interface ApiDeps {
   lifecycle?: Pick<Lifecycle, 'requestTakeover' | 'returnControl' | 'resumeInput'>;
   auth?: AuthPort; recipes?: RecipePort; owner?: OwnerPort; clock?: Clock;
   health?(): Promise<Health>;
+  /** Read-only global discovery/proof facts; never qualifies a task or allocates a native session. */
+  readiness?(): Promise<OwnerReadiness[]>;
   /** Trusted credential broker supplies values for defense-in-depth redaction; never sent or journaled. */
   secrets?(): readonly string[];
   /** Read/reconcile the exact external request only. A pending response must never launch a new action. */

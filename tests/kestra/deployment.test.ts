@@ -35,7 +35,7 @@ test('persists_h2_and_correlates_pause_inputs', async () => {
     const installation = { id: 'test-install', root: f.root, docker: f.docker, secrets: new PosixInstallationSecrets() };
     const first = await ensureKestra(installation,{store:f.store}); const config = JSON.parse(readFileSync(join(f.root, 'kestra/config/application.yaml'), 'utf8'));
     assert.equal(config.kestra.repository.type, 'h2'); assert.equal(config.kestra.queue.type, 'h2'); assert.equal(config.kestra.variables['recursive-rendering'], false);
-    assert.match(config.datasources.h2.url, /^jdbc:h2:file:\/app\/data\/database;/); assert.doesNotMatch(config.datasources.h2.url, /sqlite/);
+    assert.match(config.datasources.h2.url, /^jdbc:h2:file:\/app\/data\/database;/); assert.match(config.datasources.h2.url,/DB_CLOSE_DELAY=0/);assert.match(config.datasources.h2.url,/DB_CLOSE_ON_EXIT=TRUE/);assert.doesNotMatch(config.datasources.h2.url, /sqlite/);
     writeFileSync(join(f.root, 'kestra/data/database.mv.db'), 'H2 restart fixture');
     f.objects.get(first.containerId).State.Running = false;
     const restarted = await ensureKestra(installation,{store:f.store}); assert.equal(restarted.containerId, first.containerId); assert.ok(f.calls.some(x=>x[0]==='restart' && x.at(-1)===first.transportContainerId));
@@ -135,4 +135,7 @@ test('unacknowledged engine start stays excluded even when a later inspection is
 });
 test('transport generation receipt binds the exact engine generation',async()=>{
  const f=fixture();try{const installation={id:'test-install',root:f.root,docker:f.docker,secrets:new PosixInstallationSecrets()};const handle=await ensureKestra(installation,{store:f.store});const engine=f.objects.get(handle.containerId),transport=f.objects.get(handle.transportContainerId);const receipt=f.store.getActionByKey('kestra:generation:'+handle.transportContainerId+':'+transport.State.StartedAt);assert.equal(receipt?.payload.engineId,handle.containerId);assert.equal(receipt?.payload.engineStartedAt,engine.State.StartedAt)}finally{f.cleanup()}
+});
+test('legacy H2 lifecycle configuration is preserved rather than silently migrated',async()=>{
+ const f=fixture();try{const installation={id:'test-install',root:f.root,docker:f.docker,secrets:new PosixInstallationSecrets()};await ensureKestra(installation,{store:f.store});const path=join(f.root,'kestra/config/application.yaml');const config=JSON.parse(readFileSync(path,'utf8'));config.datasources.h2.url=config.datasources.h2.url.replace('DB_CLOSE_DELAY=0','DB_CLOSE_DELAY=-1').replace('DB_CLOSE_ON_EXIT=TRUE','DB_CLOSE_ON_EXIT=FALSE');writeFileSync(path,JSON.stringify(config),{mode:0o600});await ensureKestra(installation,{store:f.store});assert.equal(JSON.parse(readFileSync(path,'utf8')).datasources.h2.url,config.datasources.h2.url)}finally{f.cleanup()}
 });

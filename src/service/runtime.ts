@@ -31,11 +31,13 @@ import { createCoordinator } from './coordinator.ts';
 import { MaintenanceGate } from './maintenance-gate.ts';
 import { inspectMaintenanceBlockers } from './maintenance-blockers.ts';
 import { inspectNativeInventory } from './native-inventory.ts';
-import { inspectOwnedKestra, stopOwnedKestra } from '../kestra/maintenance.ts';
+import { areOwnedKestraStopped, inspectOwnedKestra, stopOwnedKestra } from '../kestra/maintenance.ts';
 import { inspectProtectedMounts } from '../kestra/mount-survey.ts';
 import { createMaintenanceWorkflowReader } from '../kestra/maintenance-recovery.ts';
 import { inspectRecordedOwnerReceipt } from '../owners/maintenance-receipt.ts';
 import { stopUninstallNativeResources } from './uninstall-native.ts';
+import { backupInstallationState, verifyInstallationBackup } from '../install/backup.ts';
+import { requireCleanH2Close } from '../kestra/maintenance.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
 import { createDispatchApi } from './dispatch-api.ts';
 import { acquireInstallationSingletonAsync } from './singleton.ts';
@@ -229,7 +231,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       }
     }
     const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
-    let maintenanceJob:Promise<unknown>|undefined;
+    let maintenanceJob:{kind:'maintenance'|'backup';promise:Promise<unknown>}|undefined;
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();
       if(method==='GET'&&path==='/readiness')return{health:await health(),owners:await owners.list(requiredEmpty),reconciliation:lastReport};
@@ -237,7 +239,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         ensure(Object.keys(input).length===1&&(input.purpose==='uninstall'||input.purpose==='reconfigure'),'runtime_maintenance','Explicit maintenance purpose required');
         if(!maintenanceIntent){maintenanceIntent=store.enqueueAction({key:'maintenance:'+randomUUID(),kind:'maintenance.intent',payload:{installationId:installation.id,purpose:input.purpose}});maintenance=true;}
         ensure(store.pendingActions().filter(action=>action.kind==='maintenance.intent').length===1&&maintenanceIntent.payload.installationId===installation.id&&maintenanceIntent.payload.purpose===input.purpose,'runtime_maintenance','Original maintenance purpose must be recovered');
-        if(maintenanceJob)return maintenanceJob;
+        if(maintenanceJob){ensure(maintenanceJob.kind==='maintenance','runtime_maintenance','Another maintenance operation is in progress');return maintenanceJob.promise}
         const purpose=input.purpose;
         const job=(async()=>{
         const draining=maintenanceGate.close();
@@ -249,6 +251,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         await fleet.closeHumanAdmissions();
         await fleet.reconcileConnectedHumanEffects();
         await stopActive();
+        const drained=store.enqueueAction({key:'maintenance:drained:'+maintenanceIntent!.id,kind:'maintenance.drained',payload:{maintenanceIntentId:maintenanceIntent!.id,purpose}});store.completeAction(drained.id);
         // Terminal and human-owned attempts may retain native writers without a lease.
         // Inspect every distinct original identity, never only active reservations.
         const retained=[...new Map(store.getReservations().filter(r=>r.attempt.native).map(r=>[canonical(r.attempt.native),r.attempt.native!])).values()];
@@ -276,8 +279,23 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
           if(blocked.length)return {state:'admission_closed',blocked};
           return {state:'engine_stopped',blocked:[]};
         } catch {return {state:'admission_closed',blocked:[{kind:'effect',identity:'native-or-engine-unverified'}]}}
-        })();maintenanceJob=job;
-        try{return await job}finally{if(maintenanceJob===job)maintenanceJob=undefined}
+        })();maintenanceJob={kind:'maintenance',promise:job};
+        try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
+      }
+      if(method==='POST'&&path==='/backup'){
+        ensure(!stopping&&Object.keys(input).length===0&&maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='reconfigure','runtime_maintenance','Original reconfiguration intent required');
+        const drain=store.getActionByKey('maintenance:drained:'+maintenanceIntent.id);ensure(drain?.kind==='maintenance.drained'&&drain.completedAt&&drain.payload.maintenanceIntentId===maintenanceIntent.id&&drain.payload.purpose==='reconfigure','runtime_maintenance','Original admission and relay drain is unconfirmed');
+        if(maintenanceJob){ensure(maintenanceJob.kind==='backup','runtime_maintenance','Another maintenance operation is in progress');return maintenanceJob.promise}
+        const intentId=maintenanceIntent.id;const key='maintenance:backup:'+intentId;const resultKey=key+':result';
+        const prior=store.getActionByKey(key);const priorResult=store.getActionByKey(resultKey);
+        const verify=async(ignoreAction?:string)=>{
+          const blocked=(await inspectMaintenanceBlockers(installation.root,store)).filter(value=>value.kind!=='action'||value.identity!==ignoreAction);ensure(!blocked.length,'runtime_maintenance','Unresolved writers retain the installation');
+          await verifyMaintenanceNative('reconfigure');const resources=await inspectOwnedKestra(installation,store);ensure(await areOwnedKestraStopped(installation,store),'runtime_maintenance','Original engine remains active');
+          const relay=await inspectOwnedBrokerRelay({id:installation.id,networkId:resources.networkId,docker:installation.docker,store});ensure(relay.stopped,'runtime_maintenance','Original broker remains active');
+          ensure((await inspectProtectedMounts(installation.root,resources.containerId,installation.docker)).length===0,'runtime_maintenance','An unowned protected mount exists');
+        };
+        const job=(async()=>{if(prior){ensure(prior.completedAt&&priorResult?.completedAt&&priorResult.payload.intentId===prior.id&&typeof priorResult.payload.directory==='string','runtime_maintenance','Original backup outcome requires recovery');await verify();const closeReceipt=await requireCleanH2Close(installation,store);await verifyInstallationBackup({id:installation.id,root:installation.root,directory:priorResult.payload.directory,store,closeReceiptId:closeReceipt.id});return {state:'complete',directory:priorResult.payload.directory}}await verify();const closeReceipt=await requireCleanH2Close(installation,store);const action=store.enqueueAction({key,kind:'maintenance.backup',payload:{maintenanceIntentId:intentId}});const saved=await backupInstallationState({id:installation.id,root:installation.root,store,docker:installation.docker,imageId:String(closeReceipt.payload.imageId),closeReceiptId:closeReceipt.id});await verify(action.id);ensure((await requireCleanH2Close(installation,store)).id===closeReceipt.id,'runtime_maintenance','H2 close generation changed');await verifyInstallationBackup({id:installation.id,root:installation.root,directory:saved.directory,store,closeReceiptId:closeReceipt.id});const receipt=store.enqueueAction({key:resultKey,kind:'maintenance.backup_result',payload:{intentId:action.id,directory:saved.directory}});store.completeAction(receipt.id);store.completeAction(action.id);return {state:'complete',directory:saved.directory}})();maintenanceJob={kind:'backup',promise:job};
+        try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
       }
       const release=maintenanceGate.enter();
       try {
@@ -294,7 +312,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       } finally { release(); }
     }});cleanup.push(()=>control.close());
     if(!maintenance)coordinator.enableAdmission();
-    return {store,api,controlUrl:control.url,scheduler,lifecycle,broker,owners,health,reconcile:()=>reconcileInstallation(services),async stop(){if(stopping)return;stopping=true;coordinator.stop();unsubscribe();for(const r of store.getReservations().filter(r=>r.lease.active&&r.attempt.native)){try{await owners.get(r.attempt.native!.ownerId).quiesce(r.attempt.native!)}catch{}}for(const close of cleanup.reverse()){try{await close()}catch{}}}};
+    return {store,api,controlUrl:control.url,scheduler,lifecycle,broker,owners,health,reconcile:()=>reconcileInstallation(services),async stop(){if(stopping)return;stopping=true;await maintenanceJob?.promise.catch(()=>{});coordinator.stop();unsubscribe();for(const r of store.getReservations().filter(r=>r.lease.active&&r.attempt.native)){try{await owners.get(r.attempt.native!.ownerId).quiesce(r.attempt.native!)}catch{}}for(const close of cleanup.reverse()){try{await close()}catch{}}}};
   } catch(error){for(const close of cleanup.reverse()){try{await close()}catch{}}throw error}
 }
 export type FactoryRuntime=Awaited<ReturnType<typeof startRuntime>>;

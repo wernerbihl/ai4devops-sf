@@ -8,6 +8,7 @@ import { canonical, fingerprint } from '../storage/database.ts';
 import { check, KestraError, privateDirectory, privateDirectoryAsync } from './executions.ts';
 import type { EngineTransport } from './executions.ts';
 import type { FactoryStore, OutboxAction } from '../storage/store.ts';
+import { readPrivateFileAsync } from '../service/config.ts';
 
 export interface DockerPort { command(args: string[], options?: { stdin?: string }): Promise<string>; }
 /** Configurable executable, shell:false, bounded output, errors never include argv/stdin/daemon secrets. */
@@ -112,7 +113,13 @@ export async function ensureKestra(installation: Installation, options:{store:Fa
   check(config.kestra.repository.type === 'h2' && config.kestra.queue.type === 'h2' && config.kestra.variables['recursive-rendering'] === false && config.kestra.plugins['auto-install'].enabled === false && config.datasources.h2.url.startsWith('jdbc:h2:file:/app/data/database;'), 'Unsafe pinned engine configuration');
   config.kestra.server = { 'basic-auth': { username: secrets.username, password: secrets.password } };
   config.kestra.encryption = { 'secret-key': secrets.encryptionKey };
-  await ensurePrivateContent(join(configDir, 'application.yaml'), JSON.stringify(config));
+  const configPath=join(configDir,'application.yaml');const cleanUrl=config.datasources.h2.url as string;
+  check(cleanUrl.includes('DB_CLOSE_DELAY=0')&&cleanUrl.includes('DB_CLOSE_ON_EXIT=TRUE'),'Unsafe H2 lifecycle configuration');
+  // Existing installations retain their exact prior H2 configuration. They cannot
+  // receive a clean-close receipt merely by observing a stopped container.
+  if(existsSync(configPath)){const existing=JSON.parse((await readPrivateFileAsync(configPath)).toString());const legacyUrl=cleanUrl.replace('DB_CLOSE_DELAY=0','DB_CLOSE_DELAY=-1').replace('DB_CLOSE_ON_EXIT=TRUE','DB_CLOSE_ON_EXIT=FALSE');if(existing?.datasources?.h2?.url===legacyUrl){const legacy=structuredClone(config);legacy.datasources.h2.url=legacyUrl;check(canonical(existing)===canonical(legacy),'Managed configuration mismatch; do not overwrite or adopt');config.datasources.h2.url=legacyUrl}}
+  await ensurePrivateContent(configPath, JSON.stringify(config));
+  const configHash=fingerprint(config);const h2Lifecycle=config.datasources.h2.url===cleanUrl?'jvm-exit':'legacy-unknown';
   const docker = installation.docker; const owner = fingerprint({ id: installation.id, root }); const prefix = 'sf-' + owner.slice(0, 24);
   const labels = { 'sf.installation': installation.id, 'sf.owner': owner, 'sf.component': 'kestra' };
   const labelArgs = Object.entries(labels).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
@@ -175,7 +182,7 @@ export async function ensureKestra(installation: Installation, options:{store:Fa
       object = await inspect('container', name); check(object?.Id===priorId&&object.State.Running&&typeof object.State.StartedAt==='string'&&object.State.StartedAt, 'Transport restart outcome unknown');
       verifyEffectiveNetworks(object,true);
       check(canonical(await engineGeneration())===canonical(parentGeneration),'Engine namespace generation changed during transport restart');
-      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt,...parentGeneration}});store.completeAction(receipt.id);store.completeAction(intent.id);
+      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt,imageId:object.Image,configHash,h2Lifecycle,...parentGeneration}});store.completeAction(receipt.id);store.completeAction(intent.id);
     }
     if (!object.State.Running) {
       const priorId=object.Id;const parentGeneration=await engineGeneration();const intent=begin('container-start',priorId);
@@ -183,7 +190,7 @@ export async function ensureKestra(installation: Installation, options:{store:Fa
       check(object?.Id===priorId&&object.State.Running&&typeof object.State.StartedAt==='string'&&object.State.StartedAt,'Container start outcome unknown');
       verifyEffectiveNetworks(object,true);
       check(canonical(await engineGeneration())===canonical(parentGeneration),'Engine namespace generation changed during transport start');
-      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt,...parentGeneration}});store.completeAction(receipt.id);store.completeAction(intent.id);
+      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt,imageId:object.Image,configHash,h2Lifecycle,...parentGeneration}});store.completeAction(receipt.id);store.completeAction(intent.id);
     }
     verifyEffectiveNetworks(object, true);
     return object.Id;

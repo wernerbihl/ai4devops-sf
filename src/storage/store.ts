@@ -1,4 +1,7 @@
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { constants, closeSync, openSync } from 'node:fs';
+import { backup } from 'node:sqlite';
+import { writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
 import type { ActorScope, Clock, CreateTaskRequest, FactorySnapshot, FindingInput, Grant, RecipePatch, RecipeRevision, Repository, RepositoryPatch, Settings, SettingsPatch, TagCreate, TagPatch, TaskPatch, TaskStatus, WeightsPatch } from '../contracts/domain.ts';
 import { defaultConfig } from '../contracts/defaults.ts';
 import { validateContract } from '../contracts/schemas.ts';
@@ -58,6 +61,13 @@ export class FactoryStore {
     } catch (error) { this.close(); throw error; }
   }
   close(): void { if (!this.closed) { this.db.sql.close(); this.closed = true; } }
+  /** Online SQLite snapshot to an exclusively created private file. */
+  async backupTo(path:string):Promise<void> {
+    ensure(isAbsolute(path)&&resolve(path)===path&&!this.closed,'backup_path','Canonical backup path and live store required');
+    if(process.platform==='win32')await writeWindowsPrivateFileAsync(path,Buffer.alloc(0));
+    else {const fd=openSync(path,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);closeSync(fd)}
+    await backup(this.db.sql,path);
+  }
   snapshot(): FactorySnapshot {
     // A read transaction gives the event cursor and every entity one coherent SQLite snapshot.
     const nested = this.db.sql.isTransaction;

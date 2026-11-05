@@ -18,6 +18,8 @@ function ownedProfile(root:string,id:string):CompanionProfile {
   else if(JSON.stringify(JSON.parse(readPrivateFile(marker).toString()))!==JSON.stringify(expected))throw new Error('Existing companion profile ownership mismatch');
   const userDataDir=join(profileRoot,'user-data');const extensionsDir=join(profileRoot,'extensions');
   for(const directory of [userDataDir,extensionsDir]){try{mkdirSync(directory,{mode:0o700})}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}privateDir(directory)}
+  const user=join(userDataDir,'User');try{mkdirSync(user,{mode:0o700})}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}privateDir(user);
+  const settings=join(user,'settings.json');try{writeFileSync(settings,JSON.stringify({'settingsSync.ignoredSettings':['chat.remoteAgentHosts','chat.workspaceRemoteAgentHosts']}),{mode:0o600,flag:'wx'})}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;readPrivateFile(settings)}
   return {root:profileRoot,userDataDir,extensionsDir};
 }
 function executable(path:string):string {

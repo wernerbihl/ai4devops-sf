@@ -14,6 +14,7 @@ test('installs the verified companion only into its owned private VS Code profil
   assert.deepEqual(args.slice(0,4),['--user-data-dir',profile.userDataDir,'--extensions-dir',profile.extensionsDir]);
   assert.equal(args[4],'--install-extension');assert.match(args[5]!,/software-factory-auth\.vsix$/);
   assert.ok(profile.userDataDir.startsWith(root+'/vscode-profile/'));assert.ok(profile.extensionsDir.startsWith(root+'/vscode-profile/'));
+  assert.match(readFileSync(join(profile.userDataDir,'User','settings.json'),'utf8'),/chat.remoteAgentHosts/);
  } finally {rmSync(root,{recursive:true});}
 });
 

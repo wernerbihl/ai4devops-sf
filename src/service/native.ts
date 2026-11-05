@@ -1,5 +1,6 @@
 import { mkdirSync, existsSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { writeWindowsPrivateFile } from '../platform/windows-private.ts';
 import { randomBytes, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import type { Attempt, NativeIdentity, NativeStart, OwnerEvent, RequiredCapabilities, TaskSpec } from '../contracts/domain.ts';
@@ -26,7 +27,8 @@ import { createProxyPlaceholder, finalizeProxyPolicy } from './proxy-policy.ts';
 import type { RuntimeConfig, IsolatedNativeTemplate } from './config.ts';
 import { readPrivateFile } from './config.ts';
 import { loadCompanionCredential } from '../install/companion-auth.ts';
-import { navigationCommits, createNativeNavigation } from '../owners/navigation.ts';
+import { navigationCommits } from '../owners/navigation.ts';
+import { createDesktopNavigation } from '../owners/desktop.ts';
 export const isolatedProfileId = 'vscode-copilot-isolated-worker-v2';
 const workerEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','LANG=C.UTF-8'];
 const nativeEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/opt/software-factory/empty-home','LANG=C.UTF-8','SF_CONTROL_SENTINEL=sf-nonsecret-control-sentinel'];
@@ -79,7 +81,7 @@ export function createNativeFleet(options: { installation: Installation; config:
   async function container(input: { name: string; image: string; role: 'native' | 'worker' | 'proxy'; owner: string; network: string; mounts: { source: string; target: string; writable: boolean }[]; env: string[]; cwd: string; command: string[]; create: boolean; alias?: string }) {
     const image = JSON.parse(await docker.command(['image','inspect',input.image]))[0];
     ensure(imageMatches(input.image,image) && (!input.image.startsWith('sha256:') || image.Config?.Labels?.['sf.installation'] === installation.id && image.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && image.Config?.Labels?.['sf.role'] === input.role) && !image.Config.Entrypoint?.length && canonical(image.Config.Env ?? []) === canonical(input.env), 'native_image', 'Pinned image must declare exact minimal environment and no implicit entrypoint');
-    const uid = process.getuid!(); const gid = process.getgid!(); ensure(uid > 0, 'native_user', 'Native runtimes require a nonroot installation');
+    const uid = process.platform==='win32'?1000:process.getuid!(); const gid = process.platform==='win32'?1000:process.getgid!(); ensure(uid > 0, 'native_user', 'Native runtimes require a nonroot installation');
     let c = await inspect('container',input.name);
     if (!c && input.create) {
       const action = store.enqueueAction({ key: 'runtime:container:'+input.name, kind: 'runtime.container', payload: { name: input.name, image: input.image, owner: input.owner } });
@@ -104,10 +106,10 @@ export function createNativeFleet(options: { installation: Installation; config:
     const marker = { schemaVersion: 1, installationId: installation.id, runtimeOwnerId: ownerId, taskId: start.task.id, source: data };
     if (create) {
       privateDirectory(parent); privateDirectory(data);
-      if (!existsSync(markerPath)) writeFileSync(markerPath,JSON.stringify(marker),{ flag:'wx',mode:0o600 });
-      if (!existsSync(join(data,'connection-token'))) writeFileSync(join(data,'connection-token'),randomBytes(32).toString('base64url'),{ flag:'wx',mode:0o600 });
+      if (!existsSync(markerPath)){if(process.platform==='win32')writeWindowsPrivateFile(markerPath,Buffer.from(JSON.stringify(marker)));else writeFileSync(markerPath,JSON.stringify(marker),{flag:'wx',mode:0o600})}
+      if (!existsSync(join(data,'connection-token'))){const token=randomBytes(32).toString('base64url');if(process.platform==='win32')writeWindowsPrivateFile(join(data,'connection-token'),Buffer.from(token));else writeFileSync(join(data,'connection-token'),token,{flag:'wx',mode:0o600})}
     }
-    ensure(canonical(JSON.parse(readFileSync(markerPath,'utf8'))) === canonical(marker), 'native_state', 'Original native state marker changed');
+    ensure(canonical(JSON.parse(readPrivateFile(markerPath).toString())) === canonical(marker), 'native_state', 'Original native state marker changed');
     const nativeState: NativeStateMount = { installationId: installation.id, runtimeOwnerId: ownerId, taskId: start.task.id, source: data, target: NATIVE_STATE_TARGET, markerPath };
     const internal = await network(ownerId+'-internal',true,create); const egress = await network(ownerId+'-model-egress',false,create);
     const targets = [{ source: start.workspacePath, target:'/workspaces/task' }]; const mounts = await resolveNativeMounts(start,targets);
@@ -161,14 +163,15 @@ export function createNativeFleet(options: { installation: Installation; config:
     const launcher = createManagedVsCodeLauncher({ containerId:native.Id,runtimeOwnerId:ownerId,image:t.nativeImage,entrypoint:t.entrypoint,entrypointSha256:t.entrypointSha256,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot},userDataDir:NATIVE_STATE_TARGET+'/user-data',tokenFile:NATIVE_STATE_TARGET+'/connection-token',port:4317,docker,...(docker instanceof ProcessDocker?{dockerExecutable:docker.executable}:{}) });
     const worker = new IsolatedToolWorker({ config:{containerId:workerContainer.Id,image:t.workerImage,runtimeOwnerId:ownerId,nativeContainerId:native.Id,mountTargets:targets},docker,store,gate });
     let boundary!: ReturnType<typeof createIsolatedNativeBoundary>; let verify!: ReturnType<typeof createProfileVerifier>;
-    const navigation = () => {
-      const value=JSON.parse(readPrivateFile(join(parent,'navigation.json')).toString());
-      ensure(value.schemaVersion===1&&value.runtimeOwnerId===ownerId&&value.containerId===native.Id&&typeof value.connectionAuthority==='string'&&/^[A-Za-z0-9_.:-]{1,200}$/.test(value.connectionAuthority)
-        &&Object.keys(value).every(key=>['schemaVersion','runtimeOwnerId','containerId','connectionAuthority','cliPath'].includes(key))&&(value.cliPath===undefined||typeof value.cliPath==='string'&&value.cliPath.startsWith('/')), 'native_navigation', 'Register this exact managed host through the owning desktop bridge before opening it');
-      return value as {connectionAuthority:string;cliPath?:string};
+    let desktop:Awaited<ReturnType<typeof createDesktopNavigation>>|undefined;
+    const closeDesktop=async()=>{const previous=desktop;desktop=undefined;await previous?.close()};
+    const prepareDesktop=async(identity:NativeIdentity,assertCurrent:()=>void)=>{
+      assertCurrent();await closeDesktop();assertCurrent();
+      const next=await createDesktopNavigation({root:installation.root,installationId:installation.id,runtimeOwnerId:ownerId,identity,assertCurrent,launcher});
+      try{assertCurrent();desktop=next}catch(error){await next.close();throw error}
     };
     const owner = createVsCodeOwner({journalPath:join(parent,'owner.sqlite'),launcher,compatibility:{protocol:'1.0.0',commits:[t.hostCommit]},workspaceUri:async()=>pathToFileURL('/workspaces/task').href,
-      navigation:{get connectionAuthority(){return navigation().connectionAuthority},async launch(uri){await createNativeNavigation(navigation().cliPath).launch(uri)}},
+      navigation:{get connectionAuthority(){ensure(desktop,'native_navigation','Managed desktop registration is unavailable');return desktop.connectionAuthority},async launch(uri){ensure(desktop,'native_navigation','Managed desktop registration is unavailable');await desktop.launch(uri)}},
       tools:createIsolatedClientTools(gate,worker),
       requireVerifiedProfile:start=>verify.requireVerifiedProfile(start),readinessStarts:async()=>[gate.currentStart()]});
     owner.subscribe(event=>{for(const listener of listeners)listener(event)});
@@ -176,7 +179,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     boundary = createIsolatedNativeBoundary({owner,gate,worker,launcher,docker,modelProxy:proxyControl,image:t.nativeImage,networks:[internal.Id],protectedPaths});
     verify = createProfileVerifier({profiles:[{id:isolatedProfileId,ownerId:'vscode',providerId:'copilot',image:t.nativeImage,networks:[internal.Id],protectedPaths,boundary,mountTargets:targets,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot}}]});
     const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const expiresIn=ref.expiresAt===undefined?undefined:Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn===undefined||expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:loadCompanionCredential(installation.root,ref).token,...(expiresIn===undefined?{}:{expiresIn}),scopes:ref.scopes})};
-    return {owner,worker,gate,launcher,boundary,verify,authenticate};
+    return {owner,worker,gate,launcher,boundary,verify,authenticate,prepareDesktop,closeDesktop};
   }
   type Member = Awaited<ReturnType<typeof compose>>;
   function member(start: NativeStart, create = false): Promise<Member> {
@@ -198,14 +201,14 @@ export function createNativeFleet(options: { installation: Installation; config:
     ensureSession:async start=>(await member(start)).owner.ensureSession(start),
     snapshot:async identity=>(await member(startFor(find(identity)))).owner.snapshot(identity),
     send:async(identity,input,key)=>(await member(startFor(find(identity)))).owner.send(identity,input,key),
-    quiesce:async identity=>{const m=await member(startFor(find(identity)));m.gate.suspend();const [native,worker]=await Promise.all([m.owner.quiesce(identity),m.worker.pause()]);return native==='unknown'||worker==='unknown'?'unknown':native},
+    quiesce:async identity=>{const m=await member(startFor(find(identity)));await m.closeDesktop();m.gate.suspend();const [native,worker]=await Promise.all([m.owner.quiesce(identity),m.worker.pause()]);return native==='unknown'||worker==='unknown'?'unknown':native},
     open:async identity=>(await member(startFor(find(identity)))).owner.open(identity),
     subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener)},
   };
   return { owner:fleetOwner,provisionability,templateReadiness,startFor,member,
-    async prepare(start:NativeStart) {ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted');ensure(store.getLifecycle(start.attemptId).reservation.status==='confirmed','native_unconfirmed','Confirm actual engine execution before native provisioning');const m=await member(start,true);ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted during provisioning');await m.boundary.prepare(start,start.idempotencyKey,m.authenticate);return m.verify.requireVerifiedProfile(start)},
+    async prepare(start:NativeStart) {ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted');ensure(store.getLifecycle(start.attemptId).reservation.status==='confirmed','native_unconfirmed','Confirm actual engine execution before native provisioning');const m=await member(start,true);await m.closeDesktop();ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted during provisioning');await m.boundary.prepare(start,start.idempotencyKey,m.authenticate);return m.verify.requireVerifiedProfile(start)},
     async reconcile(start:NativeStart){return (await member(start)).owner.reconcile(start)},
-    async close(){for(const promise of members.values()){try{await (await promise).owner.close()}catch{}}members.clear()},
+    async close(){for(const promise of members.values()){try{const m=await promise;await m.closeDesktop();await m.owner.close()}catch{}}members.clear()},
   };
 }
 export type NativeFleet = ReturnType<typeof createNativeFleet>;

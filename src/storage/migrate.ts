@@ -6,7 +6,7 @@ export function migrate(database: DatabaseSync): void {
   database.exec('BEGIN IMMEDIATE');
   try {
     const version = Number(database.prepare('PRAGMA user_version').get()!.user_version);
-    if (version > 4) throw new Error(`Unsupported factory database version ${version}`);
+    if (version > 5) throw new Error(`Unsupported factory database version ${version}`);
     if (version === 0) {
       database.exec(readFileSync(new URL('./migrations/001_initial.sql', import.meta.url), 'utf8'));
       database.exec('PRAGMA user_version = 1');
@@ -22,6 +22,10 @@ export function migrate(database: DatabaseSync): void {
     if (version < 4) {
       database.exec(readFileSync(new URL('./migrations/004_api_requests.sql', import.meta.url), 'utf8'));
       database.exec('PRAGMA user_version = 4');
+    }
+    if (version < 5) {
+      database.exec(readFileSync(new URL('./migrations/005_broker.sql', import.meta.url), 'utf8'));
+      database.exec('PRAGMA user_version = 5');
     }
     database.exec('COMMIT');
   } catch (error) { database.exec('ROLLBACK'); throw error; }

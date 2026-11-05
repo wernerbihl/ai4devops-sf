@@ -3843,1254 +3843,6 @@
         }
       }
     },
-    "/worker/v1/tasks": {
-      "post": {
-        "operationId": "post_worker_v1_tasks",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/tasks/{id}": {
-      "get": {
-        "operationId": "get_worker_v1_tasks_id",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "operationId": "patch_worker_v1_tasks_id",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "delete_worker_v1_tasks_id",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/findings": {
-      "post": {
-        "operationId": "post_worker_v1_findings",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/native/start": {
-      "post": {
-        "operationId": "post_worker_v1_native_start",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/native/continue": {
-      "post": {
-        "operationId": "post_worker_v1_native_continue",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/results": {
-      "post": {
-        "operationId": "post_worker_v1_results",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/artifacts": {
-      "post": {
-        "operationId": "post_worker_v1_artifacts",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/artifacts/{id}": {
-      "get": {
-        "operationId": "get_worker_v1_artifacts_id",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/worker/v1/attention": {
-      "post": {
-        "operationId": "post_worker_v1_attention",
-        "description": "Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.",
-        "security": [
-          {
-            "AttemptBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contract",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Scope or grant denied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Stale revision or event cursor; refresh current state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Admission limit reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Required capability or service unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerRequest"
-              }
-            }
-          }
-        }
-      }
-    },
     "/owner/v1/rpc": {
       "post": {
         "operationId": "post_owner_v1_rpc",
@@ -5311,6 +4063,1625 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/tasks": {
+      "post": {
+        "operationId": "post_worker_v1_tasks",
+        "description": "Private attempt broker. Logical operation: task.create only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "task.create",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "$ref": "#/components/schemas/TaskSpec"
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/tasks/{id}": {
+      "get": {
+        "operationId": "get_worker_v1_tasks_id",
+        "description": "Private attempt broker. Logical operation: task.read only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_worker_v1_tasks_id",
+        "description": "Private attempt broker. Logical operation: task.update only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "task.update",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "properties": {
+                            "taskId": {
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
+                            },
+                            "revision": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "title": {
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
+                            },
+                            "description": {
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
+                            },
+                            "goal": {
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
+                            },
+                            "acceptanceCriteria": {
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "taskId",
+                            "revision"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_worker_v1_tasks_id",
+        "description": "Private attempt broker. Logical operation: task.cancel only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "task.cancel",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "properties": {
+                            "taskId": {
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
+                            },
+                            "revision": {
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "taskId",
+                            "revision"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/findings": {
+      "post": {
+        "operationId": "post_worker_v1_findings",
+        "description": "Private attempt broker. Logical operation: finding.upsert only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "finding.upsert",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "$ref": "#/components/schemas/FindingInput"
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/native/start": {
+      "post": {
+        "operationId": "post_worker_v1_native_start",
+        "description": "Private attempt broker. Logical operation: native.start only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "native.start",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "$ref": "#/components/schemas/NativeStart"
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/native/continue": {
+      "post": {
+        "operationId": "post_worker_v1_native_continue",
+        "description": "Private attempt broker. Logical operation: native.continue only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "native.continue",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "properties": {
+                            "identity": {
+                              "$ref": "#/components/schemas/NativeIdentity"
+                            },
+                            "input": {
+                              "type": "object",
+                              "patternProperties": {
+                                "^(.*)$": {}
+                              }
+                            }
+                          },
+                          "required": [
+                            "identity",
+                            "input"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/results": {
+      "post": {
+        "operationId": "post_worker_v1_results",
+        "description": "Private attempt broker. Logical operation: result.submit only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "result.submit",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "$ref": "#/components/schemas/TaskResult"
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/artifacts": {
+      "post": {
+        "operationId": "post_worker_v1_artifacts",
+        "description": "Private attempt broker. Logical operation: artifact.register only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "artifact.register",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "$ref": "#/components/schemas/Artifact"
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/artifacts/{id}": {
+      "get": {
+        "operationId": "get_worker_v1_artifacts_id",
+        "description": "Private attempt broker. Logical operation: artifact.read only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/v1/attention": {
+      "post": {
+        "operationId": "post_worker_v1_attention",
+        "description": "Private attempt broker. Logical operation: attention.create only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.",
+        "security": [
+          {
+            "AttemptBearer": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope or grant denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision or event cursor; refresh current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Admission limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required capability or service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTransport"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerTransport"
+                  }
+                ],
+                "properties": {
+                  "payload": {
+                    "contentEncoding": "base64url",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "idempotencyKey": {
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
+                        "scope": {
+                          "$ref": "#/components/schemas/ActorScope"
+                        },
+                        "operation": {
+                          "const": "attention.create",
+                          "type": "string"
+                        },
+                        "payload": {
+                          "$ref": "#/components/schemas/AttentionRequest"
+                        }
+                      },
+                      "required": [
+                        "requestId",
+                        "idempotencyKey",
+                        "scope",
+                        "operation",
+                        "payload"
+                      ]
+                    }
+                  }
                 }
               }
             }

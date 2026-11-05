@@ -3,6 +3,7 @@ import type { ActorScope, Clock, CreateTaskRequest, FactorySnapshot, FindingInpu
 import { defaultConfig } from '../contracts/defaults.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { StoreDatabase, ensure, systemClock } from './database.ts';
+import { BrokerStorage } from './broker.ts';
 import { LifecycleStorage } from './lifecycle.ts';
 import type { LifecycleUpdate, LifecycleRecord } from './lifecycle.ts';
 import type { LifecycleState } from '../scheduling/leases.ts';
@@ -33,9 +34,11 @@ export class FactoryStore {
   private apiRequests: ApiRequests;
   private admission: AdmissionStorage;
   private lifecycle: LifecycleStorage;
+  readonly broker: BrokerStorage;
   private closed = false;
   constructor(path: string, options: OpenStoreOptions = {}) {
     this.db = new StoreDatabase(path, options.clock ?? systemClock);
+    this.broker = new BrokerStorage(this.db);
     this.tags = new TagStorage(this.db);
     this.recipes = new RecipeStorage(this.db);
     this.tasks = new TaskStorage(this.db, this.recipes, options.materialize);
@@ -157,6 +160,8 @@ export class FactoryStore {
   /** Trusted manual submission does not require a fabricated workflow attempt. */
   createManualTasks(request: CreateTaskRequest, key: string) { return this.db.transaction(() => this.tasks.create(request, key)); }
   createTasks(request: CreateTaskRequest, actor: ActorScope, key: string) { return this.db.transaction(() => this.tasks.create(request, key, actor)); }
+  /** Trusted E3 only: generated content with server-reconstructed identity and authority. */
+  createGeneratedTask(spec: import('../contracts/domain.ts').TaskSpec, actor: ActorScope, key: string) { return this.db.transaction(() => this.tasks.generated(spec, actor, key)); }
   upsertFinding(input: FindingInput, actor: ActorScope, key: string) { return this.db.transaction(() => this.tasks.finding(input, actor, key)); }
   getTask(id: string, actor?: ActorScope) { return this.tasks.get(id, actor); }
   getTaskHistory(id: string) { return this.tasks.history(id); }

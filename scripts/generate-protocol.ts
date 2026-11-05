@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { workerRoutes } from '../src/broker/server.ts';
 import { schemas } from '../src/contracts/schemas.ts';
 import type { ContractName } from '../src/contracts/schemas.ts';
 
@@ -8,18 +9,18 @@ type Boundary = 'BrowserSession' | 'AttemptBearer' | 'OwnerBridge';
 type Method = 'get' | 'post' | 'patch' | 'delete';
 const paths: Record<string, Partial<Record<Method, object>>> = {};
 function route(method: Method, path: string, response: ContractName | object, options: {
-  body?: ContractName; boundary?: Boundary; versioned?: boolean; description?: string; events?: boolean;
+  body?: ContractName | object; boundary?: Boundary; versioned?: boolean; description?: string; events?: boolean;
 } = {}): void {
   const parameters: object[] = [];
   for (const parameter of path.matchAll(/\{(\w+)\}/g)) {
     parameters.push({ name: parameter[1], in: 'path', required: true, schema: { type: 'string', minLength: 1 } });
   }
-  if (method !== 'get') parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 1 } });
+  if (method !== 'get' && options.boundary !== 'AttemptBearer') parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 1 } });
   if (options.versioned) parameters.push({ name: 'If-Match', in: 'header', required: true,
     description: 'The current entity revision. Stale revisions are rejected without side effects.', schema: { type: 'string', minLength: 1 } });
   if (options.events) parameters.push({ name: 'Last-Event-ID', in: 'header', required: false,
     description: 'Resume cursor. An expired cursor returns STALE_CURSOR (409); refresh the snapshot without replaying actions.', schema: { type: 'string' } });
-  const error = (description: string) => ({ description, content: { 'application/json': { schema: ref('ApiError') } } });
+  const error = (description: string) => ({ description, content: { 'application/json': { schema: ref(options.boundary === 'AttemptBearer' ? 'WorkerTransport' : 'ApiError') } } });
   const responses: Record<string, object> = {
     '200': { description: 'Success', content: { [options.events ? 'text/event-stream' : 'application/json']: {
       schema: typeof response === 'string' ? ref(response) : response,
@@ -32,7 +33,7 @@ function route(method: Method, path: string, response: ContractName | object, op
     operationId: `${method}_${path.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
     description: options.description ?? `${method.toUpperCase()} ${path}`,
     security: [{ [options.boundary ?? 'BrowserSession']: [] }], parameters, responses,
-    ...(options.body ? { requestBody: { required: true, content: { 'application/json': { schema: ref(options.body) } } } } : {}),
+    ...(options.body ? { requestBody: { required: true, content: { 'application/json': { schema: typeof options.body === 'string' ? ref(options.body) : options.body } } } } : {}),
   };
   (paths[path] ??= {})[method] = operation;
 }
@@ -69,17 +70,6 @@ route('post', '/v1/auth/probe', 'AuthState', { body: 'Empty' });
 route('post', '/v1/auth/device-flow', 'DeviceFlow', { body: 'Empty', description: 'Start backend-owned GitHub App device flow. No browser-provided credential or client secret is accepted.' });
 route('get', '/v1/auth/device-flow/{id}', 'DeviceFlow');
 route('post', '/v1/auth/device-flow/{id}/complete', 'AuthState', { body: 'Empty', description: 'Backend polls/completes the documented device flow; the browser supplies only the opaque flow ID.' });
-for (const [method, path] of [
-  ['post', '/worker/v1/tasks'], ['get', '/worker/v1/tasks/{id}'], ['patch', '/worker/v1/tasks/{id}'],
-  ['delete', '/worker/v1/tasks/{id}'], ['post', '/worker/v1/findings'], ['post', '/worker/v1/native/start'],
-  ['post', '/worker/v1/native/continue'], ['post', '/worker/v1/results'], ['post', '/worker/v1/artifacts'],
-  ['get', '/worker/v1/artifacts/{id}'], ['post', '/worker/v1/attention'],
-] as const) {
-  route(method, path, 'WorkerResponse', { boundary: 'AttemptBearer',
-    ...(method !== 'get' ? { body: 'WorkerRequest' as const } : {}),
-    description: 'Attempt-authenticated broker only. Verify expiry, recipe revision, repository scope, grants and current fence. Inherit recipe tag; never elevate finish authority or switch a running native identity. GET uses identity from the attempt credential.',
-  });
-}
 route('post', '/owner/v1/rpc', 'OwnerRpcResponse', { body: 'OwnerRpc', boundary: 'OwnerBridge',
   description: 'Paired trusted native-owner bridge only. Browser sessions and worker credentials cannot register or impersonate a bridge. Request IDs correlate one-to-one NativeOwner methods; subscribe returns an authenticated stream subscription.',
 });
@@ -97,6 +87,15 @@ const definitions = (prefix: string) => Object.fromEntries(Object.entries(schema
 route('get', '/owner/v1/events/{subscriptionId}', 'OwnerEvent', { boundary: 'OwnerBridge', events: true,
   description: 'Authenticated native-owner subscription stream. Idle/activity never proves successful completion; reconnect by snapshot reconciliation.',
 });
+for (const [verb, path, logicalOperation] of workerRoutes) {
+  const method = verb.toLowerCase() as Method;
+  const logical = schemas.WorkerRequest.anyOf.find(branch => branch.properties.operation.const === logicalOperation)!;
+  const wire = { allOf: [ref('WorkerTransport')], properties: { payload: { contentEncoding: 'base64url', contentMediaType: 'application/json', contentSchema: compact(logical, logical, '#/components/schemas/') } } };
+  route(method, path, 'WorkerTransport', { boundary: 'AttemptBearer',
+    ...(method !== 'get' ? { body: wire } : {}),
+    description: `Private attempt broker. Logical operation: ${logicalOperation} only. Request and success/error replies use canonical sf-base64url-json-v1 opaque envelopes; decode exactly once. Idempotency is carried by logical idempotencyKey, not a separate header. GET takes target from the path and scope from the signed credential. Revalidate current reservation, expiry, recipe hash/revision, grants and exclusive fence; JSON scope grants no authority. Result submission is a proposal, never verified completion.`,
+  });
+}
 const openapi = {
   openapi: '3.1.0', jsonSchemaDialect: 'https://json-schema.org/draft/2020-12/schema',
   info: { title: 'Local Software Factory protocol', version: '1.0.0',

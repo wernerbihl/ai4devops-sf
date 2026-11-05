@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultConfig } from '../../src/contracts/defaults.ts';
@@ -174,4 +175,14 @@ test('recipe_current_revision_read_contract_restores_editor_without_mutation', a
     delete incomplete[field];
     assert.equal(validateResponse(incomplete), false, `Editor response must retain ${field}`);
   }
+});
+
+test('worker_routes_document_opaque_wire_and_exact_logical_operation', async () => {
+  const api = JSON.parse(await readFile(new URL('../../protocol/openapi.json', import.meta.url), 'utf8'));
+  const request = api.paths['/worker/v1/results'].post.requestBody.content['application/json'].schema;
+  assert.equal(api.paths['/worker/v1/results'].post.parameters.some((p: {name: string}) => p.name === 'Idempotency-Key'), false);
+  assert.equal(request.allOf?.[0]?.$ref, '#/components/schemas/WorkerTransport');
+  assert.equal(request.properties.payload.contentSchema.properties.operation.const, 'result.submit');
+  assert.equal(api.paths['/worker/v1/native/start'].post.requestBody.content['application/json'].schema.properties.payload.contentSchema.properties.operation.const, 'native.start');
+  assert.equal(api.paths['/worker/v1/results'].post.responses['403'].content['application/json'].schema.$ref, '#/components/schemas/WorkerTransport');
 });

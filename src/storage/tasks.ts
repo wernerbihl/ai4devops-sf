@@ -140,6 +140,18 @@ export class TaskStorage {
       return tasks;
     });
   }
+  generated(spec: TaskSpec, actor: ActorScope, key: string): TaskSpec {
+    const registered = this.authorize(actor);
+    const recipe = this.availableRecipe(spec.recipeId, actor);
+    this.checkSpec(spec, recipe, spec.repositoryId);
+    const parent = this.get(registered.taskId)!;
+    ensure(actor.repositoryIds.includes(spec.repositoryId) && spec.parentId === registered.taskId && spec.source === 'recipe'
+      && spec.ownerId === parent.spec.ownerId && spec.providerId === parent.spec.providerId && spec.finishPolicy === parent.spec.finishPolicy,
+      'worker_authority', 'Generated task must inherit parent execution authority');
+    return this.db.idempotent(`actor:${actor.attemptId}:generated`, key, spec, () => {
+      this.insert(spec, actor.attemptId); this.linkChildren(registered.taskId, [spec.id]); return spec;
+    });
+  }
   private linkChildren(taskId: string, ids: string[]): void {
     const task = this.get(taskId)!;
     this.write({ ...task, childTaskIds: [...task.childTaskIds, ...ids], revision: task.revision + 1, updatedAt: this.db.now() });

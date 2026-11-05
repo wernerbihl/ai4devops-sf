@@ -11,7 +11,7 @@ import type { Outbox, OutboxAction } from './outbox.ts';
 
 export interface LifecycleUpdate {
   status?: TaskStatus; state?: LifecycleState; activeDurationMs?: number; usage?: Usage;
-  attention?: { kind: AttentionRequest['kind']; prompt: string; recovery: string; inputSchema?: Record<string, unknown>; nativeInputId?: string };
+  attention?: { source?: 'owner' | 'workflow'; kind: AttentionRequest['kind']; prompt: string; recovery: string; inputSchema?: Record<string, unknown>; nativeInputId?: string };
   release?: Quiescence; human?: boolean;
 }
 export interface LifecycleRecord { reservation: Reservation; state: LifecycleState }
@@ -66,7 +66,7 @@ export class LifecycleStorage {
       const prior = this.admission.records().attention.find(item => item.attemptId === attemptId && item.status === 'open' && (a.nativeInputId ? item.nativeInputId === a.nativeInputId : item.prompt === a.prompt));
       if (!prior) {
         const request = validateContract('AttentionRequest', { id: randomUUID(), taskId: old.spec.id, attemptId,
-          repositoryId: old.spec.repositoryId, source: 'owner', kind: a.kind, prompt: a.prompt, recovery: a.recovery,
+          repositoryId: old.spec.repositoryId, source: a.source ?? 'owner', kind: a.kind, prompt: a.prompt, recovery: a.recovery,
           inputSchema: a.inputSchema ?? {}, ...(a.nativeInputId ? { nativeInputId: a.nativeInputId } : {}), status: 'open', createdAt: this.db.now(), revision: 1 });
         this.db.sql.prepare('INSERT INTO admission_attention(id, payload) VALUES (?, ?)').run(request.id, JSON.stringify(request)); this.db.emit('attention', request);
       }

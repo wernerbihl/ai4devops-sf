@@ -130,6 +130,14 @@ export class IsolatedToolWorker {
       this.store.completeAction(claim.action.id); return 'waiting';
     } catch { return 'unknown'; }
   }
+  async quiesceForMaintenance():Promise<'stopped'|'waiting'|'unknown'> {
+    try {
+      const c=await this.container();
+      if(c.State?.Running)return this.pause();
+      const receipt=typeof c.State?.StartedAt==='string'?this.store.getActionByKey('worker:maintenance-stop:'+this.config.containerId+':'+c.State.StartedAt):undefined;
+      return c.State?.Paused===false&&c.State.Pid===0&&c.State.Status==='exited'&&receipt?.kind==='worker.maintenance_stop'&&receipt.completedAt?'stopped':'unknown';
+    } catch {return 'unknown'}
+  }
   /** Physically stop this exact worker only when no earlier worker effect may still accept. */
   async stopForMaintenance(): Promise<void> {
     this.closeAdmission();

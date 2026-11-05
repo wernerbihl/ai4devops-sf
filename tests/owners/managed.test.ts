@@ -42,9 +42,9 @@ test('managed stop proves detached writers gone and restart requires a live rese
     const { createManagedVsCodeLauncher } = await implementation();
     const root = await mkdtemp(join(tmpdir(), 'sf-stop-state-'));
     const nativeState = await nativeStateFixture(root);
-    let running = true, native = true, autoRestart = false;
+    let running = true, native = true, autoRestart = false;const generations:string[]=[];
     const calls: string[][] = [];
-    const options = { nativeState, nativeStateOwnership: { installationId: 'installation', root }, containerId: 'd'.repeat(64), runtimeOwnerId: 'owned', image: 'image@sha256:' + 'a'.repeat(64), entrypoint: '/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js', entrypointSha256: 'b'.repeat(64), userDataDir: nativeState.target + '/user-data', tokenFile: nativeState.target + '/connection-token', port: 8081 };
+    const options = { nativeState, nativeStateOwnership: { installationId: 'installation', root }, containerId: 'd'.repeat(64), runtimeOwnerId: 'owned', image: 'image@sha256:' + 'a'.repeat(64), entrypoint: '/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js', entrypointSha256: 'b'.repeat(64), userDataDir: nativeState.target + '/user-data', tokenFile: nativeState.target + '/connection-token', port: 8081, recordGeneration: async (_id:string,startedAt:string)=>{generations.push(startedAt)} };
     const docker = { async command(args: string[]) {
             calls.push(args);
             if (args[0] === 'container' && args[1] === 'stop') {
@@ -57,7 +57,7 @@ test('managed stop proves detached writers gone and restart requires a live rese
                 return '';
             }
             if (args[0] === 'container')
-                return JSON.stringify([{ Id: options.containerId, Config: { Labels: { 'sf.runtime-owner': 'owned' }, User: '1000' }, HostConfig: { RestartPolicy: { Name: autoRestart ? 'always' : 'no' }, AutoRemove: false }, State: { Running: running, Paused: false, Pid: running ? 12 : 0, Status: running ? 'running' : 'exited' }, Image: 'image-id', Mounts: [{ Source: nativeState.source, Destination: nativeState.target, RW: true, Type: 'bind' }] }]);
+                return JSON.stringify([{ Id: options.containerId, Config: { Labels: { 'sf.runtime-owner': 'owned' }, User: '1000' }, HostConfig: { RestartPolicy: { Name: autoRestart ? 'always' : 'no' }, AutoRemove: false }, State: { Running: running, Paused: false, Pid: running ? 12 : 0, StartedAt:'known-generation', Status: running ? 'running' : 'exited' }, Image: 'image-id', Mounts: [{ Source: nativeState.source, Destination: nativeState.target, RW: true, Type: 'bind' }] }]);
             if (args[0] === 'image')
                 return JSON.stringify([{ Id: 'image-id', RepoDigests: [options.image] }]);
             if (args[1] === '-d') {
@@ -86,7 +86,7 @@ test('managed stop proves detached writers gone and restart requires a live rese
         await assert.rejects(launcher.resumeHuman(start, () => { throw Error('not human'); }));
         await launcher.resumeHuman(start, () => { });
         assert.equal(running, true);
-        assert.equal(calls.filter(a => a[1] === 'start').length, 2);
+        assert.equal(calls.filter(a => a[1] === 'start').length, 2);assert.deepEqual(generations,['known-generation','known-generation']);
     }
     finally {
         await rm(root, { recursive: true, force: true });

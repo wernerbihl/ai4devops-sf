@@ -81,11 +81,15 @@ export class VsCodeOwner implements NativeOwner {
     private identities = new Map<string, NativeIdentity>();
     private processing = new Map<string, Promise<void>>();
     private serial: Promise<unknown> = Promise.resolve();
+    private maintenanceNoStart = false;
+    /** Internal durable-maintenance fence; a later runtime reconstruction clears it. */
+    forbidMaintenanceStart():void { this.maintenanceNoStart = true; }
     constructor(options: VsCodeOptions) { this.options = options; this.metadataDirectory = dirname(resolve(options.journalPath)); this.ownerId = options.ownerId ?? 'vscode'; this.timeoutMs = options.timeoutMs ?? 15000; this.journal = new OwnerJournal(options.journalPath,options.journalProtection); }
     async ensureStarted(): Promise<void> {
         ensure(!this.closed, 'owner_closed', 'Native owner is closed');
         if (this.client && this.root)
             return;
+        ensure(!this.maintenanceNoStart, 'owner_disconnected', 'Maintenance cannot start or reconnect the native owner');
         if (!this.starting)
             this.starting = this.connect().finally(() => { this.starting = undefined; });
         return this.starting;
@@ -435,6 +439,13 @@ export class VsCodeOwner implements NativeOwner {
             const receipt = await this.stoppedReceipt(identity);
             if (receipt)
                 return receipt.mode === 'paused' ? 'waiting' : 'stopped';
+            if (this.maintenanceNoStart) {
+                if(!this.client||!this.root||!this.options.launcher?.readable||!this.options.launcher.pause||!await this.options.launcher.readable())return 'unknown';
+                // Verify the original chat on the existing transport, then freeze the
+                // complete process tree without cancelling or replacing its live turn.
+                await this.readConnectedChat(identity);
+                await this.options.launcher.pause();this.journal.recordPaused(identity);return 'waiting';
+            }
             try {
                 const state = await this.chat(identity);
                 if (pendingNativeInput(state)) {

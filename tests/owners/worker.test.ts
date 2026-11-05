@@ -74,7 +74,7 @@ test('maintenance stops a verified worker and preserves an unresolved worker eff
   const worker=new IsolatedToolWorker({config:f.config,store:f.store,gate:f.gate,docker});
   const pending=f.store.enqueueAction({key:'unknown-worker-test',kind:'worker.execute',payload:{attemptId:f.r.attempt.id}});
   await assert.rejects(worker.stopForMaintenance());assert.equal(kills,0);
-  f.store.completeAction(pending.id);await worker.stopForMaintenance();assert.equal(kills,1);assert.equal(f.c.State.Running,false);
+  f.store.completeAction(pending.id);await worker.stopForMaintenance();assert.equal(kills,1);assert.equal(f.c.State.Running,false);assert.equal(await worker.quiesceForMaintenance(),'stopped');
  }finally{f.close()}
 });
 test('unacknowledged worker stop retains its intent and is never retried as proof',async()=>{

@@ -133,3 +133,6 @@ test('unacknowledged engine creation retains durable exclusion and is not retrie
 test('unacknowledged engine start stays excluded even when a later inspection is running',async()=>{
  const f=fixture();try{f.dropStartReply();const installation={id:'test-install',root:f.root,docker:f.docker,secrets:new PosixInstallationSecrets()};await assert.rejects(ensureKestra(installation,{store:f.store}));const starts=f.calls.filter(a=>a[0]==='start').length;await assert.rejects(ensureKestra(installation,{store:f.store}));assert.equal(f.calls.filter(a=>a[0]==='start').length,starts);assert.ok(f.store.pendingActions().some(a=>a.kind==='kestra.deployment'&&a.payload.operation==='container-start'))}finally{f.cleanup()}
 });
+test('transport generation receipt binds the exact engine generation',async()=>{
+ const f=fixture();try{const installation={id:'test-install',root:f.root,docker:f.docker,secrets:new PosixInstallationSecrets()};const handle=await ensureKestra(installation,{store:f.store});const engine=f.objects.get(handle.containerId),transport=f.objects.get(handle.transportContainerId);const receipt=f.store.getActionByKey('kestra:generation:'+handle.transportContainerId+':'+transport.State.StartedAt);assert.equal(receipt?.payload.engineId,handle.containerId);assert.equal(receipt?.payload.engineStartedAt,engine.State.StartedAt)}finally{f.cleanup()}
+});

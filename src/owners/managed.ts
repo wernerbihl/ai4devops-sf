@@ -26,6 +26,8 @@ export interface ManagedVsCodeOptions {
     port: number;
     docker?: DockerPort;
     dockerExecutable?: string;
+    /** Runtime persists the observed generation before its protected control intent clears. */
+    recordGeneration?(containerId:string,startedAt:string):Promise<void>;
 }
 export interface NativeProcess {
     pid: number;
@@ -173,6 +175,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
             }
             else
                 await startNative();
+            if(options.recordGeneration){const running=await stoppedContainer();ensure(running.State?.Running===true&&running.State.Paused===false&&running.State.Pid>0&&typeof running.State.StartedAt==='string'&&running.State.StartedAt,'owner_quiescence','Resumed container generation is unavailable');await options.recordGeneration(options.containerId,running.State.StartedAt)}
             settled = true;
             assertCurrent();
             await clearControlIntent();

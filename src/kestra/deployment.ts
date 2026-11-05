@@ -165,22 +165,25 @@ export async function ensureKestra(installation: Installation, options:{store:Fa
     check(canonical(envMap(c.Env ?? [])) === canonical(envMap([...(base.Env ?? []), ...env])), 'Container environment configuration mismatch');
     check(h.IpcMode !== 'host' && h.UsernsMode !== 'host' && h.UTSMode !== 'host' && !(h.Devices?.length) && !(h.DeviceRequests?.length) && !(h.VolumesFrom?.length) && canonical(h.Tmpfs) === canonical({ '/tmp': tmpfs }), 'Container namespace/tmpfs restriction mismatch');
     if(createIntent){const receipt=store.enqueueAction({key:'kestra:owner:'+name,kind:'kestra.owner',payload:{installationId:installation.id,name,containerId:object.Id,owner}});store.completeAction(receipt.id);store.completeAction(createIntent.id)}
+    const engineGeneration=async()=>{if(!networkMode.startsWith('container:'))return undefined;const id=networkMode.slice('container:'.length);const engine=await inspect('container',id);check(engine?.Id===id&&engine.State?.Running&&typeof engine.State.StartedAt==='string'&&engine.State.StartedAt,'Engine namespace generation is unavailable');return{engineId:id,engineStartedAt:engine.State.StartedAt as string}};
     // Mutating setup adoption always rejoins an existing transport. The engine may have
     // restarted in another invocation, including a crash before sidecar reattachment.
     // Running flags, PIDs and timestamps cannot establish shared namespace freshness.
     if (object.State.Running && image === pins.worker.image) {
-      const priorId=object.Id;const intent=begin('container-restart',priorId);
+      const priorId=object.Id;const parentGeneration=await engineGeneration();const intent=begin('container-restart',priorId);
       await docker.command(['restart', '--timeout', '1', priorId]);
       object = await inspect('container', name); check(object?.Id===priorId&&object.State.Running&&typeof object.State.StartedAt==='string'&&object.State.StartedAt, 'Transport restart outcome unknown');
       verifyEffectiveNetworks(object,true);
-      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt}});store.completeAction(receipt.id);store.completeAction(intent.id);
+      check(canonical(await engineGeneration())===canonical(parentGeneration),'Engine namespace generation changed during transport restart');
+      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt,...parentGeneration}});store.completeAction(receipt.id);store.completeAction(intent.id);
     }
     if (!object.State.Running) {
-      const priorId=object.Id;const intent=begin('container-start',priorId);
+      const priorId=object.Id;const parentGeneration=await engineGeneration();const intent=begin('container-start',priorId);
       await docker.command(['start', priorId]);object=await inspect('container',name);
       check(object?.Id===priorId&&object.State.Running&&typeof object.State.StartedAt==='string'&&object.State.StartedAt,'Container start outcome unknown');
       verifyEffectiveNetworks(object,true);
-      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt}});store.completeAction(receipt.id);store.completeAction(intent.id);
+      check(canonical(await engineGeneration())===canonical(parentGeneration),'Engine namespace generation changed during transport start');
+      const receipt=store.enqueueAction({key:'kestra:generation:'+priorId+':'+object.State.StartedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:priorId,startedAt:object.State.StartedAt,...parentGeneration}});store.completeAction(receipt.id);store.completeAction(intent.id);
     }
     verifyEffectiveNetworks(object, true);
     return object.Id;

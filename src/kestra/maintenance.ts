@@ -15,7 +15,7 @@ export async function inspectOwnedKestra(installation:EngineInstallation,store:F
   const owner=fingerprint({id,root});
   ensure(value.installationId===id&&value.owner===owner&&hexId(value.networkId)&&hexId(value.containerId)&&hexId(value.transportContainerId)&&value.containerId!==value.transportContainerId,'engine_owner','Owned engine manifest is unavailable or mismatched');
   const inspection:OwnedKestraInspection={installationId:id,owner,networkId:value.networkId,containerId:value.containerId,transportContainerId:value.transportContainerId};
-  ensure(!store.pendingActions().some(action=>action.kind==='kestra.deployment'),'engine_owner','An engine deployment action remains unresolved');
+  ensure(!store.pendingActions().some(action=>['kestra.deployment','kestra.maintenance_stop'].includes(action.kind)),'engine_owner','An engine deployment or stop action remains unresolved');
   const prefix='sf-'+owner.slice(0,24); const labels={'sf.installation':id,'sf.owner':owner,'sf.component':'kestra'};
   const exactLabels=(actual:any)=>Object.entries(labels).every(([key,expected])=>actual?.[key]===expected);
   const read=async(kind:string,key:string)=>{const values=JSON.parse(await docker.command([kind,'inspect',key]));ensure(Array.isArray(values)&&values.length===1&&values[0]?.Id===key,'engine_owner','Exact owned engine resource inspection required');return values[0]};

@@ -10,7 +10,7 @@ import type { DockerPort } from '../kestra/deployment.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
 
-export interface NativeInventoryItem { taskId:string; ownerId:string; pending:string[]; containers:{role:'native'|'worker'|'proxy';id:string;fingerprint:string;stopped:boolean;frozen:boolean;startedAt?:string}[]; networks:{id:string;fingerprint:string}[] }
+export interface NativeInventoryItem { taskId:string; ownerId:string; pending:string[]; containers:{role:'native'|'worker'|'proxy';id:string;fingerprint:string;stopped:boolean;frozen:boolean;pid:number;startedAt?:string}[]; networks:{id:string;fingerprint:string}[] }
 /** Read-only inventory of retained task runtimes. No adoption, profile setup, authentication or starts. */
 export async function inspectNativeInventory(input:{id:string;root:string;docker:DockerPort;store:FactoryStore;images:{native:string;worker:string;proxy:string}}):Promise<NativeInventoryItem[]> {
   const {id,root,docker,store,images}=input;
@@ -27,6 +27,7 @@ export async function inspectNativeInventory(input:{id:string;root:string;docker
     await verifyNativeStateMount({installationId:id,runtimeOwnerId:name,taskId,source,target:NATIVE_STATE_TARGET,markerPath},taskId,{installationId:id,root:stateRoot});
     const workspace=workspaces[0]!;
     const workerMounts=await resolveNativeMounts({workspacePath:workspace,task:matches[0]!.task.spec} as NativeStart,[{source:workspace,target:'/workspaces/task'}]);
+    for(const match of matches)ensure(canonical(await resolveNativeMounts({workspacePath:workspace,task:match.task.spec} as NativeStart,[{source:workspace,target:'/workspaces/task'}]))===canonical(workerMounts),'native_inventory','Historical task mount identities differ');
     const policyPath=join(parent,'proxy.json');const policyAction=store.getActionByKey('runtime:proxy-policy:'+name);
     await readPrivateFileAsync(policyPath);const policyStat=statSync(policyPath);
     ensure(policyAction?.kind==='runtime.proxy-policy'&&policyAction.completedAt&&policyAction.payload.path===policyPath&&policyAction.payload.dev===policyStat.dev&&policyAction.payload.ino===policyStat.ino,'native_inventory','Proxy policy identity changed or is unresolved');
@@ -34,6 +35,7 @@ export async function inspectNativeInventory(input:{id:string;root:string;docker
     for(const suffix of ['internal','model-egress'] as const){
       const networkName=name+'-'+suffix;const values=JSON.parse(await docker.command(['network','inspect',networkName]));const network=values?.[0];
       ensure(values?.length===1&&/^[a-f0-9]{64}$/.test(network?.Id??'')&&network.Name===networkName&&network.Internal===(suffix==='internal')&&network.Driver==='bridge'&&network.Labels?.['sf.installation']===id,'native_inventory','Native network identity or configuration changed');
+      const receipt=store.getActionByKey('runtime:network-owner:'+networkName);ensure(receipt?.kind==='runtime.network_owner'&&receipt.completedAt&&receipt.payload.installationId===id&&receipt.payload.name===networkName&&receipt.payload.networkId===network.Id,'native_inventory','Native network creation is unrecorded');
       networks.push({id:network.Id,fingerprint:fingerprint({id:network.Id,name:network.Name,internal:network.Internal,driver:network.Driver,labels:network.Labels,options:network.Options??{}})});
     }
     const containers:NativeInventoryItem['containers']=[];
@@ -42,14 +44,18 @@ export async function inspectNativeInventory(input:{id:string;root:string;docker
       ensure(action?.kind==='runtime.container'&&action.completedAt&&action.payload.name===containerName&&action.payload.owner===name&&action.payload.image===expectedImage,'native_inventory','Original container creation is unresolved');
       const actual=JSON.parse(await docker.command(['container','inspect',containerName]));const image=JSON.parse(await docker.command(['image','inspect',expectedImage]));
       const c=actual?.[0];ensure(actual?.length===1&&image?.length===1&&/^[a-f0-9]{64}$/.test(c?.Id??'')&&c.Name==='/'+containerName&&c.Config?.Labels?.['sf.installation']===id&&c.Config.Labels['sf.runtime-owner']===name&&c.Config.Image===expectedImage&&c.Image===image[0]?.Id&&imageMatches(expectedImage,image[0])&&c.HostConfig?.RestartPolicy?.Name==='no'&&c.HostConfig.AutoRemove===false,'native_inventory','Native resource identity or configuration changed');
+      const ownerReceipt=store.getActionByKey('runtime:container-owner:'+containerName);ensure(ownerReceipt?.kind==='runtime.container_owner'&&ownerReceipt.completedAt&&ownerReceipt.payload.installationId===id&&ownerReceipt.payload.name===containerName&&ownerReceipt.payload.containerId===c.Id&&ownerReceipt.payload.owner===name&&ownerReceipt.payload.image===expectedImage,'native_inventory','Native container creation identity is unrecorded');
+      const generation=typeof c.State?.StartedAt==='string'?store.getActionByKey('runtime:container-generation:'+c.Id+':'+c.State.StartedAt):undefined;
+      ensure(generation?.kind==='runtime.container_generation'&&generation.completedAt&&generation.payload.installationId===id&&generation.payload.containerId===c.Id&&generation.payload.startedAt===c.State.StartedAt&&generation.payload.owner===name,'native_inventory','Native container generation is unrecorded');
       const mounts=role==='native'?[{source,target:NATIVE_STATE_TARGET,writable:true}]:role==='worker'?workerMounts:[{source:policyPath,target:'/etc/software-factory/proxy.json',writable:false}];
       ensure(Array.isArray(c.Mounts)&&canonical(c.Mounts.map((m:any)=>({source:m.Source,target:m.Destination,writable:m.RW})))===canonical(mounts)&&c.Mounts.every((m:any)=>m.Type==='bind'),'native_inventory','Native runtime mount changed');
       ensure(c.State&&typeof c.State.Running==='boolean'&&typeof c.State.Paused==='boolean'&&typeof c.State.Pid==='number','native_inventory','Native runtime state unknown');
-      containers.push({role,id:c.Id,fingerprint:fingerprint({id:c.Id,image:c.Image,config:c.Config,host:c.HostConfig,mounts:c.Mounts}),stopped:c.State.Running===false&&c.State.Paused===false&&c.State.Pid===0&&c.State.Status==='exited',frozen:c.State.Running===true&&c.State.Paused===true&&c.State.Pid>0&&typeof c.State.StartedAt==='string'&&c.State.StartedAt.length>0,...(typeof c.State.StartedAt==='string'?{startedAt:c.State.StartedAt}:{})});
+      containers.push({role,id:c.Id,fingerprint:fingerprint({id:c.Id,image:c.Image,config:c.Config,host:c.HostConfig,mounts:c.Mounts}),stopped:c.State.Running===false&&c.State.Paused===false&&c.State.Pid===0&&c.State.Status==='exited',frozen:c.State.Running===true&&c.State.Paused===true&&c.State.Pid>0&&typeof c.State.StartedAt==='string'&&c.State.StartedAt.length>0,pid:c.State.Pid,...(typeof c.State.StartedAt==='string'?{startedAt:c.State.StartedAt}:{})});
     }
     // Some effects are bound to a repository or container rather than an attempt. Keep
     // them visible for every inventory item instead of guessing their ownership scope.
-    const pending=store.pendingActions().filter(a=>['human.relay','lifecycle.human_open','lifecycle.send','lifecycle.quiesce','lifecycle.pause','runtime.api_lifecycle','runtime.native','runtime.start','runtime.container','runtime.proxy-policy','runtime.closeout','worker.execute','worker.pause','worker.resume','worker.maintenance_stop'].includes(a.kind)).map(a=>a.id);
+    const connection=store.getActionByKey('runtime:network-connection:'+name);ensure(connection?.kind==='runtime.network_connection'&&connection.completedAt&&connection.payload.installationId===id&&connection.payload.owner===name&&connection.payload.containerId===containers.find(c=>c.role==='proxy')?.id&&connection.payload.networkId===networks[1]?.id,'native_inventory','Proxy network connection is unrecorded');
+    const pending=store.pendingActions().filter(a=>['human.relay','lifecycle.human_open','lifecycle.send','lifecycle.quiesce','lifecycle.pause','runtime.api_lifecycle','runtime.native','runtime.start','runtime.container','runtime.native_mutation','runtime.proxy-policy','runtime.closeout','worker.execute','worker.pause','worker.resume','worker.maintenance_stop'].includes(a.kind)).map(a=>a.id);
     try {lstatSync(join(parent,'control-start.json'));pending.push('native-control:'+name)} catch(error) {if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
     result.push({taskId,ownerId:name,pending,containers,networks});
   }

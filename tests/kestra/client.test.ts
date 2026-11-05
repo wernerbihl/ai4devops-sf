@@ -159,3 +159,6 @@ test('ordinary quiescence proves exact internal result pause and no HTTP writer'
     assert.equal(await c.quiescence(id), 'unknown');
   } finally { c.close(); f.cleanup(); }
 });
+test('maintenance workflow recovery reads exact existing execution without replay',async()=>{
+ const f=fixture();const c=f.client();try{const identity=await c.ensureExecution(f.start);f.pause();f.executions[0].taskRunList.push({id:'start',taskId:'native_start',state:{current:'SUCCESS'}});c.close();const {readOnlyWorkflowQuiescence}=await import('../../src/kestra/maintenance-recovery.ts');const calls:EngineRequest[]=[];const request=async(r:EngineRequest)=>{calls.push(r);return f.request(r)};assert.equal(await readOnlyWorkflowQuiescence(f.root,identity,request),'waiting');assert.equal(calls.length,1);assert.equal(calls[0]!.method,'GET');assert.equal(await readOnlyWorkflowQuiescence(f.root,{...identity,executionId:'other'},request),'unknown');assert.equal(calls.length,1)}finally{f.cleanup()}
+});

@@ -242,3 +242,6 @@ test('AHP idle without contained process proof never reports quiescence', async 
 test('maintenance history reads only an already connected original owner',async()=>{
  const f=await fixture();let reopened:ReturnType<typeof f.create>|undefined;try{const identity=await f.owner.ensureSession(f.start);const history=await f.owner.readConnectedChat(identity);assert.equal(history.resource,identity.chatId);await f.owner.close();const prior=f.host.methods.filter(method=>method==='initialize').length;reopened=f.create();await assert.rejects(reopened.readConnectedChat(identity));assert.equal(f.host.methods.filter(method=>method==='initialize').length,prior)}finally{await f.owner.close();await reopened?.close()}
 });
+test('maintenance quiescence never reconnects or replaces a disconnected native owner',async()=>{
+ const f=await fixture();let reopened:ReturnType<typeof f.create>|undefined;try{const identity=await f.owner.ensureSession(f.start);await f.owner.close();const before=f.host.methods.filter(m=>m==='initialize').length;reopened=f.create();reopened.forbidMaintenanceStart();assert.equal(await reopened.quiesce(identity),'unknown');assert.equal(f.host.methods.filter(m=>m==='initialize').length,before)}finally{await f.owner.close();await reopened?.close()}
+});

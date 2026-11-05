@@ -18,7 +18,7 @@ import { createManagedVsCodeLauncher } from '../owners/managed.ts';
 import { createIsolatedNativeBoundary, isolatedToolAllowlist } from '../owners/isolated.ts';
 import { IsolatedToolWorker, createIsolatedClientTools } from '../owners/worker.ts';
 import { createProfileVerifier } from '../isolation/verify.ts';
-import { NATIVE_STATE_TARGET, type NativeStateMount } from '../isolation/native-state.ts';
+import { NATIVE_STATE_TARGET, verifyNativeStateMount, type NativeStateMount } from '../isolation/native-state.ts';
 import { resolveNativeMounts } from '../isolation/mounts.ts';
 import type { NativeModelProxyControl, ModelProxyPolicy } from '../owners/model-proxy.ts';
 import { imageMatches } from '../isolation/image.ts';
@@ -32,6 +32,10 @@ import { loadCompanionCredentialAsync } from '../install/companion-auth.ts';
 import { navigationCommits } from '../owners/navigation.ts';
 import { humanActionObserved } from '../owners/human-reconcile.ts';
 import { createDesktopNavigation } from '../owners/desktop.ts';
+import { beginNativeMutation } from './native-effects.ts';
+import type { OutboxAction } from '../storage/store.ts';
+import { inspectNativeInventory } from './native-inventory.ts';
+import { inspectRecordedOwnerReceipt } from '../owners/maintenance-receipt.ts';
 export const isolatedProfileId = 'vscode-copilot-isolated-worker-v2';
 const workerEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','LANG=C.UTF-8'];
 const nativeEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/opt/software-factory/empty-home','LANG=C.UTF-8','SF_CONTROL_SENTINEL=sf-nonsecret-control-sentinel'];
@@ -40,7 +44,7 @@ function reviewedProxyHash() {
   const source = new URL(import.meta.url.endsWith('.ts') ? '../../runtime/model-proxy/connect.cjs' : '../runtime/model-proxy/connect.cjs', import.meta.url);
   return createHash('sha256').update(readFileSync(source)).digest('hex');
 }
-export function createNativeFleet(options: { installation: Installation; config: RuntimeConfig; store: FactoryStore; broker: AttemptBroker; protectedPaths: string[] }) {
+export function createNativeFleet(options: { installation: Installation; config: RuntimeConfig; store: FactoryStore; broker: AttemptBroker; protectedPaths: string[]; maintenance?:()=>boolean }) {
   const { installation, config, store, broker } = options; const docker = installation.docker;
   const listeners = new Set<(event: OwnerEvent) => void>();
   const members = new Map<string, Promise<Member>>();
@@ -77,34 +81,42 @@ export function createNativeFleet(options: { installation: Installation; config:
     catch { const listed = await docker.command([kind,'ls', ...(kind === 'container' ? ['--all'] : []), '--filter', 'name=^'+name+'$', '--format', '{{.ID}}']); ensure(!listed.trim(), 'native_unknown', 'Owned resource inspection is uncertain'); return undefined; }
   }
   async function network(name: string, internal: boolean, create: boolean) {
-    let n = await inspect('network',name);
-    if (!n && create) { try { await docker.command(['network','create',...(internal ? ['--internal'] : []),'--driver','bridge','--label','sf.installation='+installation.id,name]); } catch {} n = await inspect('network',name); }
-    ensure(n?.Name === name && n.Internal === internal && n.Driver === 'bridge' && n.Labels?.['sf.installation'] === installation.id, 'native_network', 'Exact owned runtime network unavailable'); return n;
+    let n = await inspect('network',name);let intent:OutboxAction|undefined;
+    if (!n && create) {intent=beginNativeMutation(store,'network-create',name);await docker.command(['network','create',...(internal ? ['--internal'] : []),'--driver','bridge','--label','sf.installation='+installation.id,name]);n = await inspect('network',name);}
+    ensure(n?.Name === name && n.Internal === internal && n.Driver === 'bridge' && n.Labels?.['sf.installation'] === installation.id, 'native_network', 'Exact owned runtime network unavailable');
+    if(intent){const receipt=store.enqueueAction({key:'runtime:network-owner:'+name,kind:'runtime.network_owner',payload:{installationId:installation.id,name,networkId:n.Id}});store.completeAction(receipt.id);store.completeAction(intent.id)}return n;
   }
   async function container(input: { name: string; image: string; role: 'native' | 'worker' | 'proxy'; owner: string; network: string; mounts: { source: string; target: string; writable: boolean }[]; env: string[]; cwd: string; command: string[]; create: boolean; alias?: string }) {
     const image = JSON.parse(await docker.command(['image','inspect',input.image]))[0];
     ensure(imageMatches(input.image,image) && (!input.image.startsWith('sha256:') || image.Config?.Labels?.['sf.installation'] === installation.id && image.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && image.Config?.Labels?.['sf.role'] === input.role) && !image.Config.Entrypoint?.length && canonical(image.Config.Env ?? []) === canonical(input.env), 'native_image', 'Pinned image must declare exact minimal environment and no implicit entrypoint');
     const uid = process.platform==='win32'?1000:process.getuid!(); const gid = process.platform==='win32'?1000:process.getgid!(); ensure(uid > 0, 'native_user', 'Native runtimes require a nonroot installation');
-    let c = await inspect('container',input.name);
+    let c = await inspect('container',input.name);let createIntent:OutboxAction|undefined;let creation:OutboxAction|undefined;
     if (!c && input.create) {
-      const action = store.enqueueAction({ key: 'runtime:container:'+input.name, kind: 'runtime.container', payload: { name: input.name, image: input.image, owner: input.owner } });
-      try { await docker.command(['create','--name',input.name,'--pull','never','--platform','linux/amd64','--user',`${uid}:${gid}`,'--workdir',input.cwd,
+      createIntent=beginNativeMutation(store,'container-create',input.name);
+      const claim=store.claimAction({ key: 'runtime:container:'+input.name, kind: 'runtime.container', payload: { name: input.name, image: input.image, owner: input.owner } });ensure(claim.fresh,'native_unknown','Original container creation requires recovery');creation=claim.action;
+      await docker.command(['create','--name',input.name,'--pull','never','--platform','linux/amd64','--user',`${uid}:${gid}`,'--workdir',input.cwd,
         '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','256','--memory','2g','--cpus','2','--restart','no',
         '--tmpfs',`/tmp:rw,nosuid,nodev,noexec,uid=${uid},gid=${gid},mode=1777`,'--network',input.network,...(input.alias ? ['--network-alias',input.alias] : []),
         '--label','sf.installation='+installation.id,'--label','sf.runtime-owner='+input.owner,
-        ...input.mounts.flatMap(m => ['--mount',dockerBind(m.source,m.target,!m.writable)]),input.image,...input.command]); } catch {}
-      c = await inspect('container',input.name); if (c) store.completeAction(action.id);
+        ...input.mounts.flatMap(m => ['--mount',dockerBind(m.source,m.target,!m.writable)]),input.image,...input.command]);
+      c = await inspect('container',input.name);
     }
     ensure(c?.Image === image.Id && c.Config.Image === input.image && c.Config.Labels?.['sf.runtime-owner'] === input.owner && c.Config.User === `${uid}:${gid}`
       && c.Config.WorkingDir === input.cwd && canonical(c.Config.Env) === canonical(input.env) && canonical(c.Config.Cmd) === canonical(input.command)
-      && !c.Config.Entrypoint?.length && c.HostConfig.NetworkMode === input.network && c.HostConfig.ReadonlyRootfs && !c.HostConfig.Privileged
+      && !c.Config.Entrypoint?.length && c.HostConfig.NetworkMode === input.network && c.HostConfig.ReadonlyRootfs && !c.HostConfig.Privileged && c.HostConfig.RestartPolicy?.Name==='no' && c.HostConfig.AutoRemove===false
       && canonical(c.Mounts.map((m: any) => ({ source: m.Source,target: m.Destination,writable: m.RW }))) === canonical(input.mounts), 'native_container', 'Owned runtime configuration mismatch; do not adopt or replace');
-    if (!c.State.Running && input.create) { try { await docker.command(['start',c.Id]); } catch {} c = await inspect('container',input.name); }
+    if(createIntent&&creation){const receipt=store.enqueueAction({key:'runtime:container-owner:'+input.name,kind:'runtime.container_owner',payload:{installationId:installation.id,name:input.name,containerId:c.Id,owner:input.owner,image:input.image}});store.completeAction(receipt.id);store.completeAction(creation.id);store.completeAction(createIntent.id)}
+    if (!c.State.Running && input.create) {
+      const id=c.Id;const shape=canonical({Image:c.Image,Config:c.Config,HostConfig:c.HostConfig,Mounts:c.Mounts});const intent=beginNativeMutation(store,'container-start',id);
+      await docker.command(['start',id]);c=await inspect('container',input.name);
+      ensure(c?.Id===id&&c.State?.Running===true&&c.State.Paused===false&&c.State.Pid>0&&typeof c.State.StartedAt==='string'&&c.State.StartedAt&&canonical({Image:c.Image,Config:c.Config,HostConfig:c.HostConfig,Mounts:c.Mounts})===shape,'native_unknown','Native container start is not confirmed');
+      const receipt=store.enqueueAction({key:'runtime:container-generation:'+id+':'+c.State.StartedAt,kind:'runtime.container_generation',payload:{installationId:installation.id,containerId:id,startedAt:c.State.StartedAt,owner:input.owner}});store.completeAction(receipt.id);store.completeAction(intent.id);
+    }
     ensure(c, 'native_unknown', 'Native runtime is unavailable'); return c;
   }
   async function compose(start: NativeStart, create: boolean) {
     const t = supports(start.task); const ownerId = 'rt-'+fingerprint({ installation: installation.id, task: start.task.id }).slice(0,24);
-    const stateRoot = await privateDirectoryAsync(join(installation.root,'native-state'));
+    const stateRoot = join(installation.root,'native-state');if(create)await privateDirectoryAsync(stateRoot);
     const parent = join(stateRoot,ownerId); const data = join(parent,'data'); const markerPath = join(parent,'owner.json');
     const marker = { schemaVersion: 1, installationId: installation.id, runtimeOwnerId: ownerId, taskId: start.task.id, source: data };
     if (create) {
@@ -114,6 +126,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     }
     ensure(canonical(JSON.parse((await readPrivateFileAsync(markerPath)).toString())) === canonical(marker), 'native_state', 'Original native state marker changed');
     const nativeState: NativeStateMount = { installationId: installation.id, runtimeOwnerId: ownerId, taskId: start.task.id, source: data, target: NATIVE_STATE_TARGET, markerPath };
+    await verifyNativeStateMount(nativeState,start.task.id,{installationId:installation.id,root:stateRoot});
     const internal = await network(ownerId+'-internal',true,create); const egress = await network(ownerId+'-model-egress',false,create);
     const targets = [{ source: start.workspacePath, target:'/workspaces/task' }]; const mounts = await resolveNativeMounts(start,targets);
     const native = await container({ name:ownerId+'-native', image:t.nativeImage, role:'native', owner:ownerId, network:internal.Name, mounts:[{source:data,target:NATIVE_STATE_TARGET,writable:true}], env:nativeEnv, cwd:'/workspaces/task', command:['node','-e','setInterval(()=>{},1000)'], create });
@@ -123,22 +136,26 @@ export function createNativeFleet(options: { installation: Installation; config:
     ensure(t.proxy.entrypointSha256 === proxySourceHash, 'native_proxy', 'Proxy entrypoint does not match the reviewed installed source');
     const policyPath = join(parent,'proxy.json');
     const policyKey = 'runtime:proxy-policy:' + ownerId;
-    let policyIntent = store.getActionByKey(policyKey);
+    let policyIntent = store.getActionByKey(policyKey);let createdPolicy=false;
     if (create && !existsSync(policyPath)) {
       ensure(!policyIntent, 'native_proxy', 'Missing original proxy policy; inspect retained provisioning');
       const identity = await createProxyPlaceholderAsync(policyPath);
       policyIntent = store.enqueueAction({key:policyKey,kind:'runtime.proxy-policy',payload:{path:policyPath,...identity}});
+      createdPolicy=true;
     }
     ensure(policyIntent && policyIntent.kind === 'runtime.proxy-policy' && policyIntent.payload.path === policyPath, 'native_proxy', 'Missing owned proxy policy intent');
+    ensure(policyIntent.completedAt||createdPolicy,'native_proxy','Original proxy policy write is unresolved');
     const policyFile = statSync(policyPath);
     ensure(policyIntent.payload.dev === policyFile.dev && policyIntent.payload.ino === policyFile.ino, 'native_proxy', 'Proxy policy inode changed');
     const proxy = await container({ name:ownerId+'-proxy', image:t.proxy.image, role:'proxy', owner:ownerId, network:internal.Name, mounts:[{source:policyPath,target:'/etc/software-factory/proxy.json',writable:false}], env:workerEnv, cwd:'/', command:['node',t.proxy.entrypoint,'/etc/software-factory/proxy.json'], alias:'sf-model-proxy', create });
-    if (!proxy.NetworkSettings.Networks[egress.Name] && create) { try { await docker.command(['network','connect',egress.Name,proxy.Id]); } catch {} }
+    let connectionIntent:OutboxAction|undefined;
+    if (!proxy.NetworkSettings.Networks[egress.Name] && create) {connectionIntent=beginNativeMutation(store,'network-connect',proxy.Id);await docker.command(['network','connect',egress.Name,proxy.Id]);}
     const currentProxy = await inspect('container',proxy.Id);
     const currentNative = await inspect('container',native.Id);
     const currentInternal = await inspect('network',internal.Id);
     const currentEgress = await inspect('network',egress.Id);
     const addresses = proxyTopology(currentInternal,currentEgress,currentNative,currentProxy);
+    if(connectionIntent){const receipt=store.enqueueAction({key:'runtime:network-connection:'+ownerId,kind:'runtime.network_connection',payload:{installationId:installation.id,owner:ownerId,containerId:proxy.Id,networkId:egress.Id}});store.completeAction(receipt.id);store.completeAction(connectionIntent.id)}
     const policy: ModelProxyPolicy = { schemaVersion:2,kind:'copilot-model-connect',listenPort:3128,nativeRuntimeId:native.Id,internalNetworkId:internal.Id,...addresses,allowedAuthorities:t.proxy.allowedAuthorities };
     if (create) await finalizeProxyPolicyAsync(policyPath, policy);
     else ensure(canonical(JSON.parse((await readPrivateFileAsync(policyPath)).toString())) === canonical(policy), 'native_proxy', 'Original model proxy policy changed');
@@ -163,7 +180,7 @@ export function createNativeFleet(options: { installation: Installation; config:
       return {runtimeId:proxy.Id,processIdentity:fingerprint({pid:current.State.Pid,started:current.State.StartedAt}),image:t.proxy.image,policySha256:fingerprint(policy),nativeRuntimeId:native.Id,internalNetworkId:internal.Id,egressNetworkId:egress.Id};
     } };
     const gate = createFactoryToolGate({store,broker});
-    const launcher = createManagedVsCodeLauncher({ containerId:native.Id,runtimeOwnerId:ownerId,image:t.nativeImage,entrypoint:t.entrypoint,entrypointSha256:t.entrypointSha256,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot},userDataDir:NATIVE_STATE_TARGET+'/user-data',tokenFile:NATIVE_STATE_TARGET+'/connection-token',port:4317,docker,...(docker instanceof ProcessDocker?{dockerExecutable:docker.executable}:{}) });
+    const launcher = createManagedVsCodeLauncher({ containerId:native.Id,runtimeOwnerId:ownerId,image:t.nativeImage,entrypoint:t.entrypoint,entrypointSha256:t.entrypointSha256,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot},userDataDir:NATIVE_STATE_TARGET+'/user-data',tokenFile:NATIVE_STATE_TARGET+'/connection-token',port:4317,docker,async recordGeneration(containerId,startedAt){const receipt=store.enqueueAction({key:'runtime:container-generation:'+containerId+':'+startedAt,kind:'runtime.container_generation',payload:{installationId:installation.id,containerId,startedAt,owner:ownerId}});store.completeAction(receipt.id)},...(docker instanceof ProcessDocker?{dockerExecutable:docker.executable}:{}) });
     const worker = new IsolatedToolWorker({ config:{containerId:workerContainer.Id,image:t.workerImage,runtimeOwnerId:ownerId,nativeContainerId:native.Id,mountTargets:targets},docker,store,gate });
     let boundary!: ReturnType<typeof createIsolatedNativeBoundary>; let verify!: ReturnType<typeof createProfileVerifier>;
     let desktop:Awaited<ReturnType<typeof createDesktopNavigation>>|undefined;
@@ -191,7 +208,7 @@ export function createNativeFleet(options: { installation: Installation; config:
   type Member = Awaited<ReturnType<typeof compose>>;
   function member(start: NativeStart, create = false): Promise<Member> {
     let value = members.get(start.task.id);
-    if (!value) { value = compose(start,create); members.set(start.task.id,value); void value.catch(()=>members.delete(start.task.id)); }
+    if (!value) { value = compose(start,create).then(member=>{if(options.maintenance?.())member.owner.forbidMaintenanceStart();return member}); members.set(start.task.id,value); void value.catch(()=>members.delete(start.task.id)); }
     return value;
   }
   const startFor = (attempt: Attempt): NativeStart => ({idempotencyKey:`native:${attempt.id}`,attemptId:attempt.id,task:store.getTask(attempt.taskId)!.spec,workspacePath:attempt.workspacePath,baseSha:attempt.baseSha,fence:attempt.fence,profileId:attempt.profileId});
@@ -208,13 +225,31 @@ export function createNativeFleet(options: { installation: Installation; config:
     ensureSession:async start=>(await member(start)).owner.ensureSession(start),
     snapshot:async identity=>(await member(startFor(find(identity)))).owner.snapshot(identity),
     send:async(identity,input,key)=>(await member(startFor(find(identity)))).owner.send(identity,input,key),
-    quiesce:async identity=>{const m=await member(startFor(find(identity)));m.gate.suspend();let closed=true;try{await m.closeDesktop();await m.reconcileHumanEffects(identity)}catch{closed=false}const [native,worker]=await Promise.all([m.owner.quiesce(identity),m.worker.pause()]);try{m.assertNoHumanEffect()}catch{closed=false}return !closed||native==='unknown'||worker==='unknown'?'unknown':native},
+    quiesce:async identity=>{
+      const unresolved=()=>store.pendingActions().some(a=>['runtime.native_mutation','runtime.container','worker.execute','worker.pause','worker.resume','worker.maintenance_stop','human.relay','lifecycle.human_open'].includes(a.kind));
+      if(unresolved())return 'unknown';
+      let m:Member;
+      if(options.maintenance?.()){
+        try {
+          const matches=store.getReservations().filter(r=>canonical(r.attempt.native)===canonical(identity));const tasks=[...new Set(matches.map(r=>r.attempt.taskId))];ensure(tasks.length===1,'native_identity','Original native identity is ambiguous');const attempt=matches.at(-1)!.attempt;
+          ensure(matches.every(r=>r.attempt.workspacePath===attempt.workspacePath&&r.attempt.baseSha===attempt.baseSha),'native_identity','Original native workspace changed');
+          const t=supports(store.getTask(attempt.taskId)!.spec);const items=await inspectNativeInventory({id:installation.id,root:installation.root,docker,store,images:{native:t.nativeImage,worker:t.workerImage,proxy:t.proxy.image}});const item=items.find(value=>value.taskId===attempt.taskId);ensure(item,'native_identity','Original native runtime unavailable');
+          const native=item.containers.find(c=>c.role==='native')!,worker=item.containers.find(c=>c.role==='worker')!;
+          const receipt=await inspectRecordedOwnerReceipt({directory:join(installation.root,'native-state',item.ownerId),identity,taskId:attempt.taskId,workspacePath:attempt.workspacePath,baseSha:attempt.baseSha,container:native,entrypoint:t.entrypoint});
+          const workerReceipt=worker.startedAt?store.getActionByKey((worker.frozen?'worker:pause:':'worker:maintenance-stop:')+worker.id+':'+worker.startedAt):undefined;
+          if(receipt!=='unknown'&&workerReceipt?.completedAt&&((worker.frozen&&workerReceipt.kind==='worker.pause')||(worker.stopped&&workerReceipt.kind==='worker.maintenance_stop'))&&!unresolved())return receipt;
+          const existing=members.get(attempt.taskId);if(!existing)return 'unknown';m=await existing;m.owner.forbidMaintenanceStart();m.worker.closeAdmission();
+        }catch{return 'unknown'}
+      } else {m=await member(startFor(find(identity)));m.gate.suspend()}
+      let closed=true;try{await m.closeDesktop();await m.reconcileHumanEffects(identity,!!options.maintenance?.())}catch{closed=false}
+      const [native,worker]=await Promise.all([m.owner.quiesce(identity),options.maintenance?.()?m.worker.quiesceForMaintenance():m.worker.pause()]);try{m.assertNoHumanEffect()}catch{closed=false}return !closed||unresolved()||native==='unknown'||worker==='unknown'?'unknown':native;
+    },
     open:async identity=>(await member(startFor(find(identity)))).owner.open(identity),
     subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener)},
   };
   return { owner:fleetOwner,provisionability,templateReadiness,startFor,member,
     /** Fence human tools and drain existing desktop relays; does not claim physical stop. */
-    async closeHumanAdmissions(){await Promise.all([...members.values()].map(async pending=>{const m=await pending;m.worker.closeAdmission();await m.closeDesktop()}))},
+    async closeHumanAdmissions(){await Promise.all([...members.values()].map(async pending=>{const m=await pending;m.owner.forbidMaintenanceStart();m.worker.closeAdmission();await m.closeDesktop()}))},
     /** Only already-connected members may reconcile the original human history. */
     async reconcileConnectedHumanEffects(){
       const pending=store.pendingActions().filter(a=>a.kind==='human.relay');

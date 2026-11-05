@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
   "version": "0.1.0",
-  "sourceCommit": "2efa3b7a322ecbb310310df03bf3d6eca7f908b6",
+  "sourceCommit": "bcdfa39d80cd3c152330cc61ccbcfdaeb384b26e",
   "sourceFiles": {
+    ".gitattributes": "f38bc934f69ae9f0a9f7e6c38eca045251c05a5190535d520b0f6b0d78f7b480",
     "bin/ai4devops-sf.mjs": "3296bc9cb53d3f95160f05c7f0f16229da66cdb7bca9e992fd988c28d6f7caa3",
     "package-lock.json": "39898c9b2f34baf1c7abb82dadedf6a693ad53310efbce9c385e4e542ca4b83e",
     "package.json": "469fb676f1aaee98b2aa73ac0ceebf30bd09d6b74c92fafb7eceb77d0b42cdc8",
@@ -18,7 +19,7 @@
     "release/dashboard/factory-ui.js": "9effc28cb51a5f7f7881ee76092122af85d35a609187fa4a899a556c1a05c6ac",
     "release/dashboard/index.html": "886ecb96c486abf2a268b2fe7eb0c92aea91cb8b24f9ed971646d62416cd11d8",
     "release/dashboard/openapi.json": "5d2050ba7be3f116e8a95488fb9b2cab31fe5e0a361bb7884cc3fb66bc31f6d9",
-    "release/dashboard/provenance.json": "bcab57108f6edc545be791cac308e2d36f1a9f8a97d528661254610ba81867fa",
+    "release/dashboard/provenance.json": "ba7f28386be2623d34534dec85b8b087df32053b887717ad850836934cb299aa",
     "release/dashboard/standalone.js": "d6758dd74b2b94e67635a56a6b3a64cc077f86ba5fced0f735a987dbf82d384d",
     "release/images.json": "cf5ccd669e194983ffe94225af8b5226e26e301dbfbaffff8a4ece67cad8635b",
     "runtime/kestra/application.yaml": "1f067ccac1bf523480868dc96c027143404ad7c7a219a7ab6c9a664c2bc5b89c",
@@ -40,7 +41,7 @@
     "scripts/package.ts": "bd01f0fadc1bcfb15979db7b972f470065c86fb6cb085320dec16b262689737d",
     "scripts/probe-bb.ts": "951ae7a33038f9507b51bad64b56877d6e9556f0ff6b76384f33557735dc6256",
     "scripts/probe-vscode.ts": "2ab4afdc13d3f9c373a46074529ead3502263e096b0faac9795dfa90822826cd",
-    "scripts/release-provenance.ts": "f68ba37a0a79c246e99cdd05410c40ff2cec52bb8a427633706778a22baf00f0",
+    "scripts/release-provenance.ts": "1fc29adf9fc491eb0540a2da8b282b62957145736493aa96312edabdceee1f73",
     "scripts/verify-install.ts": "8baf95e11064e84e2bfc49e79098eba98b8392a99ada42b57fe2c038ccd877e2",
     "scripts/verify-package.ts": "69b07cf1e6343018c557dcb6bc5e55e375eb87aa1e6f7c7b505e6f6cd83953fa",
     "scripts/vscode-native-pipe-helper.mjs": "3e3d1e0f2390c610693bc72be99d3da756abf0020bd7d30cf7a8c173e0a40501",
@@ -319,7 +320,7 @@
     "dist/runtime/dashboard/factory-ui.js": "9effc28cb51a5f7f7881ee76092122af85d35a609187fa4a899a556c1a05c6ac",
     "dist/runtime/dashboard/index.html": "886ecb96c486abf2a268b2fe7eb0c92aea91cb8b24f9ed971646d62416cd11d8",
     "dist/runtime/dashboard/openapi.json": "5d2050ba7be3f116e8a95488fb9b2cab31fe5e0a361bb7884cc3fb66bc31f6d9",
-    "dist/runtime/dashboard/provenance.json": "bcab57108f6edc545be791cac308e2d36f1a9f8a97d528661254610ba81867fa",
+    "dist/runtime/dashboard/provenance.json": "ba7f28386be2623d34534dec85b8b087df32053b887717ad850836934cb299aa",
     "dist/runtime/dashboard/standalone.js": "d6758dd74b2b94e67635a56a6b3a64cc077f86ba5fced0f735a987dbf82d384d",
     "dist/runtime/kestra/application.yaml": "1f067ccac1bf523480868dc96c027143404ad7c7a219a7ab6c9a664c2bc5b89c",
     "dist/runtime/kestra/compose.yaml": "c2fae1bb0bf27e762570d3b3a244743c7cdef66ec22b4f90fff5d00c541eca50",
@@ -2661,5 +2662,5 @@
     "node_modules/yaml/util.js": "2f1db26f6cc426ef698210b592f40cec49be1b6c4b34e7f2d61904786242bd85",
     "release/runtime-lock.json": "39898c9b2f34baf1c7abb82dadedf6a693ad53310efbce9c385e4e542ca4b83e"
   },
-  "releaseDigest": "494496f8f66a2dc5c6a0c679071c27804fb3e905f135e1ef6d419bfaa1f075f4"
+  "releaseDigest": "306639a95f2e3758cc1bbcd820df9e74c1e76fa74f4df9a3fe5c934df2dd5d7f"
 }

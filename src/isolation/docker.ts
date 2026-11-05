@@ -2,6 +2,7 @@ import type { NativeStart } from '../contracts/domain.ts';
 import type { DockerPort } from '../kestra/deployment.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
 import type { EffectiveBoundary, NativeBoundary } from './profiles.ts';
+import { resolveProtectedPaths } from './paths.ts';
 import { denialChecks } from './profiles.ts';
 export type NativeToolSettings = Pick<EffectiveBoundary,'runtimeId'|'processIdentity'|'ownerId'|'providerId'|'tools'|'credentialRefs'|'networkDestinations'|'unapprovedToolsDenied'|'alternateEgressDenied'|'metadataProtected'> & { attemptId: string; fence: number };
 export interface NativeToolBoundary {
@@ -13,8 +14,8 @@ export interface NativeToolBoundary {
   prepareBinding(start: NativeStart, key: string): Promise<void>;
   /** E4 must inspect the actual paired owner/client tools; declarations and Docker flags alone are insufficient. */
   inspect(start: NativeStart): Promise<NativeToolSettings>;
-  /** Fixed denial requests through the actual native tool path; no arbitrary commands from workers. */
-  challenge(start: NativeStart, nonce: string): Promise<{ nonce: string; runtimeId: string; processIdentity: string; denied: boolean; checks: readonly string[] }>;
+  /** Fixed denial requests through the actual native tool path; probe the full declared/resolved protectedPaths set. No worker commands. */
+  challenge(start: NativeStart, nonce: string, protectedPaths: readonly string[]): Promise<{ nonce: string; runtimeId: string; processIdentity: string; denied: boolean; checks: readonly string[] }>;
 }
 const canary = `let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',v=>s+=v);process.stdin.on('end',()=>{try{const fs=require('node:fs'),p=JSON.parse(s);let denied=true;for(const path of p.paths){try{const fd=fs.openSync(path,'r');fs.closeSync(fd);denied=false;}catch(e){if(!['ENOENT','ENOTDIR','EACCES','EPERM','ENXIO'].includes(e.code))throw e;}try{fs.accessSync(path,fs.constants.W_OK);denied=false;}catch(e){if(!['ENOENT','ENOTDIR','EACCES','EPERM','EROFS'].includes(e.code))throw e;}}process.stdout.write(JSON.stringify({nonce:p.nonce,denied}));}catch{process.exitCode=1;}});`;
 /** Production effective Docker adapter, composed with E4's mandatory actual native-tool enforcement adapter. */
@@ -45,12 +46,14 @@ export function createDockerNativeBoundary(options: { docker: DockerPort; contai
     return { ...tools, processIdentity: fingerprint({ native:tools.processIdentity,pid:c.State.Pid,started:c.State.StartedAt }), image:options.image,
       mounts:c.Mounts.map((m:any)=>({source:m.Source,target:m.Destination,writable:m.RW})),networks,protectedPaths:[...options.protectedPaths] };
   }
-  return { inspect, async challenge(start,nonce) {
+  return { inspect, async challenge(start,nonce,protectedPaths) {
+    const targets = await resolveProtectedPaths(options.protectedPaths);
+    ensure(canonical(protectedPaths) === canonical(targets), 'profile_protection', 'Protected canary targets changed or are incomplete');
     const before = await inspect(start);
-    const os = JSON.parse(await docker.command(['exec','-i',options.containerId,'node','-e',canary],{stdin:JSON.stringify({nonce,paths:options.protectedPaths})}));
-    const native = await options.tools.challenge(start,nonce); const actualTools = await options.tools.inspect(start);
-    const after = await inspect(start);
-    ensure(os.nonce === nonce && os.denied === true && native.nonce === nonce && native.denied
+    const os = JSON.parse(await docker.command(['exec','-i',options.containerId,'node','-e',canary],{stdin:JSON.stringify({nonce,paths:targets})}));
+    const native = await options.tools.challenge(start,nonce,targets); const actualTools = await options.tools.inspect(start);
+    const after = await inspect(start); const afterTargets = await resolveProtectedPaths(options.protectedPaths);
+    ensure(canonical(targets) === canonical(afterTargets) && os.nonce === nonce && os.denied === true && native.nonce === nonce && native.denied
       && native.runtimeId === before.runtimeId && native.processIdentity === actualTools.processIdentity
       && denialChecks.every(name=>native.checks.includes(name)) && canonical(before) === canonical(after), 'profile_canary','Actual native/tool or OS denial checks failed');
     return { nonce, runtimeId:before.runtimeId, processIdentity:before.processIdentity, denied:true, checks:denialChecks };

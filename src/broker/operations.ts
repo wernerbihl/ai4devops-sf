@@ -45,22 +45,48 @@ export function createAttemptBroker(deps: AttemptBrokerDeps) {
     validateContract('WorkerRequest', request);
     const scope = store.broker.transaction(() => authorize(token, request));
     if (request.operation === 'native.start' || request.operation === 'native.continue') {
-      ensure(deps.native && deps.profiles, 'native_unsupported', 'Native owner and effective profile verifier are required');
       const start = nativeStart(scope.attemptId, request.idempotencyKey);
       if (request.operation === 'native.start') ensure(canonical(request.payload) === canonical(start), 'native_authority', 'Native start must match server reservation');
       else {
         const r = authority.current(scope.attemptId);
         ensure(r.attempt.native && canonical(r.attempt.native) === canonical(request.payload.identity), 'native_authority', 'Continuation must retain actual native identity');
       }
-      // Reinspect effective runtime/tools before every dispatch or reconciliation; no cached readiness.
-      await deps.profiles.requireVerifiedProfile(start);
-      const claim = store.broker.transaction(() => {
+      const intent = { attemptId: scope.attemptId, fence: scope.fence, key: request.idempotencyKey, payload: request };
+      const validateIdentity = (identity: NativeIdentity) => {
+        validateContract('NativeIdentity', identity);
+        const bound = authority.current(scope.attemptId).attempt.native;
+        ensure(identity.ownerId === start.task.ownerId && identity.providerId === start.task.providerId
+          && (!bound || canonical(bound) === canonical(identity)), 'native_authority', 'Native completion differs from the actual bound session');
+      };
+      const existingClaim = (): NativeWrite | undefined => {
         authorize(token, request);
+        if (!store.broker.write(scope.attemptId, scope.fence)) return;
+        const write = store.broker.claim(intent).write; // Exact operation/key/body match, no new effect.
+        if (write.result) {
+          ensure(write.result.ok && write.result.requestId === request.requestId, 'native_authority', 'Invalid native receipt');
+          if (request.operation === 'native.start' || write.result.result !== null) validateIdentity(validateContract('NativeIdentity', write.result.result));
+        }
+        return write;
+      };
+      // A receipt read is not a new native write and does not require fresh-start/quiescence eligibility.
+      const existing = store.broker.transaction(existingClaim);
+      if (existing?.result) return existing.result;
+      ensure(deps.native, 'native_unsupported', 'A trusted native operation/reconciliation port is required');
+      let verifiedForDispatch = false;
+      if (!existing) {
+        ensure(deps.profiles, 'native_unsupported', 'An effective profile verifier is required before native dispatch');
+        await deps.profiles.requireVerifiedProfile(start); verifiedForDispatch = true;
+      }
+      // Existing unknown outcomes only use read-only reconciliation, even if the runtime has gone away.
+      const claim = store.broker.transaction(() => {
+        const prior = existingClaim(); // Reauthorize and re-read after asynchronous profile work.
+        if (prior) return { fresh: false, write: prior };
+        ensure(verifiedForDispatch, 'native_unsupported', 'No new dispatch may follow a reconciliation-only lookup');
         const record = store.getLifecycle(scope.attemptId);
         ensure(!record.state.stopRequested && !record.state.closeout, 'native_stopped', 'Attempt stopped or closeout started');
         if (request.operation === 'native.start') ensure(!record.reservation.attempt.native && !record.reservation.attempt.retryOfAttemptId, 'second_native_writer', 'Started native sessions cannot be replaced');
         else ensure(record.state.quiescent && !record.state.effect, 'second_native_writer', 'Continuation requires C4 quiescence and a fresh fence');
-        return store.broker.claim({ attemptId: scope.attemptId, fence: scope.fence, key: request.idempotencyKey, payload: request });
+        return store.broker.claim(intent);
       });
       if (claim.write.result) return claim.write.result;
       let identity: NativeIdentity | undefined;
@@ -71,12 +97,13 @@ export function createAttemptBroker(deps: AttemptBrokerDeps) {
           identity = recovered.identity;
         } else if (request.operation === 'native.start') identity = await deps.native.start(start);
         else await deps.native.continue(scope.attemptId, request.payload.input, request.idempotencyKey);
-        if (request.operation === 'native.start') {
-          validateContract('NativeIdentity', identity);
-          ensure(identity?.ownerId === start.task.ownerId && identity.providerId === start.task.providerId, 'native_authority', 'Owner returned a different execution authority');
-        }
-        const response: WorkerResponse = { requestId: request.requestId, ok: true, result: identity ?? null };
-        store.broker.transaction(() => { authorize(token, request); store.broker.settle(scope.attemptId, scope.fence, request.idempotencyKey, response); });
+        const response: WorkerResponse = { requestId: request.requestId, ok: true, result: request.operation === 'native.start' ? identity! : null };
+        store.broker.transaction(() => {
+          authorize(token, request);
+          if (request.operation === 'native.start') validateIdentity(validateContract('NativeIdentity', identity));
+          else if (identity) validateIdentity(identity);
+          store.broker.settle(scope.attemptId, scope.fence, request.idempotencyKey, response);
+        });
         return response;
       } catch (error) {
         store.broker.transaction(() => { if (store.broker.write(scope.attemptId, scope.fence)?.state !== 'done') store.broker.settle(scope.attemptId, scope.fence, request.idempotencyKey); });

@@ -9,8 +9,9 @@ export interface EffectiveBoundary {
 export interface NativeBoundary {
   /** Inspect the actual native process AND client-tool policy; never read worker assertions. */
   inspect(start: NativeStart): Promise<EffectiveBoundary>;
-  /** Execute fixed harmless canaries through the same native/client-tool boundary, not a sibling shell. */
-  challenge(start: NativeStart, nonce: string): Promise<{ nonce: string; runtimeId: string; processIdentity: string; denied: boolean; checks: readonly string[] }>;
+  /** Execute fixed harmless canaries through the same native/client-tool boundary, not a sibling shell.
+   * Probe every provided declared AND resolved protected target; do not substitute declared paths only. */
+  challenge(start: NativeStart, nonce: string, protectedPaths: readonly string[]): Promise<{ nonce: string; runtimeId: string; processIdentity: string; denied: boolean; checks: readonly string[] }>;
 }
 export interface RuntimeProfile {
   id: string; ownerId: string; providerId: ProviderId; image: string; networks: string[]; protectedPaths: string[]; boundary: NativeBoundary;

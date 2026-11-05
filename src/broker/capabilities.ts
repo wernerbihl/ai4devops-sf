@@ -13,6 +13,8 @@ export function createCapabilityAuthority(deps: CapabilityDeps) {
   ensure(secret.length >= 32 && Number.isSafeInteger(ttl) && ttl > 0 && ttl <= 1_800_000, 'invalid_signing_config', 'Protected signing key and bounded lifetime required');
   const sign = (id: Buffer) => createHmac('sha256', secret).update('sf-attempt-v1\0').update(id).digest();
   function current(attemptId: string) {
+    return store.broker.transaction(() => {
+    ensure(!store.broker.isRevoked(attemptId), 'attempt_revoked', 'Attempt authority has been permanently revoked');
     const r = store.getLifecycle(attemptId).reservation; const state = store.getAdmissionState(); const task = store.getTask(r.attempt.taskId);
     ensure(r.status !== 'released' && r.lease.active && r.lease.fence === r.attempt.fence
       && task?.attemptIds.at(-1) === attemptId && task.controlMode === 'factory' && !task.archivedAt
@@ -24,6 +26,7 @@ export function createCapabilityAuthority(deps: CapabilityDeps) {
     ensure(revision && state.recipeReadiness.some(v => v.recipeId === revision.recipeId && v.recipeRevision === revision.revision && v.hash === revision.hash && v.ready)
       && state.recipes.some(v => v.id === revision.recipeId && v.active) && state.tags.some(v => v.id === task.spec.tagId && !v.archivedAt), 'recipe_blocked', 'Pinned recipe readiness required');
     return r;
+    });
   }
   function issueAttemptCapability(attemptId: string, grantIds: string[], allowed: readonly Operation[] = operations): CapabilityToken {
     return store.broker.transaction(() => {

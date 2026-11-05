@@ -63,3 +63,47 @@ test('protected_paths_with_dot_prefix_cannot_hide_inside_writable_mounts', async
     await assert.rejects(createProfileVerifier({profiles:[profile]}).requireVerifiedProfile({idempotencyKey:'key',attemptId:'attempt',task,workspacePath:root,baseSha:'sha',fence:1,profileId:'profile'}));
   }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('I3_protected_root_parent_and_absent_child_aliases_cannot_expose_writable_workspace', async () => {
+  const { createProfileVerifier } = await implementation();
+  for (const kind of ['root', 'parent', 'absent-child', 'dangling'] as const) {
+    const root = await mkdtemp(join(tmpdir(), 'sf-protected-alias-')); const workspace = join(root, 'workspace'); await mkdir(workspace);
+    try {
+      const credentials = join(workspace, 'credentials'); await mkdir(credentials);
+      const alias = join(root, 'host-auth');
+      await symlink(kind === 'root' ? credentials : kind === 'dangling' ? join(root, 'missing') : workspace, alias);
+      const protectedPath = kind === 'root' || kind === 'dangling' ? alias : join(alias, kind === 'parent' ? 'credentials' : 'future-credentials');
+      const recipe = recipeFixture('tag'); const task = materializeFixture({ id:'task',repository:{id:'repo-1'} as any,recipe,request:{title:'Test',description:'Test'} as any,defaults:{ownerId:'vscode',providerId:'copilot',finishPolicy:'result'},source:'manual' });
+      const protectedPaths = [protectedPath, '/factory.sqlite', '/var/run/docker.sock'];
+      const value: EffectiveBoundary = {runtimeId:'runtime',processIdentity:'process',ownerId:'vscode',providerId:'copilot',image:'image',mounts:[{source:workspace,target:workspace,writable:true}],networks:['private'],tools:[],credentialRefs:[],networkDestinations:[],protectedPaths,unapprovedToolsDenied:true,alternateEgressDenied:true,metadataProtected:true};
+      const profile: RuntimeProfile = {id:'profile',ownerId:'vscode',providerId:'copilot',image:'image',networks:['private'],protectedPaths,boundary:{inspect:async()=>value,challenge:async(_s,nonce)=>({nonce,runtimeId:'runtime',processIdentity:'process',denied:true,checks:['docker-socket','factory-store','host-credentials','metadata-write','alternate-egress','external-tool']})}};
+      await assert.rejects(createProfileVerifier({profiles:[profile]}).requireVerifiedProfile({idempotencyKey:'key',attemptId:'attempt',task,workspacePath:workspace,baseSha:'sha',fence:1,profileId:'profile'}), kind);
+    } finally { await rm(root, {recursive:true,force:true}); }
+  }
+});
+
+test('I3_declared_and_resolved_absent_protection_targets_reach_both_canary_boundaries', async () => {
+  const { createProfileVerifier } = await implementation(); const { createDockerNativeBoundary } = await import('../../src/isolation/docker.ts');
+  const root = await mkdtemp(join(tmpdir(), 'sf-canary-alias-')); const workspace = join(root,'workspace'); const secrets = join(root,'secrets');
+  await mkdir(workspace); await mkdir(secrets); const alias = join(root,'auth-alias'); await symlink(secrets,alias);
+  const declared = join(alias,'future-token'); const effective = join(secrets,'future-token');
+  try {
+    const recipe=recipeFixture('tag'); const task=materializeFixture({id:'task',repository:{id:'repo-1'} as any,recipe,request:{title:'Test',description:'Test'} as any,defaults:{ownerId:'vscode',providerId:'copilot',finishPolicy:'result'},source:'manual'});
+    const start={idempotencyKey:'key',attemptId:'attempt',task,workspacePath:workspace,baseSha:'sha',fence:1,profileId:'profile'};
+    const protectedPaths=[declared,join(root,'db'),join(root,'socket')];
+    let osPaths: string[]=[]; let toolPaths: readonly string[]=[];
+    const docker={command:async(args:string[],options?:{stdin?:string})=>{
+      if(args[0]==='image')return JSON.stringify([{Id:'image-id',RepoDigests:['image']}]);
+      if(args[0]==='container')return JSON.stringify([{Id:'container',Image:'image-id',State:{Running:true,Pid:123,StartedAt:'now'},Config:{User:'1000:1000',Labels:{'sf.runtime-owner':'owner'}},HostConfig:{ReadonlyRootfs:true,CapDrop:['ALL'],SecurityOpt:['no-new-privileges'],NetworkMode:'private',PidsLimit:64,Memory:256000000,NanoCpus:1000000000},Mounts:[{Type:'bind',Source:workspace,Destination:workspace,RW:true}],NetworkSettings:{Networks:{private:{NetworkID:'private'}}}}]);
+      if(args[0]==='network')return JSON.stringify([{Id:'private',Internal:true,Driver:'bridge'}]);
+      if(args[0]==='exec'){const input=JSON.parse(options!.stdin!);osPaths=input.paths;return JSON.stringify({nonce:input.nonce,denied:true});}
+      throw Error('Unexpected command');
+    }};
+    const checks=['docker-socket','factory-store','host-credentials','metadata-write','alternate-egress','external-tool'];
+    const tools={prepareBinding:async()=>{},inspect:async()=>({attemptId:'attempt',fence:1,runtimeId:'container',processIdentity:'native',ownerId:'vscode',providerId:'copilot' as const,tools:[],credentialRefs:[],networkDestinations:[],unapprovedToolsDenied:true,alternateEgressDenied:true,metadataProtected:true}),challenge:async(_start:unknown,nonce:string,paths:readonly string[]=[])=>{toolPaths=paths;return {nonce,runtimeId:'container',processIdentity:'native',denied:true,checks};}};
+    const boundary=createDockerNativeBoundary({docker,containerId:'container',runtimeOwnerId:'owner',image:'image',networks:['private'],protectedPaths,tools});
+    await createProfileVerifier({profiles:[{id:'profile',ownerId:'vscode',providerId:'copilot',image:'image',networks:['private'],protectedPaths,boundary}]}).requireVerifiedProfile(start);
+    assert.ok(osPaths.includes(declared) && osPaths.includes(effective), 'OS canaries must include the alias spelling and effective target');
+    assert.deepEqual(toolPaths,osPaths,'Actual native/tool canaries must cover the identical effective path set');
+  }finally{await rm(root,{recursive:true,force:true});}
+});

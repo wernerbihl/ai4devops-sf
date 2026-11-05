@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { NativeStart, ProfileEvidence } from '../contracts/domain.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
+import { resolveProtectedPaths } from './paths.ts';
 import { builtinProfiles, denialChecks } from './profiles.ts';
 import type { EffectiveBoundary, RuntimeProfile } from './profiles.ts';
 export function createProfileVerifier(options: { profiles?: readonly RuntimeProfile[]; now?: () => Date } = {}) {
@@ -22,26 +23,28 @@ export function createProfileVerifier(options: { profiles?: readonly RuntimeProf
       for (const key of ['tools','credentialRefs','networkDestinations'] as const)
         ensure(canonical([...value[key]].sort()) === canonical([...required[key]].sort()), 'profile_authority', `Effective ${key} exceed or omit approved authority`);
       ensure(profile.protectedPaths.length >= 3 && profile.protectedPaths.every(p => isAbsolute(p) && resolve(p) === p) && canonical([...value.protectedPaths].sort()) === canonical([...profile.protectedPaths].sort()), 'profile_protection', 'Host credentials, factory state and Docker access require explicit protection');
+      const protectedTargets = await resolveProtectedPaths(profile.protectedPaths);
       const expected = [{ source: start.workspacePath, target: start.workspacePath, writable: true }, ...required.paths.map(p => ({ source: p.root, target: p.root, writable: p.mode === 'write' }))];
       ensure(canonical(value.mounts) === canonical(expected), 'profile_mount', 'Effective mounts differ from approved paths');
       for (const mount of value.mounts) {
         ensure(isAbsolute(mount.source) && resolve(mount.source) === mount.source && await realpath(mount.source) === mount.source, 'profile_path', 'Mount source escapes through an alias');
-        for (const protectedPath of profile.protectedPaths) {
+        for (const protectedPath of protectedTargets) {
           const rel = relative(mount.source, protectedPath);
           ensure(rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel), 'profile_path', 'A mount exposes protected host state');
         }
       }
+      return protectedTargets;
     };
-    const before = await profile.boundary.inspect(start); await verify(before);
-    const nonce = randomBytes(24).toString('base64url'); const challenge = await profile.boundary.challenge(start, nonce);
+    const before = await profile.boundary.inspect(start); const protectedTargets = await verify(before);
+    const nonce = randomBytes(24).toString('base64url'); const challenge = await profile.boundary.challenge(start, nonce, protectedTargets);
     ensure(challenge.nonce === nonce && challenge.denied && challenge.runtimeId === before.runtimeId && challenge.processIdentity === before.processIdentity
       && denialChecks.every(name => challenge.checks.includes(name)), 'profile_canary', 'Native/client-tool denial canaries failed or incomplete');
-    const after = await profile.boundary.inspect(start); await verify(after);
-    ensure(canonical(before) === canonical(after), 'profile_changed', 'Boundary changed during verification');
+    const after = await profile.boundary.inspect(start); const afterTargets = await verify(after);
+    ensure(canonical(before) === canonical(after) && canonical(protectedTargets) === canonical(afterTargets), 'profile_changed', 'Boundary changed during verification');
     return validateContract('ProfileEvidence', { profileId: profile.id, ownerId: profile.ownerId, providerId: profile.providerId,
       verifiedAt: (options.now?.() ?? new Date()).toISOString(), required: start.task.required,
       probes: [{ name: 'effective-native-boundary', mode: 'live', status: 'passed', versions: { image: before.image, runtime: before.runtimeId, process: before.processIdentity },
-        assertions: denialChecks.map(name => ({ name, passed: true })), artifacts: [`sha256:${fingerprint({ start, before, nonce })}`] }] });
+        assertions: denialChecks.map(name => ({ name, passed: true })), artifacts: [`sha256:${fingerprint({ start, before, protectedTargets, nonce })}`] }] });
   }
   return { requireVerifiedProfile };
 }

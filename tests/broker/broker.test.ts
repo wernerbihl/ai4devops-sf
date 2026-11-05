@@ -163,3 +163,109 @@ test('input_attention_requires_real_pending_owner_correlation', async()=>{
     assert.ok(f.store.queueLifecycleReply(saved.id,'answer','answer-key').id);
   }finally{f.close();}
 });
+
+test('I1_revocation_blocks_fresh_caps_current_authority_and_engine_results_across_restart', async () => {
+  const { createAttemptBroker } = await implementation();
+  const { createKestraAuthority } = await import('../../src/broker/authority.ts');
+  for (const issueFirst of [true, false]) {
+    const { f, reservation: r } = await fixture();
+    try {
+      const deps = { store: f.store, clock: f.clock, signingKey: Buffer.alloc(32, 7) };
+      const broker = createAttemptBroker(deps);
+      const token = issueFirst ? broker.issueAttemptCapability(r.attempt.id, ['grant-1']) : undefined;
+      broker.revokeAttempt(r.attempt.id); broker.revokeAttempt(r.attempt.id);
+      if (token) assert.throws(() => broker.authorizeAttempt(token, 'result.submit', {}));
+      assert.throws(() => broker.issueAttemptCapability(r.attempt.id, ['grant-1'], ['result.submit']), { code: 'attempt_revoked' });
+      const reopened = createAttemptBroker({ ...deps, store: f.reopen() });
+      assert.throws(() => reopened.current(r.attempt.id), { code: 'attempt_revoked' });
+      assert.throws(() => reopened.issueAttemptCapability(r.attempt.id, ['grant-1']), { code: 'attempt_revoked' });
+      const authority = createKestraAuthority({ broker: reopened, store: f.store });
+      await assert.rejects(authority.result(r.attempt.workflow!, { attemptId: r.attempt.id, summary: 'Revoked', evidence: [], createdTaskIds: [], outcome: 'result' }, 'fresh-result'), { code: 'attempt_revoked' });
+      assert.equal(reopened.getResultProposal(r.attempt.id), undefined);
+    } finally { f.close(); }
+  }
+});
+
+test('I1_v5_upgrade_preserves_legacy_revocation_and_new_markers', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { createAttemptBroker } = await implementation(); const { f, reservation: r } = await fixture();
+  try {
+    const deps = { store: f.store, clock: f.clock, signingKey: Buffer.alloc(32, 7) };
+    const token = createAttemptBroker(deps).issueAttemptCapability(r.attempt.id, ['grant-1']);
+    f.store.close();
+    const db = new DatabaseSync(f.path);
+    // Recreate the exact committed v5 schema/state and its only legacy revocation representation.
+    db.exec('DROP TABLE IF EXISTS broker_revocations; PRAGMA user_version = 5; UPDATE broker_capabilities SET revoked = 1'); db.close();
+    const upgraded = createAttemptBroker({ ...deps, store: f.reopen() });
+    assert.throws(() => upgraded.issueAttemptCapability(r.attempt.id, ['grant-1']), { code: 'attempt_revoked' });
+    assert.throws(() => upgraded.authorizeAttempt(token, 'task.read', {}));
+    const check = new DatabaseSync(f.path); assert.equal(check.prepare('PRAGMA user_version').get()!.user_version, 6); check.close();
+    const again = createAttemptBroker({ ...deps, store: f.reopen() });
+    assert.throws(() => again.current(r.attempt.id), { code: 'attempt_revoked' });
+  } finally { f.close(); }
+});
+
+test('I2_bound_native_start_receipt_replays_without_a_new_writer_and_unknown_identity_reconciles', async () => {
+  const { createAttemptBroker } = await implementation();
+  for (const unknown of [false, true]) {
+    const { f, reservation: r } = await fixture(); let starts = 0; let reconciles = 0;
+    const identity = { ownerId: 'vscode', providerId: 'copilot' as const, sessionId: 'actual' };
+    let recovered = identity;
+    try {
+      const deps = { store: f.store, clock: f.clock, signingKey: Buffer.alloc(32, 7),
+        profiles: { requireVerifiedProfile: async () => ({} as any) },
+        native: { start: async () => { starts++; if (unknown) throw Error('ack lost'); return identity; }, continue: async () => {},
+          reconcile: async () => { reconciles++; return { state: 'done' as const, identity: recovered }; } } };
+      const broker = createAttemptBroker(deps); const token = broker.issueAttemptCapability(r.attempt.id, ['grant-1']);
+      const scope = broker.authorizeAttempt(token, 'native.start', {});
+      const request: WorkerRequest = { requestId: 'start', idempotencyKey: 'start', scope, operation: 'native.start', payload: broker.nativeStart(r.attempt.id, 'start') };
+      const expected = { requestId: 'start', ok: true, result: identity };
+      if (unknown) await assert.rejects(broker.execute(token, request)); else assert.deepEqual(await broker.execute(token, request), expected);
+      f.store.bindLifecycleIdentity(r.attempt.id, identity);
+      const { profiles: _profiles, ...reconciliationDeps } = deps;
+      const reopened = createAttemptBroker({ ...(unknown ? reconciliationDeps : deps), store: f.reopen() });
+      if (unknown) {
+        recovered = { ...identity, sessionId: 'wrong' };
+        await assert.rejects(reopened.execute(token, request), { code: 'native_authority' });
+        recovered = identity;
+      }
+      assert.deepEqual(await reopened.execute(token, request), expected);
+      assert.deepEqual(await reopened.execute(token, request), expected);
+      assert.equal(starts, 1); assert.equal(reconciles, unknown ? 2 : 0);
+      const receiptsOnly = createAttemptBroker({ store: f.store, clock: f.clock, signingKey: deps.signingKey });
+      assert.deepEqual(await receiptsOnly.execute(token, request), expected);
+      await assert.rejects(reopened.execute(token, { ...request, requestId: 'changed-body' }));
+      await assert.rejects(reopened.execute(token, { ...request, idempotencyKey: 'second', payload: { ...request.payload, idempotencyKey: 'second' } }));
+      reopened.revokeAttempt(r.attempt.id); await assert.rejects(reopened.execute(token, request));
+    } finally { f.close(); }
+  }
+});
+
+test('I2_continuation_receipt_and_unknown_effect_reconcile_after_quiescence_changes', async () => {
+  const { createAttemptBroker } = await implementation();
+  for (const unknown of [false, true]) {
+    const { f, reservation: r } = await fixture(); let sends = 0; let reconciles = 0;
+    const identity = { ownerId: 'vscode', providerId: 'copilot' as const, sessionId: 'actual' };
+    try {
+      f.store.bindLifecycleIdentity(r.attempt.id, identity);
+      f.store.updateLifecycle(r.attempt.id, r.lease.fence, { state: { segments: [], quiescent: true } });
+      const deps = { store: f.store, clock: f.clock, signingKey: Buffer.alloc(32, 7), profiles: { requireVerifiedProfile: async () => ({} as any) },
+        native: { start: async () => identity, continue: async () => { sends++; f.store.updateLifecycle(r.attempt.id, r.lease.fence, { state: { segments: [], quiescent: false } }); if (unknown) throw Error('ack lost'); },
+          reconcile: async () => { reconciles++; return { state: 'done' as const, identity }; } } };
+      const broker = createAttemptBroker(deps); const token = broker.issueAttemptCapability(r.attempt.id, ['grant-1']);
+      const scope = broker.authorizeAttempt(token, 'native.continue', {});
+      const request: WorkerRequest = { requestId: 'continue', idempotencyKey: 'continue', scope, operation: 'native.continue', payload: { identity, input: { prompt: 'Continue' } } };
+      if (unknown) await assert.rejects(broker.execute(token, request)); else await broker.execute(token, request);
+      const { profiles: _profiles, ...reconciliationDeps } = deps;
+      const reopened = createAttemptBroker({ ...(unknown ? reconciliationDeps : deps), store: f.reopen() });
+      assert.deepEqual(await reopened.execute(token, request), { requestId: 'continue', ok: true, result: null });
+      assert.equal(sends, 1); assert.equal(reconciles, unknown ? 1 : 0);
+      await assert.rejects(reopened.execute(token, { ...request, payload: { ...request.payload, identity: { ...identity, sessionId: 'other' } } }));
+      await assert.rejects(reopened.execute(token, { ...request, idempotencyKey: 'second' }));
+      f.store.updateLifecycle(r.attempt.id, r.lease.fence, { release: 'waiting', status: 'waiting_input', state: { segments: [], quiescent: true } });
+      const next = f.store.enqueueAction({ key: 'next-fence', kind: 'lifecycle.send', payload: { attemptId: r.attempt.id } });
+      f.store.acquireLifecycle(r.attempt.id, f.store.getAdmissionState().token, false, next.id);
+      await assert.rejects(reopened.execute(token, request)); assert.equal(sends, 1);
+    } finally { f.close(); }
+  }
+});

@@ -18,8 +18,14 @@ export class BrokerStorage {
     const row = this.db.sql.prepare('SELECT payload FROM broker_capabilities WHERE id = ? AND revoked = 0').get(id);
     return row ? JSON.parse(String(row.payload)) : undefined;
   }
+  isRevoked(attemptId: string): boolean {
+    return !!this.db.sql.prepare('SELECT 1 FROM broker_revocations WHERE attempt_id = ?').get(attemptId);
+  }
   revoke(attemptId: string): void {
-    this.db.sql.prepare("UPDATE broker_capabilities SET revoked = 1 WHERE json_extract(payload,'$.scope.attemptId') = ?").run(attemptId);
+    this.db.transaction(() => {
+      this.db.sql.prepare('INSERT INTO broker_revocations(attempt_id,revoked_at) VALUES (?,?) ON CONFLICT DO NOTHING').run(attemptId, this.db.now());
+      this.db.sql.prepare("UPDATE broker_capabilities SET revoked = 1 WHERE json_extract(payload,'$.scope.attemptId') = ?").run(attemptId);
+    });
   }
   mutation<T>(key: string, input: unknown, callback: () => T): T { return this.db.idempotent('broker', key, input, callback); }
   proposal(attemptId: string): TaskResult | undefined {

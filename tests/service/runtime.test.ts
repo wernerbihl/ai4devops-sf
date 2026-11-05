@@ -73,6 +73,10 @@ test('real runtime opens API and private control honestly unavailable without pr
     const first=await send(); assert.equal(first.status,200); const firstBody=await first.json();
     const second=await send(); assert.equal(second.status,200); assert.deepEqual(await second.json(),firstBody);
     assert.ok(runtime.store.getActionByKey('dispatch:request:cli-fixture-key'));
+    const status=await fetch(runtime.controlUrl+'/dispatch-status',{method:'POST',headers,body:JSON.stringify({key:'cli-fixture-key'})});
+    assert.equal(status.status,200);assert.deepEqual(await status.json(),firstBody);
+    const unknown=await fetch(runtime.controlUrl+'/dispatch-status',{method:'POST',headers,body:JSON.stringify({key:'unknown-key'})});
+    assert.deepEqual(await unknown.json(),{state:'pending'});assert.equal(runtime.store.getActionByKey('dispatch:request:unknown-key'),undefined);
 
   } finally {await runtime?.stop();rmSync(root,{recursive:true,force:true})}
 });

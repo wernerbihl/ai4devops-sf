@@ -1,0 +1,10 @@
+import {runNpm} from './npm.ts';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { produceReleaseProvenance } from './release-provenance.ts';
+const destination=resolve(process.argv[2]??'artifacts');mkdirSync(destination,{recursive:true});
+runNpm(['run','build'],{stdio:'inherit',encoding:'utf8'});
+const provenance=produceReleaseProvenance();
+const result=JSON.parse(runNpm(['pack','--ignore-scripts','--json','--pack-destination',destination],{encoding:'utf8'}))[0];
+console.log(JSON.stringify({tarball:join(destination,result.filename),sourceCommit:provenance.sourceCommit,releaseDigest:provenance.releaseDigest,bytes:result.size,files:result.files.length},null,2));

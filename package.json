@@ -9,25 +9,52 @@
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/build.ts",
     "protocol:generate": "node scripts/generate-protocol.ts",
     "protocol:check": "node scripts/generate-protocol.ts --check",
     "probe:vscode": "node scripts/probe-vscode.ts",
     "probe:bb": "node scripts/probe-bb.ts",
     "probe:kestra": "node probes/kestra.ts",
     "probe:isolation": "node probes/isolation.ts",
-    "gates:check": "node scripts/check-gates.ts"
+    "gates:check": "node scripts/check-gates.ts",
+    "companion:package": "node scripts/package-companion.mjs",
+    "pretest": "npm run build",
+    "package": "node scripts/package.ts",
+    "verify:package": "node scripts/verify-package.ts",
+    "verify:install": "node scripts/verify-install.ts",
+    "release:check": "node scripts/release-provenance.ts --check"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",
     "@sinclair/typebox": "0.34.41",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/node": "24.10.0",
     "@types/ws": "8.18.1",
+    "@vscode/vsce": "4.1.0",
     "typescript": "5.9.3"
-  }
+  },
+  "bin": {
+    "ai4devops-sf": "bin/ai4devops-sf.mjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "release/runtime-lock.json",
+    "release/provenance.json",
+    "release/COMPATIBILITY.md",
+    "README.md"
+  ],
+  "bundleDependencies": [
+    "@microsoft/agent-host-protocol",
+    "@sinclair/typebox",
+    "ajv",
+    "ajv-formats",
+    "ws",
+    "yaml"
+  ]
 }

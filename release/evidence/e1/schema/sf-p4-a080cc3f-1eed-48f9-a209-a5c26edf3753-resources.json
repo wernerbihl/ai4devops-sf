@@ -1,0 +1,30 @@
+{
+  "owner": "sf-p4-a080cc3f-1eed-48f9-a209-a5c26edf3753",
+  "resources": [
+    {
+      "kind": "volume",
+      "name": "sf-p4-a080cc3f-1eed-48f9-a209-a5c26edf3753-h2",
+      "removed": true
+    },
+    {
+      "kind": "volume",
+      "name": "sf-p4-a080cc3f-1eed-48f9-a209-a5c26edf3753-config",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-a080cc3f-1eed-48f9-a209-a5c26edf3753-setup",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-a080cc3f-1eed-48f9-a209-a5c26edf3753-kestra",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-a080cc3f-1eed-48f9-a209-a5c26edf3753-client",
+      "removed": true
+    }
+  ]
+}

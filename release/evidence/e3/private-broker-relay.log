@@ -1,0 +1,2 @@
+{"status":"passed","assertions":["actual private Docker exec relay","opaque request and reply preserved","real signed capability and durable proposal","admin route absent","invalid capability denied","no published ports or host mounts","proposal is not closeout"],"nativeProfiles":"none advertised; actual E4 native-tool boundary required"}
+Owned scratch cleanup complete

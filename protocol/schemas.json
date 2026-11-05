@@ -460,6 +460,12 @@
             "copilot",
             "codex"
           ]
+        },
+        "inputs": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
         }
       },
       "required": [
@@ -582,6 +588,33 @@
         },
         "defaultFinishPolicy": {
           "$ref": "#/$defs/FinishPolicy"
+        },
+        "defaultProviderId": {
+          "type": "string",
+          "enum": [
+            "copilot",
+            "codex"
+          ]
+        },
+        "skillVersions": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          }
+        },
+        "toolVersions": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          }
         }
       },
       "required": [
@@ -1091,6 +1124,99 @@
         "version"
       ]
     },
+    "ProviderReadiness": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "providerId": {
+          "$ref": "#/$defs/ProviderId"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "verifiedProfileIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "providerId",
+        "ready",
+        "reasons",
+        "verifiedProfileIds"
+      ]
+    },
+    "OwnerReadiness": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "supportedProviders": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderId"
+          }
+        },
+        "verifiedProfileIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderReadiness"
+          }
+        }
+      },
+      "required": [
+        "ownerId",
+        "ready",
+        "reasons",
+        "supportedProviders",
+        "verifiedProfileIds",
+        "version",
+        "providers"
+      ]
+    },
     "TaskResult": {
       "additionalProperties": false,
       "type": "object",
@@ -1143,6 +1269,81 @@
         "evidence",
         "createdTaskIds",
         "outcome"
+      ]
+    },
+    "CloseoutResult": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "waiting_ci",
+            "needs_attention"
+          ]
+        },
+        "attemptId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "headSha": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "pullRequest": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "repositoryId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "number": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "url": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "headSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "baseRef": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "repositoryId",
+            "number",
+            "url",
+            "headSha",
+            "baseRef"
+          ]
+        },
+        "mergeSha": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "attemptId"
       ]
     },
     "ApiError": {
@@ -1286,6 +1487,81 @@
             "evidence",
             "createdTaskIds",
             "outcome"
+          ]
+        },
+        "closeout": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "waiting_ci",
+                "needs_attention"
+              ]
+            },
+            "attemptId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "headSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "pullRequest": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "repositoryId": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "number": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "url": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "headSha": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "baseRef": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "repositoryId",
+                "number",
+                "url",
+                "headSha",
+                "baseRef"
+              ]
+            },
+            "mergeSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "reason": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "attemptId"
           ]
         },
         "archivedAt": {
@@ -1665,6 +1941,81 @@
             "outcome"
           ]
         },
+        "closeout": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "waiting_ci",
+                "needs_attention"
+              ]
+            },
+            "attemptId": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "headSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "pullRequest": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "repositoryId": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "number": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "url": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "headSha": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "baseRef": {
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "repositoryId",
+                "number",
+                "url",
+                "headSha",
+                "baseRef"
+              ]
+            },
+            "mergeSha": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "reason": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "attemptId"
+          ]
+        },
         "retryOfAttemptId": {
           "minLength": 1,
           "pattern": "\\S",
@@ -1906,6 +2257,11 @@
         },
         "required": {
           "$ref": "#/$defs/RequiredCapabilities"
+        },
+        "executionProfileHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
         },
         "grantedAt": {
           "format": "date-time",
@@ -3050,6 +3406,11 @@
           "type": "string"
         },
         "recovery": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "defaultOwnerId": {
           "minLength": 1,
           "pattern": "\\S",
           "type": "string"
@@ -4221,6 +4582,25 @@
         }
       ]
     },
+    "WorkerTransport": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "encoding": {
+          "const": "sf-base64url-json-v1",
+          "type": "string"
+        },
+        "payload": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "encoding",
+        "payload"
+      ]
+    },
     "SettingsPatch": {
       "additionalProperties": false,
       "type": "object",
@@ -4301,6 +4681,18 @@
       "properties": {
         "active": {
           "type": "boolean"
+        },
+        "defaultOwnerId": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4359,6 +4751,57 @@
         "repositoryId",
         "tagIds",
         "nextTagIds"
+      ]
+    },
+    "RepositoryCatalogEntry": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "githubId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "owner": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "defaultBranch": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "githubId",
+        "owner",
+        "name",
+        "url"
+      ]
+    },
+    "RepositorySelectionRequest": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "githubId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "githubId"
       ]
     },
     "TagCreate": {
@@ -4460,7 +4903,7 @@
         }
       }
     },
-    "RecipeCreate": {
+    "RecipeValidationInput": {
       "additionalProperties": false,
       "type": "object",
       "properties": {
@@ -4487,6 +4930,65 @@
       },
       "required": [
         "yaml"
+      ]
+    },
+    "RecipeValidationBinding": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "recipeHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "payloadHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "executionProfileHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipeHash",
+        "payloadHash",
+        "executionProfileHash"
+      ]
+    },
+    "RecipeCreate": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "yaml": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "inputDefaults": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "repositoryIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "validation": {
+          "$ref": "#/$defs/RecipeValidationBinding"
+        }
+      },
+      "required": [
+        "yaml",
+        "validation"
       ]
     },
     "RecipeValidation": {
@@ -4570,6 +5072,81 @@
             "variables",
             "tasks"
           ]
+        },
+        "hash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "payloadHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "executionProfileHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "message": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "line": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "column": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "field",
+              "message",
+              "line",
+              "column"
+            ]
+          }
+        },
+        "readiness": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "ready": {
+              "type": "boolean"
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "requested": {
+              "$ref": "#/$defs/RequiredCapabilities"
+            },
+            "approved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ready",
+            "reasons",
+            "requested",
+            "approved"
+          ]
         }
       },
       "required": [
@@ -4581,6 +5158,32 @@
       "additionalProperties": false,
       "type": "object",
       "properties": {
+        "validation": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "recipeHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "payloadHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "executionProfileHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recipeHash",
+            "payloadHash",
+            "executionProfileHash"
+          ]
+        },
         "active": {
           "type": "boolean"
         },
@@ -4588,6 +5191,40 @@
           "minLength": 1,
           "pattern": "\\S",
           "type": "string"
+        },
+        "approval": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "recipeHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "payloadHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "repositoryIds": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "capabilities": {
+              "$ref": "#/$defs/RequiredCapabilities"
+            }
+          },
+          "required": [
+            "recipeHash",
+            "payloadHash",
+            "repositoryIds",
+            "capabilities"
+          ]
         }
       }
     },

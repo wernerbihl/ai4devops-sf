@@ -14,6 +14,10 @@
 
 The user closed testing for this session, deferred all remaining live gates to manual testing on other machines/apps, and authorized merging the current work into `main` in both repositories. Those testing gates do not block this checkpoint merge. Contracts/probes and fixtures are delivered; C1–C8, E1–E8 and U1–U6 remain unimplemented. See the [closeout and manual-test handoff](../reports/2026-11-04-session-closeout.md). Historical receipts and runtime restrictions keep their actual status.
 
+## Implementation resumed — VS Code Copilot first
+
+The user subsequently requested completion of this plan, with best-effort integration focused first on the VS Code Agents host in Copilot mode. Missing computer-use or visual verification is delegated to the user and does not stop implementation. Continue the remaining C/E/U product tasks rather than repeating feasibility probes. Capability enforcement and accurate unverified/unsupported status remain required; broader-host acceptance is secondary to delivering the actual runnable service, CLI and dashboard.
+
 ## Global Constraints
 
 - Exactly three public commands: setup, next, and uninstall.

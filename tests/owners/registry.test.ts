@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { validTask } from '../fixtures/contracts.ts';
+import { validateContract } from '../../src/contracts/schemas.ts';
+test('registry readiness comes from actual owner capabilities and validates sanitized DTO', async () => {
+    const m = await import('../../src/owners/registry.ts').catch(() => undefined);
+    assert.ok(m?.OwnerRegistry, 'production registry must expose actual readiness');
+    let ready = false;
+    const owner = { capabilities: async () => ({ ready, reasons: ready ? [] : ['Unavailable'], supportedProviders: ['copilot'], verifiedProfileIds: ready ? ['actual'] : [], version: '1.0.0' }) };
+    Object.assign(owner, { readiness: async () => ({ ownerId: 'vscode', ...await owner.capabilities(), providers: [{ providerId: 'copilot', ready, reasons: ready ? [] : ['Unavailable'], verifiedProfileIds: ready ? ['actual'] : [] }] }) });
+    const registry = new m.OwnerRegistry([['vscode', owner as any]]);
+    assert.equal(registry.get('vscode'), owner);
+    assert.throws(() => registry.get('missing'));
+    assert.equal((await registry.list(validTask().required))[0]?.ready, false);
+    ready = true;
+    const dto = (await registry.list(validTask().required))[0]!;
+    assert.equal(dto.ready, true);
+    validateContract('OwnerReadiness', dto);
+    assert.equal(dto.ownerId, 'vscode');
+});
+test('registry never guesses per-provider profile association from aggregate capabilities', async () => { const { OwnerRegistry } = await import('../../src/owners/registry.ts'); const registry = new OwnerRegistry([['owner', { capabilities: async () => ({ ready: true, reasons: [], supportedProviders: ['copilot', 'codex'], verifiedProfileIds: ['opaque'], version: '1' }) } as any]]); const dto = (await registry.list(validTask().required))[0]!; assert.equal(dto.ready, false); assert.ok(dto.providers.every(p => !p.ready && p.verifiedProfileIds.length === 0)); });

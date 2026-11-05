@@ -20,7 +20,10 @@ export type NativeInput = Contract<'NativeInput'>;
 export type NativeSnapshot = Contract<'NativeSnapshot'>;
 export type NativeStart = Contract<'NativeStart'>;
 export type CapabilityReport = Contract<'CapabilityReport'>;
+export type ProviderReadiness = Contract<'ProviderReadiness'>;
+export type OwnerReadiness = Contract<'OwnerReadiness'>;
 export type TaskResult = Contract<'TaskResult'>;
+export type CloseoutResult = Contract<'CloseoutResult'>;
 export type ApiError = Contract<'ApiError'>;
 export type TaskRecord = Contract<'TaskRecord'>;
 export type WorkflowIdentity = Contract<'WorkflowIdentity'>;
@@ -48,6 +51,7 @@ export type FactoryEvent = Contract<'FactoryEvent'>;
 export type Artifact = Contract<'Artifact'>;
 export type WorkerRequest = Contract<'WorkerRequest'>;
 export type WorkerResponse = Contract<'WorkerResponse'>;
+export type WorkerTransport = Contract<'WorkerTransport'>;
 
 export interface Clock {
   wallNow(): Date;
@@ -63,6 +67,8 @@ export type TagCreate = Contract<'TagCreate'>;
 export type TagPatch = Contract<'TagPatch'>;
 export type TagArchive = Contract<'TagArchive'>;
 export type TaskPatch = Contract<'TaskPatch'>;
+export type RecipeValidationInput = Contract<'RecipeValidationInput'>;
+export type RecipeValidationBinding = Contract<'RecipeValidationBinding'>;
 export type RecipeCreate = Contract<'RecipeCreate'>;
 export type RecipeValidation = Contract<'RecipeValidation'>;
 export type RecipePatch = Contract<'RecipePatch'>;

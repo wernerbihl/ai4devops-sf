@@ -1,0 +1,12 @@
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+const dir=fileURLToPath(new URL('../runtime/vscode-companion/',import.meta.url));
+const vsce=fileURLToPath(new URL('../node_modules/@vscode/vsce/vsce',import.meta.url));
+const result=spawnSync(process.execPath,[vsce,'package','--no-dependencies','--skip-license','--allow-missing-repository','--out',join(dir,'software-factory-auth.vsix')],{cwd:dir,stdio:'inherit',env:{...process.env,SOURCE_DATE_EPOCH:'315532800',TZ:'UTC'}});
+if(result.status!==0)throw Error('Companion packaging failed');
+const hash=name=>createHash('sha256').update(readFileSync(join(dir,name))).digest('hex');
+const provenance={schemaVersion:1,packager:'@vscode/vsce@4.1.0',vscodeHostCommit:'e576c7bbeb39772a1d1ebe472545def0d93e6d8b',extensionSha256:hash('extension.cjs'),manifestSha256:hash('package.json'),vsixSha256:hash('software-factory-auth.vsix')};
+writeFileSync(join(dir,'provenance.json'),JSON.stringify(provenance,null,2)+'\n');

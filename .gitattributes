@@ -1,0 +1,19 @@
+# Exact-byte build provenance must be independent of local core.autocrlf.
+* text=auto eol=lf
+
+# Archives, fonts and raster images are preserved byte-for-byte.
+*.vsix binary
+*.tgz binary
+*.gz binary
+*.zip binary
+*.xz binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.pdf binary

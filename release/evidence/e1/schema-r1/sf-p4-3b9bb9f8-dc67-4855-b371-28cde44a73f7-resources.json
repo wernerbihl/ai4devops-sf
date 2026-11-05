@@ -1,0 +1,30 @@
+{
+  "owner": "sf-p4-3b9bb9f8-dc67-4855-b371-28cde44a73f7",
+  "resources": [
+    {
+      "kind": "volume",
+      "name": "sf-p4-3b9bb9f8-dc67-4855-b371-28cde44a73f7-h2",
+      "removed": true
+    },
+    {
+      "kind": "volume",
+      "name": "sf-p4-3b9bb9f8-dc67-4855-b371-28cde44a73f7-config",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-3b9bb9f8-dc67-4855-b371-28cde44a73f7-setup",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-3b9bb9f8-dc67-4855-b371-28cde44a73f7-kestra",
+      "removed": true
+    },
+    {
+      "kind": "container",
+      "name": "sf-p4-3b9bb9f8-dc67-4855-b371-28cde44a73f7-client",
+      "removed": true
+    }
+  ]
+}

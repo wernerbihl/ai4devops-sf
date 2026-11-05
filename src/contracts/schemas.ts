@@ -43,7 +43,7 @@ const TaskSpec = withAllowedPolicy(object({
 }), 'finishPolicy');
 const CreateTaskRequest = object({
   title: text(), description: text(), recipeId: text(), repositoryIds: T.Array(text(), { minItems: 1, uniqueItems: true }),
-  finishPolicy: T.Optional(FinishPolicy), ownerId: optionalText(), providerId: T.Optional(ProviderId),
+  finishPolicy: T.Optional(FinishPolicy), ownerId: optionalText(), providerId: T.Optional(ProviderId), inputs: T.Optional(jsonObject()),
 });
 const TaskTemplate = object({
   title: text(), description: text(), goal: text(), acceptanceCriteria: T.Array(text(), { minItems: 1 }),
@@ -54,6 +54,7 @@ const RecipeMetadata = withAllowedPolicy(object({
   inputSchema: jsonObject(), taskTemplate: TaskTemplate, required: RequiredCapabilities,
   compatibleOwners: T.Array(text(), { minItems: 1, uniqueItems: true }),
   compatibleProviders: T.Array(ProviderId, { minItems: 1, uniqueItems: true }), defaultFinishPolicy: FinishPolicy,
+  defaultProviderId: T.Optional(ProviderId), skillVersions: T.Optional(T.Record(T.String(), text())), toolVersions: T.Optional(T.Record(T.String(), text())),
 }), 'defaultFinishPolicy');
 // Standard Kestra fields stay under Kestra's schema authority. Only variables.sf is factory metadata.
 const RecipeContract = T.Object({
@@ -78,15 +79,23 @@ const CapabilityReport = object({
   ready: T.Boolean(), reasons: T.Array(text()), supportedProviders: T.Array(ProviderId, { uniqueItems: true }),
   verifiedProfileIds: strings(), version: text(),
 });
+const ProviderReadiness = object({providerId:ProviderId,ready:T.Boolean(),reasons:T.Array(text()),verifiedProfileIds:strings()});
+const OwnerReadiness = object({ ownerId: text(), ...CapabilityReport.properties,providers:T.Array(ProviderReadiness) });
 const TaskResult = object({
   attemptId: text(), summary: text(), evidence: strings(), createdTaskIds: strings(),
   outcome: choice('result', 'changes', 'needs_input'), headSha: optionalText(),
+});
+// Server-owned verification receipt. It is deliberately absent from TaskResult/worker inputs.
+const CloseoutResult = object({
+  kind: choice('completed', 'waiting_ci', 'needs_attention'), attemptId: text(), headSha: optionalText(),
+  pullRequest: T.Optional(object({ repositoryId: text(), number: integer(1), url: text(), headSha: text(), baseRef: text() })),
+  mergeSha: optionalText(), reason: optionalText(),
 });
 const ApiError = object({ code: text(), message: text(), recovery: text(), retryable: T.Boolean() });
 const TaskRecord = object({
   spec: TaskSpec, status: TaskStatus, revision: integer(1), controlMode: choice('factory', 'human'),
   createdAt: timestamp(), updatedAt: timestamp(), attemptIds: strings(), childTaskIds: strings(),
-  reason: optionalText(), recovery: optionalText(), result: T.Optional(TaskResult), archivedAt: T.Optional(timestamp()),
+  reason: optionalText(), recovery: optionalText(), result: T.Optional(TaskResult), closeout: T.Optional(CloseoutResult), archivedAt: T.Optional(timestamp()),
 });
 const WorkflowIdentity = object({ executionId: text(), namespace: text(), flowId: text(), revision: text() });
 const WorkflowStart = object({ idempotencyKey: text(), attemptId: text(), recipe: RecipeRevision, inputs: jsonObject(), scopeId: text(), fence: integer(1) });
@@ -98,7 +107,7 @@ const Attempt = object({
   id: text(), taskId: text(), recipeRevision: text(), baseSha: text(), workspacePath: text(), profileId: text(),
   fence: integer(1), status: TaskStatus, native: T.Optional(NativeIdentity), workflow: T.Optional(WorkflowIdentity),
   createdAt: timestamp(), startedAt: T.Optional(timestamp()), endedAt: T.Optional(timestamp()),
-  activeDurationMs: integer(), usage: T.Optional(Usage), result: T.Optional(TaskResult), retryOfAttemptId: optionalText(),
+  activeDurationMs: integer(), usage: T.Optional(Usage), result: T.Optional(TaskResult), closeout: T.Optional(CloseoutResult), retryOfAttemptId: optionalText(),
 });
 const AttentionRequest = object({
   id: text(), taskId: text(), attemptId: optionalText(), repositoryId: text(),
@@ -112,7 +121,7 @@ const ActorScope = object({
 });
 const FindingInput = object({ repositoryId: text(), recipeId: text(), findingKey: text(), task: TaskSpec, relatedTaskId: optionalText() });
 const Grant = object({ id: text(), recipeId: text(), recipeRevision: text(), repositoryIds: strings(),
-  required: RequiredCapabilities, grantedAt: timestamp(), expiresAt: T.Optional(timestamp()), revokedAt: T.Optional(timestamp()) });
+  required: RequiredCapabilities, executionProfileHash: optionalText(), grantedAt: timestamp(), expiresAt: T.Optional(timestamp()), revokedAt: T.Optional(timestamp()) });
 const probeFields = { scratchRepo: text(), outputDir: text(), endpoint: optionalText(), provider: T.Optional(ProviderId) };
 const ProbeOptions = T.Union([
   object({ ...probeFields, mode: T.Literal('fixture'), allowLive: T.Boolean() }),
@@ -161,7 +170,7 @@ const Repository = object({
   id: text(), name: text(), url: text(), active: T.Boolean(), controlMode: choice('factory', 'human'),
   revision: integer(1), createdAt: timestamp(), lastServicedAt: T.Optional(timestamp()),
   weights: T.Record(T.String(), T.Integer({ minimum: 0, maximum: 100 })),
-  currentTaskId: optionalText(), reason: optionalText(), recovery: optionalText(),
+  currentTaskId: optionalText(), reason: optionalText(), recovery: optionalText(), defaultOwnerId: optionalText(),
 });
 const RecipeSummary = object({ id: text(), displayName: text(), description: text(), tagId: text(), currentRevision: text(),
   revision: integer(1), active: T.Boolean(), ready: T.Boolean(), reasons: T.Array(text()) });
@@ -200,22 +209,36 @@ const WorkerResponse = T.Union([
   object({ requestId: text(), ok: T.Literal(false), error: ApiError }),
 ]);
 
+// The engine sees only this opaque envelope; logical worker contracts and authorization are unchanged.
+const WorkerTransport = object({ encoding: T.Literal('sf-base64url-json-v1'), payload: T.String({ minLength: 1, pattern: '^[A-Za-z0-9_-]+$' }) });
+
 const SettingsPatch = object({
   taktSeconds: T.Optional(integer(1)), limits: T.Optional(FactoryConfig.properties.limits),
   defaultOwnerId: optionalText(), defaultProviderId: T.Optional(ProviderId), paused: T.Optional(T.Boolean()),
 });
-const RepositoryPatch = object({ active: T.Optional(T.Boolean()) });
+const RepositoryPatch = object({ active: T.Optional(T.Boolean()), defaultOwnerId: T.Optional(T.Union([text(), T.Null()])) });
 const WeightsPatch = object({ weights: T.Record(T.String(), T.Integer({ minimum: 0, maximum: 100 })) });
 const RotationPreview = object({ repositoryId: text(), tagIds: strings(), nextTagIds: T.Array(text()), reason: optionalText() });
+const RepositoryCatalogEntry = object({ githubId: text(), owner: text(), name: text(), url: text(), defaultBranch: optionalText() });
+const RepositorySelectionRequest = object({ githubId: text() });
 const TagCreate = object({ displayName: text() });
 const TagPatch = object({ displayName: optionalText(), reassignToTagId: optionalText() });
 const TagArchive = object({ reassignToTagId: text() });
 const TaskPatch = object({ title: optionalText(), description: optionalText(), goal: optionalText(),
   acceptanceCriteria: T.Optional(T.Array(text(), { minItems: 1 })), finishPolicy: T.Optional(FinishPolicy),
   ownerId: optionalText(), providerId: T.Optional(ProviderId), status: T.Optional(T.Literal('cancelled')) });
-const RecipeCreate = object({ yaml: text(), inputDefaults: T.Optional(jsonObject()), repositoryIds: T.Optional(strings()) });
-const RecipeValidation = object({ valid: T.Boolean(), errors: T.Array(text()), contract: T.Optional(RecipeContract) });
-const RecipePatch = object({ active: T.Optional(T.Boolean()), displayName: optionalText() });
+const recipeInputFields = { yaml: text(), inputDefaults: T.Optional(jsonObject()), repositoryIds: T.Optional(strings()) };
+// Validation is usable before a browser has any content or server-profile hashes.
+const RecipeValidationInput = object(recipeInputFields);
+const RecipeValidationBinding = object({ recipeHash: text(), payloadHash: text(), executionProfileHash: text() });
+const RecipeCreate = object({ ...recipeInputFields, validation: RecipeValidationBinding });
+const RecipeValidation = object({ valid: T.Boolean(), errors: T.Array(text()), contract: T.Optional(RecipeContract),
+  hash: optionalText(), payloadHash: optionalText(), executionProfileHash: optionalText(), issues: T.Optional(T.Array(object({ field: T.String(), message: text(), line: integer(1), column: integer(1) }))),
+  readiness: T.Optional(object({ ready: T.Boolean(), reasons: T.Array(text()), requested: RequiredCapabilities, approved: T.Boolean() })),
+});
+const RecipePatch = object({ validation: T.Optional(RecipeValidationBinding), active: T.Optional(T.Boolean()), displayName: optionalText(), approval: T.Optional(object({
+  recipeHash: text(), payloadHash: text(), repositoryIds: strings(), capabilities: RequiredCapabilities,
+})) });
 const DispatchResult = object({ admitted: T.Boolean(), taskId: optionalText(), attemptId: optionalText(), reason: optionalText() });
 const AttentionResponse = object({ input: jsonObject() });
 const NativeOpenResult = object({ uri: optionalText() });
@@ -227,12 +250,12 @@ const Acknowledgement = object({ accepted: T.Boolean() });
 export const schemas = {
   ProviderId, FinishPolicy, TaskStatus, TaskSource, RequiredCapabilities, ExecutionDefaults, FactoryConfig,
   TaskSpec, CreateTaskRequest, TaskTemplate, RecipeMetadata, RecipeContract, RecipeRevision,
-  NativeIdentity, Usage, NativeInput, NativeSnapshot, NativeStart, CapabilityReport, TaskResult, ApiError,
+  NativeIdentity, Usage, NativeInput, NativeSnapshot, NativeStart, CapabilityReport, ProviderReadiness, OwnerReadiness, TaskResult, CloseoutResult, ApiError,
   TaskRecord, WorkflowIdentity, WorkflowStart, WorkflowSnapshot, Attempt, AttentionRequest, ActorScope,
   FindingInput, Grant, ProbeOptions, ProbeEvidence, VerifiedProbeEvidence, ProfileSpec, ProfileEvidence, OwnerEvent, OwnerRpc, OwnerRpcResponse,
-  Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse,
-  SettingsPatch, Settings, RepositoryPatch, WeightsPatch, RotationPreview, TagCreate, TagPatch, TagArchive,
-  TaskPatch, RecipeCreate, RecipeValidation, RecipePatch, DispatchResult, AttentionResponse, NativeOpenResult,
+  Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse, WorkerTransport,
+  SettingsPatch, Settings, RepositoryPatch, WeightsPatch, RotationPreview, RepositoryCatalogEntry, RepositorySelectionRequest, TagCreate, TagPatch, TagArchive,
+  TaskPatch, RecipeValidationInput, RecipeValidationBinding, RecipeCreate, RecipeValidation, RecipePatch, DispatchResult, AttentionResponse, NativeOpenResult,
   DeviceFlow, Empty, Acknowledgement,
 } as const;
 export type ContractName = keyof typeof schemas;

@@ -1,4 +1,4 @@
-import { OwnedDocker, images, restrictedArgs } from '../../../../probes/docker.ts';
+import { OwnedDocker, images, restrictedArgs, verifyReusableVolumes } from '../../../../probes/docker.ts';
 import { inspectRestrictions, workerCanary, requireWorkerAssertions } from '../../../../probes/isolation.ts';
 import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,6 +12,7 @@ const docker=new OwnedDocker(outputDir);
 Object.defineProperty(docker,'owner',{value:resources.owner}); docker.resources.push(...manifest.resources);
 const report={mode:'live',status:'blocked',observedAt:new Date().toISOString(),nativeProfileVerified:false,modelTurnsStarted:0,loginStarted:false,resourceOwner:docker.owner,assertions:[]};
 try {
+ await verifyReusableVolumes(docker,manifest,[resources.assets,resources.state,resources.config]);
  const script=String.raw`const fs=require('fs'),cp=require('child_process'),crypto=require('crypto');(async()=>{const url='https://main.vscode-cdn.net/agent-sdk/codex/0.163.0/linux-x64.tgz';const r=await fetch(url);if(!r.ok)throw new Error('SDK unavailable');const b=Buffer.from(await r.arrayBuffer());if(crypto.createHash('sha256').update(b).digest('hex')!=='201b83598aaa2764468788cff3ad450e81e5d1e2f00662be668f94d85e8de294')throw new Error('SDK hash mismatch');fs.writeFileSync('/tmp/codex.tgz',b);fs.mkdirSync('/assets/codex-sdk',{recursive:true});cp.execFileSync('tar',['-xzf','/tmp/codex.tgz','-C','/assets/codex-sdk']);console.log(JSON.stringify({url,version:'0.163.0',sha256:crypto.createHash('sha256').update(b).digest('hex'),bytes:b.length}));})().catch(e=>{console.error(e.message);process.exit(1)});`;
  const sdk=await docker.run('sdk-setup',['--pull','never','--network','bridge','--mount',`type=volume,src=${resources.assets},dst=/assets`,images.worker.image,'node','-e',script]);
  assert.equal(await docker.command(['wait',sdk]),'0');

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "kestraVersion": "2.0.8",
+  "policy": "src/recipes/policy.ts",
+  "status": "source verified and revised STRING/opaque starter schemas accepted by pinned live Kestra; end-to-end broker/native transport roundtrip remains E2/E3/E6",
+  "flow": "fixed core.http.Request native_start -> core.flow.Pause await_result -> core.http.Request submit_result",
+  "brokerOrigin": "http://sf-broker:8080",
+  "routes": [
+    "/worker/v1/native/start",
+    "/worker/v1/results"
+  ],
+  "initialInputs": {
+    "sf_capability": "SECRET",
+    "sf_native_start": "STRING canonical WorkerTransport JSON encoding logical WorkerRequest native.start"
+  },
+  "internalResultResume": {
+    "sf_result": "STRING canonical WorkerTransport JSON encoding logical WorkerRequest result.submit",
+    "sf_result_capability": "SECRET current attempt/fence capability"
+  },
+  "requiredEngineConfiguration": {
+    "kestra.variables.recursive-rendering": false,
+    "kestra.encryption.secret-key": "setup-managed secret; must be configured"
+  },
+  "capabilityAlphabet": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+  "runtimeObligations": [
+    "E2 validates fixed engine configuration and refuses readiness on mismatch; recipe cannot override it",
+    "E2/E3 supplies only authenticated runtime-owned initial inputs, never recipe defaults or arbitrary browser inputs",
+    "E6 resumes await_result only after a genuine structured result; ordinary human replies go to native continuation",
+    "E2/E3/E6 supplies a fresh result capability for the current attempt/fence, not the original start capability",
+    "E3 validates WorkerRequest operation, scope, fence, immutable owner/provider, granted paths/tools and result authority",
+    "HTTP bodies pass pre-serialized opaque envelope STRING values directly, without toJson; RAW_PATTERN postprocessing cannot alter the base64url payload. Recursive rendering must still stay false",
+    "HTTP headers are rendered twice; capability alphabet is enforced before engine rendering",
+    "No redirects or non-200 broker responses are accepted; no caller-defined headers, proxy, logging, retries or TLS overrides",
+    "Engine completion and verified lifecycle quiescence are still required for closeout; native idle is not a result",
+    "E2/E6 must use encodeWorkerRequest before injecting reserved STRING inputs; E3 reads bounded raw body text and decodeWorkerRequest exactly once before logical authorization",
+    "E3 uses encodeWorkerResponse for all broker reply bodies; E2/E6 decodeWorkerResponse outside Kestra; never double-stringify the wrapper or recursively unwrap logical context",
+    "Historical JSON/toJson recipes are rejected by the updated exact graph policy and require an explicitly approved new revision"
+  ],
+  "sources": [
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/plugin/core/http/AbstractHttp.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/http/client/configurations/HttpConfiguration.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/plugin/core/flow/Pause.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/VariableRenderer.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/configuration/VariableConfiguration.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/DefaultRunContext.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/webserver/src/main/java/io/kestra/webserver/controllers/api/FlowController.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/FlowInputOutput.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/pebble/filters/ToJsonFilter.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/plugin/core/http/Request.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/pebble/JsonWriter.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/models/property/Property.java"
+  ],
+  "liveSchemaReceipt": "release/evidence/e1/schema-r1/starter-schema.json",
+  "transport": {
+    "encoding": "sf-base64url-json-v1",
+    "shape": {
+      "encoding": "sf-base64url-json-v1",
+      "payload": "canonical unpadded base64url of UTF-8 logical JSON"
+    },
+    "codec": "src/contracts/worker-transport.ts",
+    "logicalContracts": [
+      "WorkerRequest",
+      "WorkerResponse"
+    ],
+    "maxWireBytes": 8388608,
+    "maxDecodedBytes": 6291456,
+    "nativeBody": "{{ inputs.sf_native_start }}",
+    "resultBody": "{{ outputs.await_result.onResume.sf_result }}",
+    "responses": "Same canonical envelope; decode only in trusted broker/runtime, never inside Kestra expressions",
+    "limits": "Resource bounds per message; fail without truncation; not a context/token budget"
+  },
+  "supersedes": "Original JSON/toJson arbitrary-text preservation claim was false because pinned VariableRenderer always removes matching raw-tag delimiters"
+}

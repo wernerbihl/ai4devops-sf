@@ -72,3 +72,16 @@ export async function verifyImagePins(docker: OwnedDocker): Promise<void> {
     if (!data.RepoDigests?.includes(image) || data.Os !== 'linux' || data.Architecture !== 'amd64') throw new ProbeBlocked('Pinned linux/amd64 image unavailable');
   }
 }
+
+/** Historical headless bootstrap may reuse only existing, unconsumed, exactly owned volumes. */
+export async function verifyReusableVolumes(docker: Pick<OwnedDocker,'owner'|'command'>, manifest: {owner:string;resources:Resource[]}, names: string[]): Promise<void> {
+  if(manifest.owner!==docker.owner||!/^sf-p4-[a-zA-Z0-9-]+$/.test(manifest.owner)||!Array.isArray(manifest.resources))throw new ProbeBlocked('Invalid setup manifest ownership');
+  for(const name of names){
+    const records=manifest.resources.filter(resource=>resource.kind==='volume'&&resource.name===name);
+    if(records.length!==1||records[0]!.removed!==false)throw new ProbeBlocked('Setup volume manifest consumed or ambiguous; create a fresh owned setup');
+  }
+  for(const name of names){
+    let volume:any;try{volume=JSON.parse(await docker.command(['volume','inspect',name]))[0];}catch{throw new ProbeBlocked('Setup volume absent; create a fresh owned setup');}
+    if(volume?.Name!==name||volume.Labels?.['sf.p4.owner']!==docker.owner)throw new ProbeBlocked('Setup volume ownership mismatch');
+  }
+}

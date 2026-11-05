@@ -1,0 +1,94 @@
+# Assign variables.sf.tagId to an existing factory tag before importing.
+id: scoped-quality
+namespace: sf.recipes
+description: Scoped quality report
+variables:
+  sf:
+    schemaVersion: 1
+    recipeId: scoped-quality
+    displayName: Scoped quality report
+    tagId: Improve Codebase Quality
+    inputSchema:
+      type: object
+      properties:
+        scope:
+          type: string
+          default: the explicitly requested area
+        context:
+          type: string
+          default: ""
+      additionalProperties: false
+    taskTemplate:
+      title: "{{ title }}"
+      description: "{{ description }}"
+      goal: Assess code quality within {{ inputs.scope }} and report actionable
+        findings. {{ description }}
+      acceptanceCriteria:
+        - The report cites concrete evidence
+        - Recommendations stay within the requested scope
+      skills: []
+      tools: [native-files, native-terminal]
+      context: "{{ inputs.context }}"
+    required:
+      paths:
+        - root: .
+          mode: read
+      tools: [native-files, native-terminal]
+      networkDestinations: []
+      credentialRefs: []
+      allowedFinishPolicies:
+        - result
+    compatibleOwners:
+      - vscode
+    compatibleProviders:
+      - copilot
+      - codex
+    defaultProviderId: copilot
+    defaultFinishPolicy: result
+    skillVersions: {}
+    toolVersions:
+      native-files: "2"
+      native-terminal: "2"
+inputs:
+  - id: sf_capability
+    type: SECRET
+    required: true
+  - id: sf_native_start
+    type: STRING
+    required: true
+tasks:
+  - id: native_start
+    type: io.kestra.plugin.core.http.Request
+    uri: http://sf-broker:8080/worker/v1/native/start
+    method: POST
+    contentType: application/json
+    headers:
+      Authorization: Bearer {{ inputs.sf_capability }}
+    body: "{{ inputs.sf_native_start }}"
+    options:
+      followRedirects: false
+      allowFailed: false
+      allowedResponseCodes:
+        - 200
+  - id: await_result
+    type: io.kestra.plugin.core.flow.Pause
+    onResume:
+      - id: sf_result
+        type: STRING
+        required: true
+      - id: sf_result_capability
+        type: SECRET
+        required: true
+  - id: submit_result
+    type: io.kestra.plugin.core.http.Request
+    uri: http://sf-broker:8080/worker/v1/results
+    method: POST
+    contentType: application/json
+    headers:
+      Authorization: Bearer {{ outputs.await_result.onResume.sf_result_capability }}
+    body: "{{ outputs.await_result.onResume.sf_result }}"
+    options:
+      followRedirects: false
+      allowFailed: false
+      allowedResponseCodes:
+        - 200

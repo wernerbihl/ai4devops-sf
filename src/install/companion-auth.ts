@@ -58,7 +58,7 @@ export async function startCompanionAuth(options:{root:string;requestDir:string;
     if(metadataBytes){prior=JSON.parse(metadataBytes.toString()) as Metadata;if(prior.schemaVersion!==1||prior.resource!==resource||JSON.stringify(prior.scopes)!==JSON.stringify(scopes)||prior.ref!=='native-copilot'||!validAccount(prior.account))throw new Error('Invalid native credential metadata');}
     if(prior&&options.account&&prior.account.id!==options.account.id)throw new Error('Selected native account changed');
   } catch(error){unlock();throw error}
-  const account=prior?.account??options.account;const bearer=randomBytes(32).toString('base64url');const expected=Buffer.from('Bearer '+bearer);const nonce=randomBytes(24).toString('base64url');const expiresAt=Date.now()+300000;
+  const account=prior?.account??options.account;const bearer=randomBytes(32).toString('base64url');const expected=Buffer.from('Bearer '+bearer);const nonce=randomBytes(24).toString('base64url');const timeout=options.interactive?300000:15000;const expiresAt=Date.now()+timeout;
   let succeed!:(result:Metadata)=>void;let fail!:(error:Error)=>void;const completed=new Promise<Metadata>((resolve,reject)=>{succeed=resolve;fail=reject});void completed.catch(()=>{});
   let used=false;let finished=false;
   const server=createServer(async(req,res)=>{
@@ -83,7 +83,7 @@ export async function startCompanionAuth(options:{root:string;requestDir:string;
     const request=JSON.stringify({schemaVersion:1,url:`http://127.0.0.1:${address.port}/provider`,bearer,nonce,expiresAt,resource,scopes,interactive:options.interactive,...(account?{account}:{})});
     if(process.platform==='win32'){writeWindowsPrivateFile(requestPath,Buffer.from(request));const s=lstatSync(requestPath);identity={dev:s.dev,ino:s.ino}}else {const fd=openSync(requestPath,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);
     try {const s=fstatSync(fd);identity={dev:s.dev,ino:s.ino};writeFileSync(fd,request);fsyncSync(fd)}finally{closeSync(fd)}}
-    const timer=setTimeout(()=>{if(!finished){finished=true;fail(new Error('Companion authentication timed out'))}},300000);timer.unref();
+    const timer=setTimeout(()=>{if(!finished){finished=true;fail(new Error('Companion authentication timed out'))}},timeout);timer.unref();
     return {requestPath,completed,async close(){if(closed)return;closed=true;clearTimeout(timer);if(!finished){finished=true;fail(new Error('Companion authentication cancelled'))}await new Promise<void>(resolve=>{server.close(()=>resolve());server.closeAllConnections()});try{const current=lstatSync(requestPath);if(identity&&current.dev===identity.dev&&current.ino===identity.ino)unlinkSync(requestPath)}catch{}unlock()}};
   } catch(error){server.close();if(identity&&requestPath){try{const current=lstatSync(requestPath);if(current.dev===identity.dev&&current.ino===identity.ino)unlinkSync(requestPath)}catch{}}unlock();throw error}
 }

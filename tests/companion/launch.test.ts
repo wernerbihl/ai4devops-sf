@@ -40,3 +40,17 @@ test('orchestrator installs a private profile and transfers the fixture session 
   assert.equal(result.account.id,'test');assert.equal(readFileSync(join(root,'vault','native-copilot'),'utf8'),'fixed-nonsecret-fixture');
  } finally {rmSync(root,{recursive:true});}
 });
+
+test('silent refresh binds the stored account and replaces the vault credential',async()=>{
+ const {authenticateViaCompanion,refreshCompanionCredential}=await import('../../src/install/companion-launch.ts');
+ const {mkdirSync}=await import('node:fs');
+ const root=mkdtempSync(join(tmpdir(),'sf-companion-refresh-'));const requestDir=join(root,'request');const executable=join(root,'fake-code');const observed=join(root,'options.json');mkdirSync(requestDir,{mode:0o700});mkdirSync(join(root,'vault'),{mode:0o700});
+ const extension=new URL('../../runtime/vscode-companion/extension.cjs',import.meta.url).pathname;
+ writeFileSync(executable,`#!${process.execPath}\nif(process.argv.includes('--new-window')){const c=require(${JSON.stringify(extension)});c.runAuthentication({authentication:{getSession:async(_id,_scopes,options)=>{require('node:fs').writeFileSync(${JSON.stringify(observed)},JSON.stringify(options));return {accessToken:'fixed-nonsecret-refresh',account:{id:'test',label:'Test'},scopes:['read:user','user:email']}}}},process.env.SF_COMPANION_REQUEST).catch(()=>process.exitCode=1)}\n`,{mode:0o700});
+ try {
+  await authenticateViaCompanion({root,requestDir,installationId:'fixture',codeExecutable:executable,interactive:true});
+  await refreshCompanionCredential({root,requestDir,installationId:'fixture',codeExecutable:executable});
+  assert.deepEqual(JSON.parse(readFileSync(observed,'utf8')),{silent:true,account:{id:'test',label:'Test'}});
+  assert.equal(readFileSync(join(root,'vault','native-copilot'),'utf8'),'fixed-nonsecret-refresh');
+ }finally{rmSync(root,{recursive:true})}
+});

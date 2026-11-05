@@ -26,6 +26,7 @@ import { proxyTopology } from './proxy-topology.ts';
 import { createProxyPlaceholder, finalizeProxyPolicy } from './proxy-policy.ts';
 import type { RuntimeConfig, IsolatedNativeTemplate } from './config.ts';
 import { readPrivateFile } from './config.ts';
+import { refreshCompanionCredential } from '../install/companion-launch.ts';
 import { loadCompanionCredential } from '../install/companion-auth.ts';
 import { navigationCommits } from '../owners/navigation.ts';
 import { createDesktopNavigation } from '../owners/desktop.ts';
@@ -178,7 +179,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     const protectedPaths = [...options.protectedPaths,markerPath,join(parent,'owner.sqlite'),launcher.controlIntentPath,launcher.pauseReceiptPath,policyPath,join(parent,'navigation.json')];
     boundary = createIsolatedNativeBoundary({owner,gate,worker,launcher,docker,modelProxy:proxyControl,image:t.nativeImage,networks:[internal.Id],protectedPaths});
     verify = createProfileVerifier({profiles:[{id:isolatedProfileId,ownerId:'vscode',providerId:'copilot',image:t.nativeImage,networks:[internal.Id],protectedPaths,boundary,mountTargets:targets,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot}}]});
-    const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const expiresIn=ref.expiresAt===undefined?undefined:Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn===undefined||expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:loadCompanionCredential(installation.root,ref).token,...(expiresIn===undefined?{}:{expiresIn}),scopes:ref.scopes})};
+    const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const startup=JSON.parse(readPrivateFile(join(installation.root,'startup.json')).toString());ensure(startup.installationId===installation.id&&typeof startup.codeExecutable==='string'&&startup.requestDir===join(installation.root,'auth-request'),'native_auth','Private companion configuration unavailable');await refreshCompanionCredential({root:installation.root,requestDir:startup.requestDir,installationId:installation.id,codeExecutable:startup.codeExecutable});const expiresIn=ref.expiresAt===undefined?undefined:Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn===undefined||expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:loadCompanionCredential(installation.root,ref).token,...(expiresIn===undefined?{}:{expiresIn}),scopes:ref.scopes})};
     return {owner,worker,gate,launcher,boundary,verify,authenticate,prepareDesktop,closeDesktop};
   }
   type Member = Awaited<ReturnType<typeof compose>>;

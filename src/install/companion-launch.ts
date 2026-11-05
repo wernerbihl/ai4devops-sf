@@ -70,3 +70,12 @@ export async function authenticateViaCompanion(input:{root:string;requestDir:str
   } catch {launcher?.stop();throw new Error('Companion authentication did not complete; inspect the private profile and selected account')}
   finally {await broker.close()}
 }
+
+/** Refresh only the already selected account through the isolated VS Code provider. */
+export async function refreshCompanionCredential(input:{root:string;requestDir:string;installationId:string;codeExecutable:string}):Promise<void> {
+  const {loadCompanionCredential}=await import('./companion-auth.ts');
+  const existing=loadCompanionCredential(input.root,{ref:'native-copilot',resource:'https://api.github.com',scopes:['read:user','user:email']});
+  await authenticateViaCompanion({...input,interactive:false,account:existing.account});
+  const updated=loadCompanionCredential(input.root,{ref:'native-copilot',resource:'https://api.github.com',scopes:['read:user','user:email']});
+  if(updated.account.id!==existing.account.id)throw new Error('Refreshed native account changed');
+}

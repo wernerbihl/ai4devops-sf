@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "version": "0.1.0",
-  "sourceCommit": "cb3590461dbb43b39a54794f88139474b143e2dd",
-  "sourceSha256": "bf57f22dcb81e0411efb2dde36021b8788d6ddb6df8108be32b3de8153b7c312",
+  "sourceCommit": "5b8ce3988a022b491b505edc78f3ee4ece4a17dc",
+  "sourceSha256": "87be7654b41708e67fac09e68fd7f1adc2d695f6c03b08eb6c90eb1bb2ae47c2",
   "sourceFiles": {
     ".gitignore": "0224f30e789c332a5abd8dbde01dbcc99415da1ef4eeb958ecef694f6879d276",
     "adapters/bb/README.md": "f73670aeb54bcba6ced39d57a92eab79b20363b40c7161d00bc617a5353d57d1",
@@ -49,7 +49,7 @@
     "scripts/check-recipe-templates.ts": "b8d97703beef2729119f19efcbc68c387fdb5049d0453d5ad85595b3714c593f",
     "scripts/dashboard-types.ts": "453561c00d315e63dde67d246d25b11b4679b09605b032e0bc30ebf069b3e3c2",
     "scripts/npm.ts": "c5e709fe46be464d1a6455eb13c35674f8b0c39cee21e39fa8f4ce5b4e77b6d4",
-    "scripts/package.ts": "c36d260c71dbc60d92c84ec1397df2fa11a23e891c23a278920e16df9ad9deca",
+    "scripts/package.ts": "9c4ba950c02ecdd6cda5fbf0df6e9099466542f32d22d1c76c585db949b9b4cb",
     "scripts/sync-protocol.ts": "bfad3167f6c14019c29136b28f30a58da3cf1eba5bd97536de86985c252ef1ea",
     "scripts/test.ts": "73ddc0709eb283fcb0f9c036463e2af7c178d57a32873ec8bd8bc1660b8f0779",
     "scripts/verify-adapters-browser.ts": "c062b1fdfb494f3a0b7b594cfb2037fb6b0b88382dcc993dc8b22ebef377aff0",

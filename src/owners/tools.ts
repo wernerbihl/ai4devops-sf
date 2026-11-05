@@ -17,6 +17,8 @@ export function createFactoryToolGate(options: {
     function current(start: NativeStart) { const actual = options.broker.nativeStart(start.attemptId, start.idempotencyKey); ensure(canonical(actual) === canonical(start), 'owner_binding', 'Native binding must match actual current reservation'); return options.broker.current(start.attemptId); }
     const gate: NativeClientTools & {
         prepare(start: NativeStart, key: string): void;
+        suspend(): void;
+        isSuspended(): boolean;
         binding(): {
             attemptId: string;
             fence: number;
@@ -25,6 +27,8 @@ export function createFactoryToolGate(options: {
         nativeIdentity(start?: NativeStart): NativeIdentity | undefined;
     } = {
         definitions: [{ name: 'sf_factory_operation', description: 'Execute one scoped factory operation. task.create/finding.upsert return real queued task IDs. result.submit accepts an explicit TaskResult proposal; native idle never completes a task. No host filesystem, shell, network, native start, or administration.', inputSchema: { type: 'object', properties: { operation: { type: 'string', enum: [...allowed] }, payload: { type: 'object' } }, required: ['operation', 'payload'] } }],
+        suspend() { bound = undefined; bindingKey = undefined; },
+        isSuspended() { return bound === undefined; },
         prepare(start, key) {
             ensure(key.trim(), 'owner_binding', 'Binding idempotency key is required');
             current(start);

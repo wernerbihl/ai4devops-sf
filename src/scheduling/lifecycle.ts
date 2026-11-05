@@ -1,5 +1,5 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import type { Attempt, Clock, CloseoutResult, NativeIdentity, OwnerEvent, TaskResult, TaskSpec } from '../contracts/domain.ts';
+import type { Attempt, Clock, CloseoutResult, NativeIdentity, OwnerEvent, TaskResult, TaskSpec, NativeStart } from '../contracts/domain.ts';
 import type { NativeOwner } from '../contracts/owner.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { StoreError, ensure, fingerprint } from '../storage/database.ts';
@@ -12,6 +12,7 @@ import { hasCapabilityGrants } from './eligibility.ts';
 import { lifecycleActionKinds, verifySnapshot } from './recovery.ts';
 
 export interface TransientFailure { transient: boolean; reason: string }
+export interface HumanOpenContext { readonly start:NativeStart; assertCurrent():void }
 export interface LifecycleDeps {
   store: FactoryStore; clock: Clock;
   owner(identity: NativeIdentity): NativeOwner;
@@ -20,6 +21,7 @@ export interface LifecycleDeps {
   /** Trusted managed-owner stopped receipts only. Preflight never starts a process or claims live history.
    * prepare runs under the acquired writer fence and active effect accounting; it must restore only the
    * original runtime/state, authenticate, rebind tools, verify containment and reconcile original history. */
+  managedHumanOpen?: {prepare(attempt:Attempt,key:string,context:HumanOpenContext):Promise<void>};
   managedContinuation?: {
     preflight(attempt: Attempt): Promise<PreparedStart | UnavailableStart | undefined>;
     prepare(attempt: Attempt, key: string): Promise<void>;
@@ -35,6 +37,8 @@ export interface LifecycleDeps {
 export interface Lifecycle {
   applyOwnerEvent(attemptId: string, event: OwnerEvent): Promise<void>;
   requestTakeover(taskId: string): Promise<void>;
+  /** Existing C5 OwnerPort.open delegates here, including already-human focus. */
+  openNative(identity:NativeIdentity,key:string):Promise<{uri?:string}>;
   returnControl(repositoryId: string): Promise<void>;
   resumeInput(requestId: string, value: unknown, key: string): Promise<void>;
   retryTransient(attemptId: string, failure: TransientFailure): Promise<Attempt | null>;
@@ -172,6 +176,25 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     }
     return null;
   }
+  async function openNative(identity:NativeIdentity,key:string):Promise<{uri?:string}> {
+    const r=store.getReservations().find(r=>r.attempt.native&&fingerprint(r.attempt.native)===fingerprint(identity));
+    ensure(r,'identity_missing','Original native identity is not owned by this factory');
+    const task=store.getTask(r.attempt.taskId)!;const repo=store.getRepository(task.spec.repositoryId)!;
+    const assertCurrent=()=>{const current=store.getTask(task.spec.id);const repository=store.getRepository(repo.id);const actual=record(r.attempt.id).reservation;
+      ensure(repository?.controlMode==='human'&&repository.revision===repo.revision&&current?.revision===task.revision&&current.status!=='cancelled'&&current.attemptIds.at(-1)===r.attempt.id&&fingerprint(actual.attempt.native)===fingerprint(identity)&&!store.getAdmissionState().activeLeases.some(l=>l.repositoryId===repo.id),'human_open_unadmitted','Human navigation admission changed; retain original runtime');};
+    assertCurrent();
+    const action=store.enqueueAction({key:`lifecycle:human-open:${key}`,kind:'lifecycle.human_open',payload:{attemptId:r.attempt.id,repositoryId:repo.id,identity}});
+    if(action.completedAt)return {};
+    const start:NativeStart={idempotencyKey:key,attemptId:r.attempt.id,task:task.spec,workspacePath:r.attempt.workspacePath,baseSha:r.attempt.baseSha,fence:r.lease.fence,profileId:r.attempt.profileId};
+    try {
+      await deps.managedHumanOpen?.prepare(r.attempt,key,{start,assertCurrent});assertCurrent();
+      const result=await deps.owner(identity).open(identity);assertCurrent();store.completeAction(action.id);return result;
+    } catch(error) {
+      // An unknown/late restart must keep repository control excluded from automatic admission.
+      try {if(await deps.owner(identity).quiesce(identity)!=='unknown')store.completeAction(action.id);}catch{}
+      throw error;
+    }
+  }
   async function takeover(taskId: string): Promise<void> {
     const task = store.getTask(taskId); ensure(task, 'not_found', 'Task not found');
     const repo = store.getRepository(task.spec.repositoryId)!;
@@ -185,7 +208,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     }
     await quiet(id);
     ensure(store.getRepository(repo.id)?.controlMode === 'human', 'control_mode', 'Native handoff requires paused repository control');
-    await deps.owner(r.attempt.native!).open(r.attempt.native!); store.completeAction(action.id);
+    await openNative(r.attempt.native!,action.key); store.completeAction(action.id);
   }
   const api: Lifecycle = {
     prepareCloseout: async (id, result) => {
@@ -222,6 +245,10 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       else store.validateLifecycleIdentity(id, event.identity);
       const r = record(id).reservation;
       if (event.type === 'snapshot') store.validateLifecycleIdentity(id, event.snapshot.identity);
+      // Retained human sessions and late events after explicit return are observational only.
+      // A fresh factory lease is required before events may drive factory budgets or input pauses.
+      const task=store.getTask(r.attempt.taskId)!;
+      if(store.getRepository(task.spec.repositoryId)?.controlMode==='human'||task.controlMode==='human'||!r.lease.active)return;
       const pendingInput = event.type === 'input' ? event.input : event.type === 'snapshot' && event.snapshot.state === 'waiting' ? event.snapshot.inputs[0] : undefined;
       if (pendingInput) {
         await pause(id, 'waiting_input', { kind: 'input', prompt: pendingInput.prompt, recovery: 'Answer this request to continue the original native session', inputSchema: pendingInput.schema, nativeInputId: pendingInput.id }); return;
@@ -235,9 +262,11 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       await checkBudgets();
     }),
     requestTakeover: taskId => operation(() => takeover(taskId)),
+    openNative: (identity,key)=>operation(()=>openNative(identity,key)),
     returnControl: repositoryId => operation(async () => {
       const repo = store.getRepository(repositoryId); ensure(repo, 'not_found', 'Repository not found');
       ensure(repo.controlMode === 'human', 'control_mode', 'Repository is not under human control');
+      ensure(!store.pendingActions().some(a=>a.kind==='lifecycle.human_open'&&a.payload.repositoryId===repositoryId),'human_open_pending','Human native control start/open is pending or unknown; reconcile before return');
       const attempts = store.getReservations().filter(r => r.lease.repositoryId === repositoryId && r.status === 'confirmed');
       for (const r of attempts.filter(r => store.getTask(r.attempt.taskId)!.attemptIds.at(-1) === r.attempt.id && !['completed', 'failed', 'cancelled'].includes(store.getTask(r.attempt.taskId)!.status))) {
         if (r.lease.active) await pause(r.attempt.id, 'needs_attention', undefined, true);
@@ -245,6 +274,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
         const token = await preflight(r.attempt.id);
         ensure(store.getAdmissionState().token === token, 'admission_changed', 'Policy changed while returning control');
       }
+      ensure(!store.pendingActions().some(a=>a.kind==='lifecycle.human_open'&&a.payload.repositoryId===repositoryId),'human_open_pending','Human native control start/open began during return; reconcile before release');
       store.returnLifecycleControl(repositoryId, repo.revision, store.getAdmissionState().token);
       // An explicit return cancels an unfinished open request; reconnect must not take control back.
       for (const action of store.pendingActions().filter(a => a.kind === 'lifecycle.takeover' && store.getTask(String(a.payload.taskId))?.spec.repositoryId === repositoryId)) store.completeAction(action.id);

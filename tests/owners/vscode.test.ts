@@ -220,6 +220,7 @@ test('managed native open refuses a missing registered connection authority befo
     let launches = 0;
     const owner = createVsCodeOwner({ journalPath: join(f.dir, 'owner.sqlite'), connect: f.host.connect, timeoutMs: 70, launcher: { ensureStarted: async () => ({ registryPath: '/unused' }) }, navigation: { launch: async () => { launches++; } } });
     try {
+        owner.admitHumanOpen(id, () => { });
         await assert.rejects(owner.open(id), /connection|authority/i);
         assert.equal(launches, 0);
     }
@@ -227,10 +228,13 @@ test('managed native open refuses a missing registered connection authority befo
         await owner.close();
     }
 });
-test('AHP idle without contained process proof never reports quiescence', async () => { const f = await fixture(); try {
-    const id = await f.owner.ensureSession(f.start);
-    assert.equal(await f.owner.quiesce(id), 'unknown');
-}
-finally {
-    await f.owner.close();
-} });
+test('AHP idle without contained process proof never reports quiescence', async () => {
+    const f = await fixture();
+    try {
+        const id = await f.owner.ensureSession(f.start);
+        assert.equal(await f.owner.quiesce(id), 'unknown');
+    }
+    finally {
+        await f.owner.close();
+    }
+});

@@ -82,8 +82,11 @@ test('managed stop proves detached writers gone and restart requires a live rese
         let checks = 0;
         await launcher.resume(start, { nativeIdentity() { checks++; return undefined; } });
         assert.ok(checks >= 3);
+        await launcher.stop!();
+        await assert.rejects(launcher.resumeHuman(start, () => { throw Error('not human'); }));
+        await launcher.resumeHuman(start, () => { });
         assert.equal(running, true);
-        assert.equal(calls.filter(a => a[1] === 'start').length, 1);
+        assert.equal(calls.filter(a => a[1] === 'start').length, 2);
     }
     finally {
         await rm(root, { recursive: true, force: true });

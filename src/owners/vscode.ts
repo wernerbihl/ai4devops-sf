@@ -56,6 +56,10 @@ export class VsCodeOwner implements NativeOwner {
     readonly metadataDirectory: string;
     private closed = false;
     private intentionalStop = false;
+    private humanOpen: {
+        identity: NativeIdentity;
+        assertCurrent: () => void;
+    } | undefined;
     private authentications = new Map<ProviderId, {
         resource: string;
         expiresAt: number;
@@ -121,7 +125,7 @@ export class VsCodeOwner implements NativeOwner {
                         if (event.event.type === 'action') {
                             const id = this.identities.get(event.channel);
                             if (id)
-                                this.scheduleObserve(id);
+                                this.scheduleObserve(id, client);
                         }
                     }
                 }
@@ -152,10 +156,14 @@ export class VsCodeOwner implements NativeOwner {
             catch { /* A consumer cannot break native control. */ }
         }
     }
-    private scheduleObserve(identity: NativeIdentity) {
+    private scheduleObserve(identity: NativeIdentity, source: AhpClient) {
         const key = identity.chatId!;
         const previous = this.processing.get(key) ?? Promise.resolve();
-        const next = previous.then(async () => { const state = await this.readChat(identity); await this.processTools(identity, state); this.publish(identity, state); }).catch(() => { this.emit({ type: 'connection_lost', identity, reason: 'Native observation failed; reconcile before continuing', at: new Date().toISOString() }); });
+        const next = previous.then(async () => { if (this.client !== source)
+            return; const state = await this.readChat(identity); if (this.client !== source)
+            return; await this.processTools(identity, state, source); if (this.client === source)
+            this.publish(identity, state); }).catch(() => { if (this.client === source)
+            this.emit({ type: 'connection_lost', identity, reason: 'Native observation failed; reconcile before continuing', at: new Date().toISOString() }); });
         this.processing.set(key, next);
         void next.finally(() => {
             if (this.processing.get(key) === next)
@@ -421,9 +429,23 @@ export class VsCodeOwner implements NativeOwner {
             return 'unknown';
         }
     }
+    admitHumanOpen(identity: NativeIdentity, assertCurrent: () => void) { this.journal.owned(identity); assertCurrent(); this.humanOpen = { identity, assertCurrent }; }
     async open(identity: NativeIdentity): Promise<{
         uri?: string;
-    }> { await this.nativeSession(identity); const navigation = this.options.navigation ?? createNativeNavigation(); ensure(!this.options.launcher || navigation.connectionAuthority, 'owner_navigation', 'Managed native opening requires its registered connection authority'); const uri = nativeOpenUri(identity, this.commit, navigation.connectionAuthority); await navigation.launch(uri); return { uri }; }
+    }> {
+        const admission = this.humanOpen;
+        this.humanOpen = undefined;
+        ensure(!this.options.launcher || admission && canonical(admission.identity) === canonical(identity), 'owner_navigation', 'Managed native opening requires admitted human control');
+        admission?.assertCurrent();
+        await this.nativeSession(identity);
+        admission?.assertCurrent();
+        const navigation = this.options.navigation ?? createNativeNavigation();
+        ensure(!this.options.launcher || navigation.connectionAuthority, 'owner_navigation', 'Managed native opening requires its registered connection authority');
+        const uri = nativeOpenUri(identity, this.commit, navigation.connectionAuthority);
+        admission?.assertCurrent();
+        await navigation.launch(uri);
+        return { uri };
+    }
     subscribe(listener: (event: OwnerEvent) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
     private async wait(check: () => Promise<boolean>, message: string) {
         const deadline = Date.now() + this.timeoutMs;
@@ -434,16 +456,20 @@ export class VsCodeOwner implements NativeOwner {
         } while (Date.now() < deadline);
         throw new Error(message);
     }
-    private async processTools(identity: NativeIdentity, state: ChatState) {
+    private async processTools(identity: NativeIdentity, state: ChatState, source: AhpClient) {
         if (!state.activeTurn)
             return;
         const client = await this.rpc();
+        if (client !== source)
+            return;
         for (const part of state.activeTurn.responseParts) {
             if (part.kind !== 'toolCall')
                 continue;
             const tool = part.toolCall;
             if (tool.contributor?.kind !== 'client' || tool.contributor.clientId !== factoryClientId || tool.status !== 'running')
                 continue;
+            if (this.client !== source)
+                return;
             let result: Record<string, unknown>;
             let success = false;
             try {
@@ -454,6 +480,8 @@ export class VsCodeOwner implements NativeOwner {
             catch {
                 result = { error: 'Factory operation denied or outcome unknown; inspect factory attention' };
             }
+            if (this.client !== source)
+                return;
             client.dispatch(identity.chatId!, { type: 'chat/toolCallComplete' as ActionType.ChatToolCallComplete, turnId: state.activeTurn.id, toolCallId: tool.toolCallId, result: { success, pastTenseMessage: success ? 'Factory operation recorded' : 'Factory operation refused', structuredContent: result } });
         }
     }

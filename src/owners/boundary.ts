@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ActionType, RootState, TerminalState, TerminalClaimKind } from '@microsoft/agent-host-protocol';
-import type { NativeStart } from '../contracts/domain.ts';
+import type { NativeIdentity, NativeStart } from '../contracts/domain.ts';
 import type { NativeToolBoundary, NativeToolSettings } from '../isolation/docker.ts';
 import { denialChecks } from '../isolation/profiles.ts';
 import { resolveNativeMounts, pathContains, type NativeMountTarget } from '../isolation/mounts.ts';
@@ -41,6 +41,7 @@ export function createVsCodeNativeToolBoundary(options: {
     modelProxy?: NativeModelProxyControl;
 }): NativeToolBoundary & {
     prepareModelTransport(start: NativeStart): Promise<void>;
+    prepareHumanOpen(start: NativeStart, identity: NativeIdentity, assertCurrent: () => void, authenticate: () => Promise<void>): Promise<void>;
 } {
     let receipt: {
         processIdentity: string;
@@ -52,6 +53,8 @@ export function createVsCodeNativeToolBoundary(options: {
     } | undefined;
     const { owner, gate, launcher } = options;
     ensure(options.protectedPaths.some(p => pathContains(p, owner.metadataDirectory)), 'owner_boundary', 'Owner journal metadata directory must be protected');
+    if (launcher.controlIntentPath)
+        ensure(options.protectedPaths.some(p => pathContains(p, launcher.controlIntentPath)), 'owner_boundary', 'Managed control-start metadata must be protected');
     async function root() { const { result, subscription } = await (await owner.rpc()).subscribe('ahp-root://'); await subscription.close(); ensure(result.snapshot?.resource === 'ahp-root://', 'owner_boundary', 'Missing native root snapshot'); return result.snapshot.state as RootState; }
     function policy(start: NativeStart) {
         ensure(start.task.providerId === 'copilot', 'owner_boundary', 'No verified managed Codex tool policy is registered');
@@ -98,8 +101,14 @@ export function createVsCodeNativeToolBoundary(options: {
                 await client.request('disposeTerminal', { channel });
         }
     }
-    async function challenge(start: NativeStart, nonce: string, protectedPaths: readonly string[]) {
-        ensure(canonical({ ...gate.currentStart(), idempotencyKey: '' }) === canonical({ ...start, idempotencyKey: '' }), 'owner_binding', 'Native boundary is bound to another reservation');
+    async function challenge(start: NativeStart, nonce: string, protectedPaths: readonly string[], humanGuard?: () => void) {
+        const assertBinding = () => { if (humanGuard) {
+            humanGuard();
+            ensure(gate.isSuspended(), 'owner_binding', 'Factory client gate must stay closed during human control');
+        }
+        else
+            ensure(canonical({ ...gate.currentStart(), idempotencyKey: '' }) === canonical({ ...start, idempotencyKey: '' }), 'owner_binding', 'Native boundary is bound to another reservation'); };
+        assertBinding();
         await assertPolicy(start);
         const before = await launcher.inspect();
         const proxyBefore = await inspectModelProxy(options.modelProxy, start, before.runtimeId);
@@ -130,15 +139,20 @@ export function createVsCodeNativeToolBoundary(options: {
             ensure(denied, 'owner_canary', 'External native client tool bypass detected');
         }
         await assertPolicy(start);
-        ensure(canonical({ ...gate.currentStart(), idempotencyKey: '' }) === canonical({ ...start, idempotencyKey: '' }), 'owner_binding', 'Native binding changed during challenge');
-        receipt = { runtimeId: before.runtimeId, processIdentity: before.processIdentity, attemptId: start.attemptId, fence: start.fence, result, proxy: proxyBefore };
+        assertBinding();
+        if (!humanGuard)
+            receipt = { runtimeId: before.runtimeId, processIdentity: before.processIdentity, attemptId: start.attemptId, fence: start.fence, result, proxy: proxyBefore };
         return { nonce, runtimeId: before.runtimeId, processIdentity: before.processIdentity, denied: true, checks: denialChecks };
     }
-    async function prepareModelTransport(start: NativeStart): Promise<void> {
+    async function prepareModelTransport(start: NativeStart, human?: {
+        identity: NativeIdentity;
+        assertCurrent: () => void;
+    }): Promise<void> {
+        human?.assertCurrent();
         const actual = await launcher.inspect();
         await inspectModelProxy(options.modelProxy, start, actual.runtimeId);
-        const identity = gate.nativeIdentity?.(start);
-        if (identity) {
+        const identity = human?.identity ?? gate.nativeIdentity?.(start);
+        if (identity && !human) {
             const state = await owner.chat(identity);
             ensure(!state.activeTurn && !state.backgroundWork?.length && !state.queuedMessages?.length && !(state.status & 8), 'owner_binding', 'Native runtime must be quiescent before model transport preparation');
         }
@@ -146,7 +160,8 @@ export function createVsCodeNativeToolBoundary(options: {
         ensure(config?.schema.properties['http.proxy']?.type === 'string' && config.schema.properties['http.noProxy']?.type === 'array' && config.schema.properties.systemProxyEnabled?.type === 'boolean', 'owner_model_proxy', 'Native host did not advertise supported proxy configuration');
         const matches = (state: RootState) => state.config?.values['http.proxy'] === MODEL_PROXY_URL && canonical(state.config.values['http.noProxy']) === canonical([]) && state.config.values.systemProxyEnabled === false;
         if (!matches(await root())) {
-            ensure(!identity, 'owner_model_proxy', 'Existing native session model transport cannot be replaced');
+            ensure(!identity || human, 'owner_model_proxy', 'Existing native session model transport cannot be replaced');
+            human?.assertCurrent();
             (await owner.rpc()).dispatch('ahp-root://', { type: 'root/configChanged' as ActionType.RootConfigChanged, config: { 'http.proxy': MODEL_PROXY_URL, 'http.noProxy': [], systemProxyEnabled: false } });
             const deadline = Date.now() + owner.timeoutMs;
             while (Date.now() < deadline) {
@@ -157,7 +172,37 @@ export function createVsCodeNativeToolBoundary(options: {
             throw new Error('Native model proxy configuration was not observed');
         }
     }
-    return { prepareModelTransport, async prepareBinding(start, key) {
+    async function prepareHumanOpen(start: NativeStart, identity: NativeIdentity, assertCurrent: () => void, authenticate: () => Promise<void>) {
+        assertCurrent();
+        gate.suspend();
+        receipt = undefined;
+        await prepareModelTransport(start, { identity, assertCurrent });
+        assertCurrent();
+        const state = await root();
+        assertCurrent();
+        ensure(state.config?.schema.properties.modelCapabilityOverrides?.type === 'object', 'owner_boundary', 'Native provider tool policy is unavailable');
+        if (canonical(state.config.values.modelCapabilityOverrides) !== canonical(policy(start)))
+            (await owner.rpc()).dispatch('ahp-root://', { type: 'root/configChanged' as ActionType.RootConfigChanged, config: { modelCapabilityOverrides: policy(start) } });
+        await authenticate();
+        assertCurrent();
+        const deadline = Date.now() + owner.timeoutMs;
+        while (true) {
+            assertCurrent();
+            try {
+                await assertPolicy(start);
+                break;
+            }
+            catch (error) {
+                if (Date.now() >= deadline)
+                    throw error;
+                await delay(10);
+            }
+        }
+        assertCurrent();
+        await challenge(start, randomBytes(24).toString('base64url'), await resolveProtectedPaths(options.protectedPaths), assertCurrent);
+        assertCurrent();
+    }
+    return { prepareModelTransport, prepareHumanOpen, async prepareBinding(start, key) {
             receipt = undefined;
             await prepareModelTransport(start);
             const runtime = await launcher.inspect();

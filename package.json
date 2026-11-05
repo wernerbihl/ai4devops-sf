@@ -46,6 +46,7 @@
     "dist/",
     "release/runtime-lock.json",
     "release/provenance.json",
+    "release/COMPATIBILITY.md",
     "README.md"
   ],
   "bundleDependencies": [

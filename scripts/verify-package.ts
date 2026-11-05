@@ -1,3 +1,4 @@
+import {runNpm} from './npm.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -7,7 +8,7 @@ export interface PackageReport { artifact:string; version:string; platform:strin
 export async function verifyPackage(tarball:string,scratchRoot:string):Promise<PackageReport>{
   tarball=resolve(tarball);scratchRoot=resolve(scratchRoot);mkdirSync(scratchRoot,{recursive:true});
   const cache=join(scratchRoot,'empty npm cache');mkdirSync(cache);
-  const project=join(scratchRoot,'consumer 工場');mkdirSync(project);execFileSync(process.platform==='win32'?'npm.cmd':'npm',['install','--offline','--omit=dev','--ignore-scripts','--no-audit','--no-fund','--cache',cache,'--prefix',project,tarball],{stdio:'pipe',env:{...process.env,NODE_PATH:'',npm_config_cache:cache},timeout:120_000});
+  const project=join(scratchRoot,'consumer 工場');mkdirSync(project);runNpm(['install','--offline','--omit=dev','--ignore-scripts','--no-audit','--no-fund','--cache',cache,'--prefix',project,tarball],{stdio:'pipe',encoding:'utf8',env:{...process.env,NODE_PATH:'',npm_config_cache:cache},timeout:120_000});
   const root=join(project,'node_modules/ai4devops-sf');
   if(existsSync(join(root,'src'))||existsSync(join(root,'node_modules/@vscode/vsce'))||existsSync(join(root,'node_modules/typescript')))throw Error('Development source/dependencies leaked into runtime');
   const manifest=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));

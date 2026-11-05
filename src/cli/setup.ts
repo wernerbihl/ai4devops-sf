@@ -11,15 +11,22 @@ import { loadDefaults, saveDefaults, type SetupDefaults } from '../install/defau
 import { clearStagedCredential } from '../install/staging-cleanup.ts';
 import { planInstall, type SetupAnswers } from '../install/plan.ts';
 import { applyInstall } from '../install/install.ts';
+import { locateInstallation } from '../install/locator.ts';
+import { reconfigureInstallation } from '../install/reconfigure.ts';
 
 export interface SetupIo {out(text:string):void;err(text:string):void;ask(prompt:string):Promise<string>}
 function defaultCode():string {
   for(const directory of (process.env.PATH??'').split(process.platform==='win32'?';':':'))for(const name of (process.platform==='win32'?['Code.exe','Code - Insiders.exe']:['code','code-insiders'])){const path=resolve(directory||'.',name);try{accessSync(path,constants.X_OK);return path}catch{}}
   return process.platform==='win32'?join(process.env.LOCALAPPDATA??homedir(),'Programs','Microsoft VS Code','Code.exe'):'/usr/bin/code';
 }
-export async function runSetup(io:SetupIo,options:{docker?:DockerPort;defaultsPath?:string;locatorPath?:string;sourceRoot?:string;tempParent?:string;authenticate?:typeof authenticateViaCompanion}={}):Promise<number> {
+export async function runSetup(io:SetupIo,options:{docker?:DockerPort;defaultsPath?:string;locatorPath?:string;sourceRoot?:string;tempParent?:string;authenticate?:typeof authenticateViaCompanion;systemctl?:string}={}):Promise<number> {
   const saved=loadDefaults(options.defaultsPath);const defaults:SetupDefaults=saved??{directory:join(homedir(),'.ai4devops-sf'),taktSeconds:60,ownerId:'vscode',providers:['copilot'],codeExecutable:defaultCode()};
   const ask=async(label:string,value:string)=>{const answer=(await io.ask(`${label} [${value}]: `)).trim();return answer||value};
+  const existing=await locateInstallation(options.locatorPath);if(existing){
+    const directory=await ask('Installation directory',existing.root);const taktSeconds=Number(await ask('Takt seconds',String(defaults.taktSeconds)));if(!Number.isSafeInteger(taktSeconds)||taktSeconds<1||taktSeconds>86400)throw new Error('Takt must be between 1 and 86400 seconds');
+    io.out(`Reconfigure installation ${existing.id} at ${directory}; existing native sessions and data are retained. Takt: ${taktSeconds} seconds.\n`);const answer=(await io.ask('Reconfigure (Y/n): ')).trim().toLowerCase();if(answer&&answer!=='y'&&answer!=='yes'){io.out('Reconfiguration cancelled.\n');return 0}
+    const result=await reconfigureInstallation(existing,{directory,sourceRoot:options.sourceRoot??resolve(fileURLToPath(new URL('../../',import.meta.url))),taktSeconds},{...(options.locatorPath?{locatorPath:options.locatorPath}:{}),...(options.docker?{docker:options.docker}:{}),...(options.systemctl?{systemctl:options.systemctl}:{})});io.out(`Reconfigured installation: ${result.root}\n`);return 0;
+  }
   const directory=await ask('Installation directory',defaults.directory);
   const takt=Number(await ask('Takt seconds',String(defaults.taktSeconds)));
   const providerText=await ask('Providers (copilot,codex)',defaults.providers.join(','));

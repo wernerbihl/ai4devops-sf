@@ -161,3 +161,5 @@ export async function writeWindowsPrivateFileAsync(path:string,data:Buffer):Prom
 export async function replaceWindowsPrivateFileAsync(path:string,data:Buffer):Promise<void>{await executeAsync('replace-private',path,data)}
 export async function readWindowsPrivateFileAsync(path:string):Promise<Buffer>{return executeAsync('read-private',path)}
 export async function assertWindowsOwnedFileAsync(path:string):Promise<void>{await executeAsync('check-owned-file',path)}
+
+export async function protectWindowsFileAsync(path:string):Promise<void>{await executeAsync('protect-file',path)}

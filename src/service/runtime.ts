@@ -39,12 +39,13 @@ import { stopUninstallNativeResources } from './uninstall-native.ts';
 import { backupInstallationState, verifyInstallationBackup } from '../install/backup.ts';
 import { requireCleanH2Close } from '../kestra/maintenance.ts';
 import { prepareCandidate, readLaunchCandidate } from './reconfiguration.ts';
+import type { VerifiedRollbackReceipt } from '../install/rollback.ts';
 import { removeInventoriedResources, type InventoriedResource } from '../install/owned-removal.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
 import { createDispatchApi } from './dispatch-api.ts';
 import { acquireInstallationSingletonAsync } from './singleton.ts';
 import { startPrivateControl } from './control.ts';
-import { loadRuntimeConfigAsync, readVaultSecretAsync } from './config.ts';
+import { loadRuntimeConfigAsync, readPrivateFileAsync, readVaultSecretAsync } from './config.ts';
 import { createNativeFleet, isolatedProfileId } from './native.ts';
 import type { NativeFleet } from './native.ts';
 import { reconcileInstallation } from './reconcile.ts';
@@ -66,6 +67,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
     earlyLifecycle.observeBudgets();const bootstrapTimer=setInterval(()=>earlyLifecycle.observeBudgets(),250);cleanup.push(()=>clearInterval(bootstrapTimer));
     // A retained intent fences startup before any create/start/adoption of external writers.
     let maintenanceIntent=store.pendingActions().find(action=>action.kind==='maintenance.intent');
+    const uninstallPath=join(installation.root,'uninstall-pending.json');if(existsSync(uninstallPath)){const pending=JSON.parse((await readPrivateFileAsync(uninstallPath)).toString());ensure(pending.schemaVersion===1&&pending.installationId===installation.id&&pending.state==='pending','runtime_maintenance','Uninstall request identity is unknown');if(!maintenanceIntent)maintenanceIntent=store.enqueueAction({key:'maintenance:'+randomUUID(),kind:'maintenance.intent',payload:{installationId:installation.id,purpose:'uninstall'}});ensure(maintenanceIntent.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='uninstall','runtime_maintenance','Conflicting maintenance intent requires recovery')}
     let maintenance=!!maintenanceIntent;
     const candidate=maintenanceIntent&&typeof process.argv[1]==='string'?await readLaunchCandidate({id:installation.id,root:installation.root,store,intent:maintenanceIntent,node:process.execPath,entry:process.argv[1]}):undefined;
     const maintenanceGate=new MaintenanceGate();if(maintenance)void maintenanceGate.close();
@@ -239,18 +241,21 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       return items;
     }
     const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
-    let maintenanceJob:{kind:'maintenance'|'backup'|'cleanup';promise:Promise<unknown>}|undefined;
+    let maintenanceJob:{kind:'maintenance'|'backup'|'cleanup'|'activation'|'prepare';promise:Promise<unknown>}|undefined;
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();
       if(method==='GET'&&path==='/readiness')return{health:await health(),owners:await owners.list(requiredEmpty),reconciliation:lastReport};
+      if(method==='GET'&&path==='/relocation-check'){const retained=store.getReservations().filter(r=>r.attempt.native).map(r=>({workspace:r.attempt.workspacePath,native:r.attempt.native}));return {root:installation.root,workspaces:[...new Set(retained.map(r=>r.workspace))],native:retained.map(r=>r.native),profile:existsSync(join(installation.root,'vscode-profile'))?join(installation.root,'vscode-profile'):null}}
       if(method==='GET'&&path==='/candidate-health'||method==='POST'&&path==='/activate-candidate'){
         ensure(candidate&&maintenanceIntent&&maintenance&&!stopping&&!recovering&&engine&&relayBridge&&!maintenanceJob,'runtime_maintenance','Prepared candidate is not ready');
-        ensure((await readLaunchCandidate({id:installation.id,root:installation.root,store,intent:maintenanceIntent,node:process.execPath,entry:process.argv[1]!}))?.id===candidate.id,'runtime_maintenance','Candidate identity changed');
+        const originalIntent=maintenanceIntent;const job=(async()=>{
+        ensure((await readLaunchCandidate({id:installation.id,root:installation.root,store,intent:originalIntent,node:process.execPath,entry:process.argv[1]!}))?.id===candidate.id,'runtime_maintenance','Candidate identity changed');
         const blocked=(await inspectMaintenanceBlockers(installation.root,store)).filter(item=>item.kind!=='action'||item.identity!==candidate.id);ensure(!blocked.length,'runtime_maintenance','Candidate retains an unresolved effect');
         const natives=await verifyMaintenanceNative('reconfigure'),resources=await inspectOwnedKestra(installation,store),relay=await inspectOwnedBrokerRelay({id:installation.id,networkId:resources.networkId,docker:installation.docker,store});ensure(!relay.stopped&&(await inspectProtectedMounts(installation.root,resources.containerId,installation.docker,natives.flatMap(i=>i.containers))).length===0&&config.native.length>0&&store.snapshot().recipes.some(r=>r.ready),'runtime_maintenance','Candidate dependencies are not ready');
         ensure(typeof candidate.payload.backupDirectory==='string'&&typeof candidate.payload.closeReceiptId==='string','runtime_maintenance','Original backup identity is unavailable');await verifyInstallationBackup({id:installation.id,root:installation.root,directory:candidate.payload.backupDirectory,store,closeReceiptId:candidate.payload.closeReceiptId});
         if(method==='GET')return {state:'ready',candidateId:candidate.id};
-        ensure(Object.keys(input).length===0,'runtime_maintenance','Unexpected activation input');store.commitReconfiguration(maintenanceIntent.id,candidate.id,installation.id);maintenance=false;maintenanceIntent=undefined;maintenanceGate.reopen();coordinator.enableAdmission();return {state:'active',candidateId:candidate.id};
+        ensure(Object.keys(input).length===0,'runtime_maintenance','Unexpected activation input');store.commitReconfiguration(originalIntent.id,candidate.id,installation.id);maintenance=false;maintenanceIntent=undefined;maintenanceGate.reopen();coordinator.enableAdmission();return {state:'active',candidateId:candidate.id};
+        })();maintenanceJob={kind:'activation',promise:job};try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
       }
       if(method==='POST'&&path==='/maintenance'){
         ensure(Object.keys(input).length===1&&(input.purpose==='uninstall'||input.purpose==='reconfigure'),'runtime_maintenance','Explicit maintenance purpose required');
@@ -281,7 +286,9 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         const retained=[...new Map(store.getReservations().filter(r=>r.attempt.native).map(r=>[canonical(r.attempt.native),r.attempt.native!])).values()];
         const nativeResults=await Promise.allSettled(retained.map(identity=>owners.get(identity.ownerId).quiesce(identity)));
         const nativeBlocked=nativeResults.flatMap((result,index)=>result.status==='fulfilled'&&result.value!=='unknown'?[]:[{kind:'native',identity:fingerprint(retained[index])}]);
-        let blocked=await inspectMaintenanceBlockers(installation.root,store);
+        const originalCandidate=purpose==='reconfigure'?store.getActionByKey('maintenance:candidate:'+maintenanceIntent!.id):undefined;
+        const retainCandidate=(items:Awaited<ReturnType<typeof inspectMaintenanceBlockers>>)=>items.filter(item=>item.kind!=='action'||item.identity!==originalCandidate?.id);
+        let blocked=retainCandidate(await inspectMaintenanceBlockers(installation.root,store));
         if(blocked.length||nativeBlocked.length)return {state:'admission_closed',blocked:[...blocked,...nativeBlocked]};
         try {
           await verifyMaintenanceNative('reconfigure');
@@ -296,7 +303,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
           await stopOwnedBrokerRelay(relay);
           await stopOwnedKestra(installation,engineResources,store);
           if(engine){engine.close();engine=undefined;engineReason='Engine stopped for maintenance'}
-          blocked=await inspectMaintenanceBlockers(installation.root,store);
+          blocked=retainCandidate(await inspectMaintenanceBlockers(installation.root,store));
           await verifyMaintenanceNative(purpose);
           ensure((await inspectOwnedBrokerRelay(relay)).stopped,'runtime_maintenance','Broker relay stop not proven');
           ensure((await inspectProtectedMounts(installation.root,engineResources.containerId,installation.docker,nativeInventory.flatMap(item=>item.containers))).length===0,'runtime_maintenance','An unowned protected mount appeared');
@@ -335,11 +342,20 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
           const removed=await removeInventoriedResources({id:installation.id,docker:installation.docker,store,resources});const result=store.enqueueAction({key:cleanupKey+':result',kind:'maintenance.cleanup_result',payload:{intentId:action.id,removed}});store.completeAction(result.id);store.completeAction(action.id);return {state:'resources_removed',removed,blocked:[]};
         })();maintenanceJob={kind:'cleanup',promise:job};try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
       }
+      if(method==='GET'&&path==='/rollback-evidence'){
+        ensure(maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='reconfigure'&&!stopping&&!maintenanceJob,'runtime_maintenance','Original reconfiguration required');const original=store.getActionByKey('maintenance:candidate:'+maintenanceIntent.id);ensure(original?.kind==='maintenance.candidate'&&!original.completedAt,'runtime_maintenance','Original candidate required');
+        const blocked=(await inspectMaintenanceBlockers(installation.root,store)).filter(item=>item.kind!=='action'||item.identity!==original.id);ensure(!blocked.length,'runtime_maintenance','An external outcome is unresolved');const natives=await verifyMaintenanceNative('reconfigure'),resources=await inspectOwnedKestra(installation,store);ensure(await areOwnedKestraStopped(installation,store),'runtime_maintenance','Original engine remains active');const relay=await inspectOwnedBrokerRelay({id:installation.id,networkId:resources.networkId,docker:installation.docker,store});ensure(relay.stopped&&relay.startedAt&&(await inspectProtectedMounts(installation.root,resources.containerId,installation.docker,natives.flatMap(i=>i.containers))).length===0,'runtime_maintenance','Original relay or mount proof unavailable');const close=await requireCleanH2Close(installation,store);ensure(typeof original.payload.backupDirectory==='string'&&typeof original.payload.closeReceiptId==='string','runtime_maintenance','Original backup unavailable');await verifyInstallationBackup({id:installation.id,root:installation.root,directory:original.payload.backupDirectory,store,closeReceiptId:original.payload.closeReceiptId});
+        const receipts:VerifiedRollbackReceipt[]=[];for(const id of [resources.containerId,resources.transportContainerId]){const values=JSON.parse(await installation.docker.command(['container','inspect',id]));const c=values?.[0];ensure(values?.length===1&&c?.Id===id&&typeof c.State?.StartedAt==='string','runtime_maintenance','Original generation unavailable');const startedAt=c.State.StartedAt;receipts.push({key:'kestra:generation:'+id+':'+startedAt,kind:'kestra.generation',payload:{installationId:installation.id,containerId:id,startedAt}},{key:'kestra:maintenance-stop:'+id+':'+startedAt,kind:'kestra.maintenance_stop',payload:{containerId:id,startedAt}})}
+        receipts.push({key:'kestra:h2-closed:'+resources.containerId+':'+close.payload.startedAt,kind:'kestra.h2_closed',payload:{installationId:installation.id,containerId:resources.containerId,startedAt:close.payload.startedAt}},{key:'broker:relay:generation:'+relay.containerId+':'+relay.startedAt,kind:'broker.relay_generation',payload:{installationId:installation.id,containerId:relay.containerId,startedAt:relay.startedAt,networkId:resources.networkId}},{key:'broker:relay:stop:'+relay.containerId+':'+relay.startedAt,kind:'broker.relay_stop',payload:{installationId:installation.id,containerId:relay.containerId,startedAt:relay.startedAt,networkId:resources.networkId}});
+        for(const receipt of receipts){const action=store.getActionByKey(receipt.key);ensure(action?.kind===receipt.kind&&action.completedAt&&Object.entries(receipt.payload).every(([key,value])=>canonical(action.payload[key])===canonical(value)),'runtime_maintenance','Original stop receipt is unconfirmed')}
+        return {candidateId:original.id,backupDirectory:original.payload.backupDirectory,closeReceiptId:original.payload.closeReceiptId,receipts};
+      }
       if(method==='POST'&&path==='/prepare-candidate'){
         ensure(!stopping&&maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='reconfigure'&&Object.keys(input).sort().join(',')==='entry,node,taktSeconds'&&typeof input.node==='string'&&typeof input.entry==='string'&&typeof input.taktSeconds==='number'&&!maintenanceJob,'runtime_maintenance','Original reconfiguration intent required');
-        ensure(!(await inspectMaintenanceBlockers(installation.root,store)).length,'runtime_maintenance','Unresolved writers retain the installation');const natives=await verifyMaintenanceNative('reconfigure');const resources=await inspectOwnedKestra(installation,store);ensure(await areOwnedKestraStopped(installation,store),'runtime_maintenance','Engine must remain stopped');const relay=await inspectOwnedBrokerRelay({id:installation.id,networkId:resources.networkId,docker:installation.docker,store});ensure(relay.stopped&&(await inspectProtectedMounts(installation.root,resources.containerId,installation.docker,natives.flatMap(item=>item.containers))).length===0,'runtime_maintenance','Original writer proof changed');
-        const close=await requireCleanH2Close(installation,store);const receipt=store.getActionByKey('maintenance:backup:'+maintenanceIntent.id+':result');ensure(receipt?.kind==='maintenance.backup_result'&&receipt.completedAt&&typeof receipt.payload.directory==='string','runtime_maintenance','Verified original backup unavailable');await verifyInstallationBackup({id:installation.id,root:installation.root,directory:receipt.payload.directory,store,closeReceiptId:close.id});
-        const candidate=await prepareCandidate({id:installation.id,root:installation.root,store,intent:maintenanceIntent,node:input.node,entry:input.entry,taktSeconds:input.taktSeconds,closeReceiptId:close.id});return {state:'prepared',candidateId:candidate.id};
+        const originalIntent=maintenanceIntent;const job=(async()=>{ensure(!(await inspectMaintenanceBlockers(installation.root,store)).length,'runtime_maintenance','Unresolved writers retain the installation');const natives=await verifyMaintenanceNative('reconfigure');const resources=await inspectOwnedKestra(installation,store);ensure(await areOwnedKestraStopped(installation,store),'runtime_maintenance','Engine must remain stopped');const relay=await inspectOwnedBrokerRelay({id:installation.id,networkId:resources.networkId,docker:installation.docker,store});ensure(relay.stopped&&(await inspectProtectedMounts(installation.root,resources.containerId,installation.docker,natives.flatMap(item=>item.containers))).length===0,'runtime_maintenance','Original writer proof changed');
+        const close=await requireCleanH2Close(installation,store);const receipt=store.getActionByKey('maintenance:backup:'+originalIntent.id+':result');ensure(receipt?.kind==='maintenance.backup_result'&&receipt.completedAt&&typeof receipt.payload.directory==='string','runtime_maintenance','Verified original backup unavailable');await verifyInstallationBackup({id:installation.id,root:installation.root,directory:receipt.payload.directory,store,closeReceiptId:close.id});
+        const candidate=await prepareCandidate({id:installation.id,root:installation.root,store,intent:originalIntent,node:input.node as string,entry:input.entry as string,taktSeconds:input.taktSeconds as number,closeReceiptId:close.id});return {state:'prepared',candidateId:candidate.id};
+        })();maintenanceJob={kind:'prepare',promise:job};try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
       }
       if(method==='POST'&&path==='/backup'){
         ensure(!stopping&&Object.keys(input).length===0&&maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='reconfigure','runtime_maintenance','Original reconfiguration intent required');

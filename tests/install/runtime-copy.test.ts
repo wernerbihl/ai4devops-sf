@@ -18,3 +18,6 @@ test('installed runtime copies Node and only production dependencies without a s
   await assert.rejects(copyRuntime({sourceRoot:resolve('.'),target}),/exist/i);
  } finally {rmSync(root,{recursive:true});}
 });
+test('a changed runtime can stage an immutable build-labelled copy of the same package version',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'sf-runtime-revision-'));try{const result=await copyRuntime({sourceRoot:resolve('.'),target:join(root,'staged'),installationVersion:'0.1.0+reconfig.fixture'});assert.equal(result.version,'0.1.0+reconfig.fixture')}finally{rmSync(root,{recursive:true,force:true})}
+});

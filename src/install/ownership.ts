@@ -1,7 +1,7 @@
-import { constants, lstatSync, openSync, closeSync, fsyncSync, realpathSync, writeFileSync } from 'node:fs';
+import { constants, lstatSync, openSync, closeSync, fsyncSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { readPrivateFileAsync } from '../service/config.ts';
-import { assertWindowsPrivateDirectoryAsync, assertWindowsPrivateFileAsync, writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
+import { assertWindowsPrivateDirectoryAsync, assertWindowsPrivateFileAsync, replaceWindowsPrivateFileAsync, writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
 import { ensure } from '../storage/database.ts';
 
 export interface CreatedPath {path:string;kind:'file'|'directory';dev:number;ino:number}
@@ -16,4 +16,10 @@ export async function recordCreatedPaths(input:{id:string;root:string;paths:Crea
 export async function readCreatedPaths(input:{id:string;root:string}):Promise<CreatedPath[]>{
  const value=JSON.parse((await readPrivateFileAsync(join(input.root,'owned-paths.json'))).toString());ensure(value.schemaVersion===1&&value.installationId===input.id&&value.root===input.root&&Array.isArray(value.paths),'path_owner','Original ownership manifest unavailable');const result:CreatedPath[]=[];
  for(const item of value.paths){ensure(item&&typeof item.path==='string'&&/^[A-Za-z0-9_.-]+$/.test(item.path)&&item.path!=='.'&&item.path!=='..'&&item.path!=='owned-paths.json'&&['file','directory'].includes(item.kind)&&Number.isSafeInteger(item.dev)&&Number.isSafeInteger(item.ino),'path_owner','Invalid owned path record');const path=join(input.root,item.path),s=lstatSync(path);ensure(!s.isSymbolicLink()&&realpathSync(path)===path&&s.dev===item.dev&&s.ino===item.ino&&(item.kind==='file'?s.isFile():s.isDirectory()),'path_owner','Original owned path changed');if(process.platform==='win32'){if(s.isDirectory())await assertWindowsPrivateDirectoryAsync(path);else await assertWindowsPrivateFileAsync(path)}else ensure(s.uid===process.getuid!()&&(s.mode&0o022)===0,'path_owner','Owned path has unsafe ownership');result.push(item)}ensure(new Set(result.map(item=>item.path)).size===result.length,'path_owner','Duplicate owned path');return result;
+}
+
+/** Rebind only an already-recorded file after an acknowledged same-filesystem replacement. */
+export async function replaceRecordedFileIdentity(input:{id:string;root:string;previous:CreatedPath;next:CreatedPath}):Promise<void>{
+ const path=join(input.root,'owned-paths.json'),value=JSON.parse((await readPrivateFileAsync(path)).toString());ensure(value.schemaVersion===1&&value.installationId===input.id&&value.root===input.root&&Array.isArray(value.paths)&&input.previous.path==='factory.sqlite'&&input.previous.kind==='file'&&input.next.path===input.previous.path&&input.next.kind==='file','path_owner','Invalid ownership rebind');const index=value.paths.findIndex((x:CreatedPath)=>x.path===input.previous.path);ensure(index>=0&&JSON.stringify(value.paths[index])===JSON.stringify(input.previous),'path_owner','Original ownership record changed');const actual=snapshotCreatedPath(input.root,input.next.path);ensure(JSON.stringify(actual)===JSON.stringify(input.next),'path_owner','Replacement identity changed');value.paths[index]=input.next;for(const item of value.paths as CreatedPath[]){const current=snapshotCreatedPath(input.root,item.path);ensure(JSON.stringify(current)===JSON.stringify(item),'path_owner','Another owned path changed')}
+ const bytes=Buffer.from(JSON.stringify(value));if(process.platform==='win32'){await replaceWindowsPrivateFileAsync(path,bytes);return}const temp=join(input.root,'.owned-paths-rollback.tmp');const fd=openSync(temp,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);try{writeFileSync(fd,bytes);fsyncSync(fd)}finally{closeSync(fd)}renameSync(temp,path);const dir=openSync(input.root,constants.O_RDONLY);try{fsyncSync(dir)}finally{closeSync(dir)}
 }

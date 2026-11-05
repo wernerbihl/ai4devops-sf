@@ -1,8 +1,10 @@
-import { constants, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
-import { readPrivateFile } from '../service/config.ts';
-import { protectWindowsDirectory, writeWindowsPrivateFile } from '../platform/windows-private.ts';
+import { readPrivateFile, readPrivateFileAsync } from '../service/config.ts';
+import { canonical } from '../storage/database.ts';
+import { randomUUID } from 'node:crypto';
+import { protectWindowsDirectory, replaceWindowsPrivateFileAsync, writeWindowsPrivateFile } from '../platform/windows-private.ts';
 
 export interface Installation { schemaVersion:1; id:string; root:string; node:string; serviceEntry:string; version:string }
 export function installationLocatorPath(options:{platform?:NodeJS.Platform;home?:string;xdgConfigHome?:string;appData?:string}={}):string {
@@ -32,4 +34,9 @@ export async function saveInstallation(installation:Installation,path=installati
   let fd:number;try{fd=openSync(path,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600)}catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')throw new Error('An installation locator already exists');throw error}
   try{writeFileSync(fd,JSON.stringify(installation));fsyncSync(fd)}finally{closeSync(fd)}
   const dir=openSync(directory,constants.O_RDONLY);try{fsyncSync(dir)}finally{closeSync(dir)}
+}
+
+/** Replace only the exact original locator while the administration lock is held. */
+export async function replaceInstallation(current:Installation,next:Installation,path=installationLocatorPath()):Promise<void>{
+ validate(current);validate(next);if(current.id!==next.id)throw Error('Installation identity cannot change');const before=lstatSync(path);const value=validate(JSON.parse((await readPrivateFileAsync(path)).toString()) as Installation);if(canonical(value)!==canonical(current))throw Error('Original installation locator changed');const bytes=Buffer.from(JSON.stringify(next));if(process.platform==='win32'){await replaceWindowsPrivateFileAsync(path,bytes);return}const temp=join(dirname(path),'.installation-'+randomUUID()+'.tmp');const fd=openSync(temp,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);try{writeFileSync(fd,bytes);fsyncSync(fd)}finally{closeSync(fd)}const after=lstatSync(path);if(after.dev!==before.dev||after.ino!==before.ino||canonical(validate(JSON.parse((await readPrivateFileAsync(path)).toString()) as Installation))!==canonical(current))throw Error('Original installation locator changed');renameSync(temp,path);const d=openSync(dirname(path),constants.O_RDONLY);try{fsyncSync(d)}finally{closeSync(d)}
 }

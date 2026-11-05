@@ -17,6 +17,8 @@ import { WindowsStartup } from './service-windows.ts';
 import { MacOSStartup } from './service-macos.ts';
 import type { InstallPlan } from './plan.ts';
 import { recordCreatedPaths, snapshotCreatedPath, type CreatedPath } from './ownership.ts';
+import { acquireAdministrationLock, recordServiceStart } from './administration.ts';
+import { probeController } from '../cli/next.ts';
 
 function writePrivate(path:string,value:string|Buffer):void {
   if(process.platform==='win32'){writeWindowsPrivateFile(path,Buffer.isBuffer(value)?value:Buffer.from(value));return}
@@ -27,6 +29,7 @@ function writePrivate(path:string,value:string|Buffer):void {
 export async function applyInstall(plan:InstallPlan,options:{docker?:DockerPort;locatorPath?:string;configHome?:string;systemctl?:string}={}):Promise<Installation> {
   if(!['linux','darwin','win32'].includes(process.platform))throw new Error('This platform does not yet have a protected installation adapter');
   const locator=options.locatorPath??installationLocatorPath();if(await locateInstallation(locator))throw new Error('An installation already exists');
+  const administration=await acquireAdministrationLock(plan.id,dirname(locator));try {
   const credential=loadCompanionCredential(plan.stagedAuthRoot,{ref:'native-copilot',resource:'https://api.github.com',scopes:['read:user','user:email']});
   if(credential.account.id!==plan.account.id)throw new Error('Selected Copilot account changed since preview');
   const docker=options.docker??new ProcessDocker(plan.dockerExecutable??'docker');const state=inspectSelectedRoot(plan.directory);let created=false;let markerCreated=false;let bindConfirmed=false;
@@ -37,6 +40,7 @@ export async function applyInstall(plan:InstallPlan,options:{docker?:DockerPort;
     writePrivate(marker,markerValue);markerCreated=true;remember('install-owner.json');
     if(!await pinnedBaseAvailable(docker)){await docker.command(['pull',kestraImagePins.worker.image]);if(!await pinnedBaseAvailable(docker))throw new Error('Pinned Docker base image is unavailable')}
     await probeSelectedRoot(plan.directory,docker,plan.id);bindConfirmed=true;
+    const kestraParent=join(plan.directory,'kestra');mkdirSync(kestraParent,{mode:0o700});remember('kestra');if(process.platform==='win32')protectWindowsDirectory(kestraParent);
     const runtimeParent=join(plan.directory,'runtime');mkdirSync(runtimeParent,{mode:0o700});remember('runtime');if(process.platform==='win32')protectWindowsDirectory(runtimeParent);
     const version=JSON.parse(readFileSync(join(plan.sourceRoot,'package.json'),'utf8')).version as string;
     const runtime=await copyRuntime({sourceRoot:plan.sourceRoot,target:join(runtimeParent,version)});
@@ -62,7 +66,8 @@ export async function applyInstall(plan:InstallPlan,options:{docker?:DockerPort;
     const serviceRecord=service instanceof WindowsStartup?{kind:'windows-task'}:service instanceof MacOSStartup?{kind:'launchagent',plistPath:service.plistPath}:{kind:'systemd-user',unitPath:service.unitPath};
     writePrivate(join(plan.directory,'startup.json'),JSON.stringify({schemaVersion:1,installationId:plan.id,...serviceRecord,codeExecutable:plan.codeExecutable,requestDir,...(plan.dockerExecutable?{dockerExecutable:plan.dockerExecutable}:{})}));
     remember('startup.json');await recordCreatedPaths({id:plan.id,root:plan.directory,paths:createdPaths});
-    await service.install();await saveInstallation(installation,locator);await service.start();
+    await service.install();await saveInstallation(installation,locator);await recordServiceStart(plan.directory,plan.id,'pending',dirname(locator));await service.start();
+    let connected=false;for(let i=0;i<30;i++){try{await probeController(plan.directory);connected=true;break}catch{await new Promise(resolve=>setTimeout(resolve,1000))}}if(!connected)throw new Error('Initial service start remains unconfirmed; retain the original installation for recovery');await recordServiceStart(plan.directory,plan.id,'complete',dirname(locator));
     return installation;
   } catch(error) {
     if(!bindConfirmed&&markerCreated){
@@ -70,4 +75,5 @@ export async function applyInstall(plan:InstallPlan,options:{docker?:DockerPort;
     } else if(!bindConfirmed&&created&&!markerCreated){try{if(readdirSync(plan.directory).length===0)rmdirSync(plan.directory)}catch{}}
     throw error;
   }
+  } finally {administration.close()}
 }

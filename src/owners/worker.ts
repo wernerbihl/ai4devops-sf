@@ -129,6 +129,25 @@ export class IsolatedToolWorker {
       this.store.completeAction(claim.action.id); return 'waiting';
     } catch { return 'unknown'; }
   }
+  /** Physically stop this exact worker only when no earlier worker effect may still accept. */
+  async stopForMaintenance(): Promise<void> {
+    this.gate.suspend(); this.human = undefined;
+    const unsettled = () => this.store.pendingActions().some(action => ['worker.execute','worker.pause','worker.resume','worker.maintenance_stop'].includes(action.kind));
+    ensure(!unsettled(), 'worker_unknown', 'An unresolved worker effect retains exclusion');
+    const before = await this.container();
+    ensure(!unsettled(), 'worker_unknown', 'A worker effect began during inspection');
+    if (!before.State?.Running) {
+      ensure(before.State?.Paused===false && before.State.Pid===0 && before.State.Status==='exited', 'worker_stop', 'Worker stopped state is unknown');
+      return;
+    }
+    ensure(before.State.StartedAt && before.State.Pid > 0, 'worker_stop', 'Worker process identity unavailable');
+    const action=this.store.enqueueAction({key:'worker:maintenance-stop:'+this.config.containerId+':'+before.State.StartedAt,kind:'worker.maintenance_stop',payload:{containerId:this.config.containerId,startedAt:before.State.StartedAt}});
+    ensure(!action.completedAt, 'worker_stop', 'Previously stopped worker restarted; retain for recovery');
+    await this.docker.command(['container','kill','--signal','KILL',this.config.containerId]);
+    const after=await this.container();
+    ensure(after.State?.Running===false&&after.State.Paused===false&&after.State.Pid===0&&after.State.Status==='exited', 'worker_stop', 'Worker physical stop is unknown');
+    this.store.completeAction(action.id);
+  }
   async resume(start: NativeStart, key: string) {
     this.current(start); const c = await this.container();
     if (!c.State.Paused) { await this.inspect(start); return; }

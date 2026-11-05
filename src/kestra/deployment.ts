@@ -113,7 +113,6 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
     network = await inspect('network', networkName);
   }
   check(network && network.Name === networkName && network.Internal === true && network.Driver === 'bridge' && Object.entries(labels).every(([k, v]) => network.Labels?.[k] === v) && Object.entries(network.Options ?? {}).every(([k, v]) => (k === 'com.docker.network.enable_ipv4' && v === 'true') || (k === 'com.docker.network.enable_ipv6' && v === 'false')), 'Owned internal network configuration mismatch');
-  let engineRestarted = false;
   const ensureContainer = async (name: string, image: string, networkMode: string, mounts: { source: string; target: string; readOnly: boolean }[], env: string[], command: string[]): Promise<string> => {
     let object = await inspect('container', name);
     if (!object) {
@@ -122,6 +121,20 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
       object = await inspect('container', name);
     }
     check(object, 'Container creation outcome unknown');
+    const verifyEffectiveNetworks = (container: any, assigned: boolean): void => {
+      const attached = container.NetworkSettings?.Networks;
+      check(container.HostConfig?.NetworkMode === networkMode && attached && typeof attached === 'object' && !Array.isArray(attached), 'Container effective network configuration unavailable');
+      if (networkMode.startsWith('container:')) {
+        // The trusted transport joins the exact engine container namespace; it owns no endpoints.
+        check(Object.keys(attached).length === 0, 'Transport effective network attachments mismatch');
+      } else {
+        const names = Object.keys(attached); const id = attached[networkName]?.NetworkID;
+        // Docker may leave a newly created, not-yet-started endpoint's ID empty.
+        // Once running, require the actual ID of the verified owned internal network.
+        check(names.length === 1 && names[0] === networkName && (id === network.Id || !assigned && id === ''), 'Engine effective network attachments mismatch');
+      }
+    };
+    verifyEffectiveNetworks(object, object.State.Running === true);
     const h = object.HostConfig; const c = object.Config; const base = imageConfigs.get(image);
     check(canonical(c.Entrypoint) === canonical(base.Entrypoint) && c.WorkingDir === base.WorkingDir, 'Container entrypoint configuration mismatch');
     check(object.Name === '/' + name && object.Image === imageIds.get(image) && c.Image === image && c.User === user && Object.entries(labels).every(([k, v]) => c.Labels?.[k] === v) && canonical(c.Cmd) === canonical(command), 'Owned container configuration mismatch');
@@ -130,11 +143,15 @@ export async function ensureKestra(installation: Installation): Promise<KestraHa
     const envMap = (values: string[]) => Object.fromEntries(values.map(e => { const split = e.indexOf('='); return [e.slice(0, split), e.slice(split + 1)]; }));
     check(canonical(envMap(c.Env ?? [])) === canonical(envMap([...(base.Env ?? []), ...env])), 'Container environment configuration mismatch');
     check(h.IpcMode !== 'host' && h.UsernsMode !== 'host' && h.UTSMode !== 'host' && !(h.Devices?.length) && !(h.DeviceRequests?.length) && !(h.VolumesFrom?.length) && canonical(h.Tmpfs) === canonical({ '/tmp': tmpfs }), 'Container namespace/tmpfs restriction mismatch');
-    if (object.State.Running && image === pins.worker.image && engineRestarted) {
+    // Mutating setup adoption always rejoins an existing transport. The engine may have
+    // restarted in another invocation, including a crash before sidecar reattachment.
+    // Running flags, PIDs and timestamps cannot establish shared namespace freshness.
+    if (object.State.Running && image === pins.worker.image) {
       try { await docker.command(['restart', '--timeout', '1', object.Id]); } catch { /* reconcile namespace reattachment */ }
       object = await inspect('container', name); check(object?.State.Running, 'Transport restart outcome unknown');
     }
-    if (!object.State.Running) { if (image === pins.kestra.image) engineRestarted = true; try { await docker.command(['start', object.Id]); } catch { /* inspect start outcome */ } object = await inspect('container', name); check(object?.State.Running, 'Container start outcome unknown'); }
+    if (!object.State.Running) { try { await docker.command(['start', object.Id]); } catch { /* inspect start outcome */ } object = await inspect('container', name); check(object?.State.Running, 'Container start outcome unknown'); }
+    verifyEffectiveNetworks(object, true);
     return object.Id;
   };
   const containerId = await ensureContainer(prefix + '-kestra', pins.kestra.image, networkName, [{ source: dataDir, target: '/app/data', readOnly: false }, { source: configDir, target: '/app/confs', readOnly: true }], ['MICRONAUT_CONFIG_FILES=/app/confs/application.yaml', 'KESTRA_PLUGINS_AUTO_INSTALL_ENABLED=false'], ['server', 'local']);

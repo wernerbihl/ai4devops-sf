@@ -89,3 +89,43 @@ Exit 0; eight legacy P4 assertions passed, including typed invalid resume reject
 - Windows protector, native Windows/macOS/ARM behavior, GUI/native-provider operation and production broker/isolation remain unverified here. Failclosed private/proven-capability boundaries stay intact. E7 owns Windows implementation and platform installation evidence; user host visuals do not replace those automated boundaries.
 - Unknown start/resume outcomes intentionally remain journaled if no matching execution/output is observable. This avoids duplicate effects; E6 must expose reconciliation/attention instead of inventing success or automatically replacing the attempt. `stop` only requests engine kill; it does not prove writer/native quiescence.
 - Reviewed actual source/diff for secrets in argv/logs, foreign-resource adoption, broker-network scope, immutable flow validation, request/response codec reuse, stale result authority versus continuation races, build asset paths, and no factory-SQLite-as-H2 substitution. Found/fixed AES key format, entrypoint verification, pinned kill path, and transport namespace restart. No source/probe coupling or unrelated refactor was introduced.
+
+## Review fix round 1 of 5
+
+Fix base: `c0641b09590883d59cea6c503a12678653ed42e6`. Read `review-task-15-report.md` fully. Scope: Important findings I1 and I2 only; Minor M1 (fixture UID/GID portability) stays recorded/deferred to U6 as directed by root. No subagents, broad refactor, global configuration change or native-host claim.
+
+- **I1 — Verify effective network attachments before adopting the engine.** Fixed in `src/kestra/deployment.ts`: verify `NetworkSettings.Networks` in addition to the original `HostConfig.NetworkMode`. The engine must have exactly the managed network name and its verified actual `NetworkID`; extra attachments or a mismatched ID are rejected before adoption can start/restart containers or request readiness. A created, not-running endpoint may initially have an empty ID, but after start the actual ID must match. The transport case is explicit: mode must identify the exact managed engine container and it must have no independently attached network endpoints. Network assertions run again on the inspected object after start/restart.
+- **I2 — Recover transport after an engine restart across invocations.** Removed the invocation-local `engineRestarted` condition. During mutating setup adoption, an already-running transport is restarted only after its complete existing ownership, pinned image, command, environment, mounts, restriction and effective-network verification succeeds. Restart rejoins the engine namespace before readiness. This covers a prior setup crash between engine start and transport restart, as well as an engine restart outside this invocation. No production namespace identity is inferred from process IDs, elapsed time, or running flags; no future health-loop restart behavior was introduced. Newly created/stopped transport starts normally.
+
+New fixture regressions preserve the original engine network mode while adding an external attachment, substitute a wrong managed `NetworkID`, attach an independent transport network, and model an engine namespace replacement with **both** containers already running before a fresh ensureKestra invocation. The recovery regression verifies the sole mutating command is restart of the exact owned transport, the engine/container identities remain unchanged, and all readiness checks occur after fixture namespace reattachment. Fixture namespace generations are an observable test oracle only, not a production proof mechanism. Real filesystem/configuration/secret checks still run.
+
+Exact commands ran in the owning product worktree with Node 24.22.2:
+
+```sh
+PATH=/tmp/sf-p1-runtime/node-v24.22.2-linux-x64/bin:$PATH npm test -- tests/kestra/deployment.test.ts > /tmp/sf-task15-fix1-red.log 2>&1
+```
+RED: test process exit 1; 8 tests, 5 pass, 3 fail. Both network regressions failed `Missing expected rejection.`; cross-invocation recovery failed `1 !== 2` for stale transport versus new engine namespace. These failures were captured before production changes.
+
+```sh
+PATH=/tmp/sf-p1-runtime/node-v24.22.2-linux-x64/bin:$PATH npm test -- tests/kestra/deployment.test.ts tests/kestra/client.test.ts > /tmp/sf-task15-fix1-green.log 2>&1
+```
+GREEN exit 0, exact final stdout summary:
+```text
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2865.3759
+```
+
+```sh
+PATH=/tmp/sf-p1-runtime/node-v24.22.2-linux-x64/bin:$PATH npm run typecheck > /tmp/sf-task15-fix1-typecheck.log 2>&1
+PATH=/tmp/sf-p1-runtime/node-v24.22.2-linux-x64/bin:$PATH npm run build > /tmp/sf-task15-fix1-build.log 2>&1
+git diff --check
+```
+All exit 0. Typecheck stdout: `> ai4devops-sf@0.1.0 typecheck` then `> tsc --noEmit`, no diagnostics. Build stdout: `> ai4devops-sf@0.1.0 build` then `> tsc -p tsconfig.build.json && node scripts/copy-runtime-assets.mjs`, no diagnostics. Diff check: no output.
+
+Fix contract: I1 and I2 addressed; production changes are confined to deployment inspection/adoption, with regression coverage in deployment tests. Existing client tests remain green. As directed, no redundant full-suite or pinned-engine roundtrip rerun was performed for these inspection/adoption-only changes. Earlier full/live evidence remains accurately scoped to its original revision; this fix has focused fixture/type/build evidence. Actual production bind deployment on this host is still blocked by the recorded Windows-Docker/WSL path bridge. Downstream E3/E6/E7 and supported-host verification obligations remain unchanged. Self-review confirmed network checks run before adoption mutations, the post-start check requires a real matching network ID, and restart is limited to the fully verified owned transport rather than the engine or foreign resources.

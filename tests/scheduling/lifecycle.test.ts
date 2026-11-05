@@ -672,3 +672,13 @@ test('maintenance stop retains an unknown writer fence and releases only after c
     assert.deepEqual(f.store.getLifecycle(x.attempt.id).reservation.attempt.native, x.native);
   } finally { f.close(); }
 });
+test('concurrent maintenance stops share one attempt lane while another attempt can stop',async()=>{
+ const x=await fixture();const {f}=x;let release!:()=>void;const stalled=new Promise<void>(resolve=>{release=resolve});const calls=new Map<string,number>();
+ try{
+  const settings=f.store.getSettings();f.store.patchSettings({limits:{...settings.config.limits,concurrency:2}},settings.revision);f.store.createManualTasks({...f.request,repositoryIds:['repo-2']},'maintenance-second');assert.equal((await x.scheduler.dispatch('manual')).kind,'started');const second=f.store.getReservations().find(r=>r.attempt.id!==x.attempt.id)!;
+  const deps=x.deps();const lifecycle=createLifecycle({...deps,owner:identity=>({...deps.owner(identity),async quiesce(actual){calls.set(actual.sessionId,(calls.get(actual.sessionId)??0)+1);if(actual.sessionId===x.native.sessionId)await stalled;return 'unknown'}})});
+  const first=lifecycle.stopForMaintenance(x.attempt.id).catch(()=>{});const duplicate=lifecycle.stopForMaintenance(x.attempt.id).catch(()=>{});await lifecycle.stopForMaintenance(second.attempt.id).catch(()=>{});
+  assert.equal(calls.get(x.native.sessionId),1);assert.equal(calls.get(second.attempt.native!.sessionId),1);assert.equal(f.store.getLifecycle(second.attempt.id).state.stopRequested,true);
+  release();await Promise.all([first,duplicate]);assert.equal(f.store.getAdmissionState().activeLeases.length,2);
+ }finally{release();f.close()}
+});

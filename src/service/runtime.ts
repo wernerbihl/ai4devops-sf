@@ -53,7 +53,8 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
     const earlyLifecycle=createLifecycle({store,clock:systemClock,owner(){throw new Error('Native owner bootstrap pending')},readiness:async()=>({ready:false,code:'bootstrap_pending',recovery:'Restore protected startup dependencies'}),workspace:async()=>false,workflow:{snapshot:async()=> 'unknown',quiesce:async()=> 'unknown',resume:async()=>{throw new Error('Bootstrap pending')}}});
     earlyLifecycle.observeBudgets();const bootstrapTimer=setInterval(()=>earlyLifecycle.observeBudgets(),250);cleanup.push(()=>clearInterval(bootstrapTimer));
     // A retained intent fences startup before any create/start/adoption of external writers.
-    let maintenance=store.pendingActions().some(action=>action.kind==='maintenance.intent');
+    let maintenanceIntent=store.pendingActions().find(action=>action.kind==='maintenance.intent');
+    let maintenance=!!maintenanceIntent;
     const maintenanceGate=new MaintenanceGate();if(maintenance)void maintenanceGate.close();
     let warned=false;async function required<T>(action:()=>Promise<T>):Promise<T>{for(;;){try{return await action()}catch(error){if(!store.getReservations().some(r=>r.lease.active))throw error;if(!warned){warned=true;process.stderr.write('Factory startup is waiting for protected dependencies; retained writer deadlines remain active.\n')}await delay(250)}}}
     const config=await required(()=>(bootstrap.loadConfig??loadRuntimeConfigAsync)(installation.root,installation.id));
@@ -204,13 +205,17 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       if(method==='GET'&&path==='/health')return health();
       if(method==='GET'&&path==='/readiness')return{health:await health(),owners:await owners.list(requiredEmpty),reconciliation:lastReport};
       if(method==='POST'&&path==='/maintenance'){
-        if(!maintenance){store.enqueueAction({key:'maintenance:'+randomUUID(),kind:'maintenance.intent',payload:{installationId:installation.id}});maintenance=true;}
+        ensure(Object.keys(input).length===1&&(input.purpose==='uninstall'||input.purpose==='reconfigure'),'runtime_maintenance','Explicit maintenance purpose required');
+        if(!maintenanceIntent){maintenanceIntent=store.enqueueAction({key:'maintenance:'+randomUUID(),kind:'maintenance.intent',payload:{installationId:installation.id,purpose:input.purpose}});maintenance=true;}
+        ensure(store.pendingActions().filter(action=>action.kind==='maintenance.intent').length===1&&maintenanceIntent.payload.installationId===installation.id&&maintenanceIntent.payload.purpose===input.purpose,'runtime_maintenance','Original maintenance purpose must be recovered');
         const draining=maintenanceGate.close();
+        const stopActive=()=>Promise.allSettled(store.getReservations().filter(r=>r.lease.active).map(r=>lifecycle.stopForMaintenance(r.attempt.id)));
         // Begin relay closure without waiting for another in-flight dispatch; then
         // repeat after the drain to cover a member whose provisioning was already admitted.
         const relays=fleet.closeHumanAdmissions();
-        await Promise.all([draining,coordinator.closeAdmission(),relays]);
+        await Promise.all([draining,coordinator.closeAdmission(),relays,stopActive()]);
         await fleet.closeHumanAdmissions();
+        await stopActive();
         return {state:'admission_closed',blocked:store.getReservations().filter(r=>r.lease.active).map(r=>r.attempt.id)};
       }
       const release=maintenanceGate.enter();

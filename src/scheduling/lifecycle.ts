@@ -367,7 +367,11 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       await dispatchPending();
     }),
     waitForCI: id => operation(() => pause(id, 'waiting_ci')),
-    stopForMaintenance: id => operation(() => pause(id, 'needs_attention', { kind: 'blocked', prompt: 'Factory maintenance', recovery: 'Resume the original session after maintenance completes' })),
+    stopForMaintenance: id => operation(() => {
+      const existing=budgetStops.get(id);if(existing)return existing;
+      const job=pause(id, 'needs_attention', { kind: 'blocked', prompt: 'Factory maintenance', recovery: 'Resume the original session after maintenance completes' }).finally(()=>{if(budgetStops.get(id)===job)budgetStops.delete(id)});
+      budgetStops.set(id,job);return job;
+    }),
   };
   function assertEffect(id: string, fence: number, token: string): void {
     const current = record(id);

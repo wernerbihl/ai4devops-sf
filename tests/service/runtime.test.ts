@@ -174,8 +174,10 @@ test('private maintenance admission persists before refusing new dispatch and su
  const headers={authorization:'Bearer '+Buffer.alloc(32,7).toString('base64url'),'content-type':'application/json'};
  try {
   runtime=await startRuntime(installation);
-  const response=await fetch(runtime.controlUrl+'/maintenance',{method:'POST',headers,body:'{}'});assert.equal(response.status,200);
-  assert.ok(runtime.store.pendingActions().some(action=>action.kind==='maintenance.intent'));
+  assert.equal((await fetch(runtime.controlUrl+'/maintenance',{method:'POST',headers,body:'{}'})).status,409);
+  const response=await fetch(runtime.controlUrl+'/maintenance',{method:'POST',headers,body:JSON.stringify({purpose:'reconfigure'})});assert.equal(response.status,200);
+  assert.equal(runtime.store.pendingActions().find(action=>action.kind==='maintenance.intent')?.payload.purpose,'reconfigure');
+  assert.equal((await fetch(runtime.controlUrl+'/maintenance',{method:'POST',headers,body:JSON.stringify({purpose:'uninstall'})})).status,409);
   assert.equal((await fetch(runtime.controlUrl+'/next',{method:'POST',headers,body:JSON.stringify({key:'after-maintenance'})})).status,409);
   await runtime.stop();runtime=await startRuntime(installation);
   assert.ok(runtime.store.pendingActions().some(action=>action.kind==='maintenance.intent'));

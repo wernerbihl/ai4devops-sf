@@ -2258,6 +2258,11 @@
         "required": {
           "$ref": "#/$defs/RequiredCapabilities"
         },
+        "executionProfileHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
         "grantedAt": {
           "format": "date-time",
           "pattern": "Z$",
@@ -4898,7 +4903,7 @@
         }
       }
     },
-    "RecipeCreate": {
+    "RecipeValidationInput": {
       "additionalProperties": false,
       "type": "object",
       "properties": {
@@ -4925,6 +4930,65 @@
       },
       "required": [
         "yaml"
+      ]
+    },
+    "RecipeValidationBinding": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "recipeHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "payloadHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "executionProfileHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipeHash",
+        "payloadHash",
+        "executionProfileHash"
+      ]
+    },
+    "RecipeCreate": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "yaml": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "inputDefaults": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        },
+        "repositoryIds": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "validation": {
+          "$ref": "#/$defs/RecipeValidationBinding"
+        }
+      },
+      "required": [
+        "yaml",
+        "validation"
       ]
     },
     "RecipeValidation": {
@@ -5019,6 +5083,11 @@
           "pattern": "\\S",
           "type": "string"
         },
+        "executionProfileHash": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
         "issues": {
           "type": "array",
           "items": {
@@ -5089,6 +5158,32 @@
       "additionalProperties": false,
       "type": "object",
       "properties": {
+        "validation": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "recipeHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "payloadHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            "executionProfileHash": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recipeHash",
+            "payloadHash",
+            "executionProfileHash"
+          ]
+        },
         "active": {
           "type": "boolean"
         },

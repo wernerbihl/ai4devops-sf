@@ -326,7 +326,7 @@ test('v2_upgrade_preserves_running_attempt_and_treats_its_active_time_as_uncerta
   try {
     f.store.close();
     const db = new DatabaseSync(f.path);
-    db.exec('DROP TABLE broker_revocations; DROP TABLE broker_artifacts; DROP TABLE broker_results; DROP TABLE broker_writes; DROP TABLE broker_capabilities; DROP TABLE api_requests; DROP TABLE lifecycle_actions; DROP TABLE lifecycle_state; PRAGMA user_version = 2'); db.close();
+    db.exec('DROP TABLE repository_selection_receipts; DROP TABLE repository_selections; DROP TABLE broker_revocations; DROP TABLE broker_artifacts; DROP TABLE broker_results; DROP TABLE broker_writes; DROP TABLE broker_capabilities; DROP TABLE api_requests; DROP TABLE lifecycle_actions; DROP TABLE lifecycle_state; PRAGMA user_version = 2'); db.close();
     x.reopen(); await x.lifecycle.reconnect();
     assert.equal(f.store.snapshot().attempts[0]!.activeDurationMs, 1800000);
     assert.equal(f.store.getTask(f.task.id)!.status, 'needs_attention');

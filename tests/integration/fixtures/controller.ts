@@ -1,3 +1,4 @@
+import { boundRecipe, boundPatch, fixtureExecutionProfile } from '../../helpers/recipe-validation.ts';
 import {readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -26,13 +27,13 @@ const root=process.argv[2]!;const crash=process.argv[3];const config=JSON.parse(
 const checkpoint=async(phase:string,detail:Record<string,unknown>={})=>{if(crash===phase){process.send?.({phase,...detail});await new Promise(()=>{})}};
 const request=async(url:string,value?:unknown)=>{const r=await fetch(url,{method:value===undefined?'GET':'POST',...(value===undefined?{}:{body:JSON.stringify(value),headers:{'content-type':'application/json'}})});if(!r.ok)throw Error(await r.text());return r.json()};
 const lock=acquireInstallationSingleton(root);const store=openStore(join(root,'factory.sqlite'),{materialize:recipeMaterializer});
-const registry=new RecipeRegistry(store,{resolveReference:resolveNativeToolReference,executionReadiness:()=>[]});
+const registry=new RecipeRegistry(store,{resolveReference:resolveNativeToolReference,executionProfile:fixtureExecutionProfile,executionReadiness:()=>[]});
 if(!store.getRepository('repo')){
   store.createRepository({id:'repo',name:'fixture',url:'https://github.com/fixture/repo.git'});
   const source=parse(readFileSync(new URL('../../../recipes/starter/focused-feature.yaml',import.meta.url),'utf8'));
   source.variables.sf.tagId=store.snapshot().tags[0]!.id;source.variables.sf.required.allowedFinishPolicies=['result'];source.variables.sf.defaultFinishPolicy='result';
-  const recipe=registry.createCommand({yaml:JSON.stringify(source),repositoryIds:['repo']},{key:'fixture-recipe'});
-  registry.patchCommand(recipe.recipeId,{active:true,approval:{recipeHash:recipe.hash,payloadHash:recipePayloadHash(recipe),repositoryIds:['repo'],capabilities:recipe.contract.variables.sf.required}},{key:'fixture-approve',expectedRevision:store.snapshot().recipes[0]!.revision});
+  const recipe=registry.createCommand(boundRecipe(registry, {yaml:JSON.stringify(source),repositoryIds:['repo']}),{key:'fixture-recipe'});
+  registry.patchCommand(recipe.recipeId,boundPatch(registry, recipe.recipeId, {active:true,approval:{recipeHash:recipe.hash,payloadHash:recipePayloadHash(recipe),repositoryIds:['repo'],capabilities:recipe.contract.variables.sf.required}}),{key:'fixture-approve',expectedRevision:store.snapshot().recipes[0]!.revision});
   store.createManualTasks({recipeId:recipe.recipeId,repositoryIds:['repo'],title:'Fixture task',description:'Retain identity across crash',finishPolicy:'result'},'fixture-task');
 }
 const task=store.snapshot().tasks[0]!;

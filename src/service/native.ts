@@ -8,6 +8,7 @@ import type { NativeOwner } from '../contracts/owner.ts';
 import type { Installation } from '../kestra/deployment.ts';
 import { dockerBind, ProcessDocker } from '../kestra/deployment.ts';
 import { privateDirectoryAsync } from '../kestra/executions.ts';
+import type { RecipeExecutionProfile } from '../recipes/registry.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import type { AttemptBroker } from '../broker/operations.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
@@ -44,11 +45,36 @@ function reviewedProxyHash() {
   const source = new URL(import.meta.url.endsWith('.ts') ? '../../runtime/model-proxy/connect.cjs' : '../runtime/model-proxy/connect.cjs', import.meta.url);
   return createHash('sha256').update(readFileSync(source)).digest('hex');
 }
+/** Provisioning intention only. Actual isolation remains a post-reservation dispatch gate. */
+export function nativeExecutionProfile(template: IsolatedNativeTemplate, sourceFingerprint: string, reviewedProxySha256: string,
+  availability: { reasons: string[]; credentialCurrent: boolean; [key: string]: unknown }): RecipeExecutionProfile {
+  return { available: availability.reasons.length === 0 && availability.credentialCurrent, isolatedProfileId, kind: template.kind, hostCommit: template.hostCommit,
+    nativeImage: template.nativeImage, workerImage: template.workerImage,
+    entrypoint: template.entrypoint, entrypointSha256: template.entrypointSha256,
+    pristineDirectory: template.pristineDirectory, emptyHome: template.emptyHome,
+    proxy: { ...template.proxy, allowedAuthorities: [...template.proxy.allowedAuthorities].sort(), reviewedProxySha256,
+      policyVersion: 2, curatedAuthorities: [...curatedModelAuthorities].sort() },
+    sourceFingerprint, capabilityPolicy: { toolkitVersion: '2', tools: ['native-files','native-terminal'],
+      excludedTools: ['builtin:*','mcp:*'], externalNetwork: false, credentials: false, skills: false,
+      allowlistHash: fingerprint(isolatedToolAllowlist.toString()) }, availability: structuredClone(availability) };
+}
 export function createNativeFleet(options: { installation: Installation; config: RuntimeConfig; store: FactoryStore; broker: AttemptBroker; protectedPaths: string[]; maintenance?:()=>boolean }) {
   const { installation, config, store, broker } = options; const docker = installation.docker;
   const listeners = new Set<(event: OwnerEvent) => void>();
   const members = new Map<string, Promise<Member>>();
-  const template = config.native[0];
+  const template = config.native[0] ? structuredClone(config.native[0]) : undefined;
+  const buildSourceFingerprint = expectedImageBuild().sourceFingerprint;
+  const reviewedProxySha256 = reviewedProxyHash();
+  let availabilityReasons = ['Native template availability has not been checked'];
+  function executionProfile(): RecipeExecutionProfile | undefined {
+    if (!template) return undefined;
+    const credential = config.providerCredentials.find(c => c.ref === template.credentialRef);
+    return nativeExecutionProfile(template, buildSourceFingerprint, reviewedProxySha256, {
+      reasons: availabilityReasons, credentialConfigured: !!credential,
+      credentialCurrent: !!credential && (credential.expiresAt === undefined || Date.parse(credential.expiresAt) > Date.now() + 30_000),
+      credentialAuthority: credential ? { providerId: credential.providerId, resource: credential.resource, scopes: [...credential.scopes].sort() } : null,
+    });
+  }
   function supports(task: TaskSpec) {
     ensure(template && task.ownerId === 'vscode' && task.providerId === 'copilot' && task.skills.length === 0, 'native_unsupported', 'Only configured isolated VS Code/Copilot is supported');
     isolatedToolAllowlist(task);
@@ -68,8 +94,9 @@ export function createNativeFleet(options: { installation: Installation; config:
         const actual = JSON.parse(await docker.command(['image','inspect',image]))[0];
         ensure(imageMatches(image,actual) && actual.Os === 'linux' && actual.Architecture === 'amd64' && (!image.startsWith('sha256:') || actual.Config?.Labels?.['sf.installation'] === installation.id && actual.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && actual.Config?.Labels?.['sf.role'] === role), 'native_image', 'Pinned native/worker/proxy image is unavailable or its owned build does not match');
       }
-      return [];
-    } catch (error) { return [error instanceof Error ? error.message : 'Native provisioning unavailable']; }
+      availabilityReasons = [];
+    } catch (error) { availabilityReasons = [error instanceof Error ? error.message : 'Native provisioning unavailable']; }
+    return [...availabilityReasons];
   }
   async function provisionability(task: TaskSpec): Promise<string[]> {
     try { supports(task); return templateReadiness(); }
@@ -247,7 +274,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     open:async identity=>(await member(startFor(find(identity)))).owner.open(identity),
     subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener)},
   };
-  return { owner:fleetOwner,provisionability,templateReadiness,startFor,member,
+  return { owner:fleetOwner,provisionability,templateReadiness,executionProfile,startFor,member,
     /** Fence human tools and drain existing desktop relays; does not claim physical stop. */
     async closeHumanAdmissions(){await Promise.all([...members.values()].map(async pending=>{const m=await pending;m.owner.forbidMaintenanceStart();m.worker.closeAdmission();await m.closeDesktop()}))},
     /** Only already-connected members may reconcile the original human history. */

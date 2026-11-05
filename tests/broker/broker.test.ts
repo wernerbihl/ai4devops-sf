@@ -195,11 +195,11 @@ test('I1_v5_upgrade_preserves_legacy_revocation_and_new_markers', async () => {
     f.store.close();
     const db = new DatabaseSync(f.path);
     // Recreate the exact committed v5 schema/state and its only legacy revocation representation.
-    db.exec('DROP TABLE IF EXISTS broker_revocations; PRAGMA user_version = 5; UPDATE broker_capabilities SET revoked = 1'); db.close();
+    db.exec('DROP TABLE repository_selection_receipts; DROP TABLE repository_selections; DROP TABLE IF EXISTS broker_revocations; PRAGMA user_version = 5; UPDATE broker_capabilities SET revoked = 1'); db.close();
     const upgraded = createAttemptBroker({ ...deps, store: f.reopen() });
     assert.throws(() => upgraded.issueAttemptCapability(r.attempt.id, ['grant-1']), { code: 'attempt_revoked' });
     assert.throws(() => upgraded.authorizeAttempt(token, 'task.read', {}));
-    const check = new DatabaseSync(f.path); assert.equal(check.prepare('PRAGMA user_version').get()!.user_version, 6); check.close();
+    const check = new DatabaseSync(f.path); assert.equal(check.prepare('PRAGMA user_version').get()!.user_version, 7); check.close();
     const again = createAttemptBroker({ ...deps, store: f.reopen() });
     assert.throws(() => again.current(r.attempt.id), { code: 'attempt_revoked' });
   } finally { f.close(); }

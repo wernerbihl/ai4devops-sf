@@ -2467,7 +2467,7 @@
       },
       "post": {
         "operationId": "post_v1_recipes",
-        "description": "POST /v1/recipes",
+        "description": "Save an inactive immutable revision only when validation matches exact recipe content, effective payload and current server execution profile. Hash binding expresses content intention, never capability authorization.",
         "security": [
           {
             "BrowserSession": []
@@ -2581,7 +2581,7 @@
     "/v1/recipes/validate": {
       "post": {
         "operationId": "post_v1_recipes_validate",
-        "description": "Metadata validation plus pinned upstream Kestra and restricted-subset validation. Metadata validation alone cannot claim executable readiness.",
+        "description": "Pre-hash YAML, effective defaults and repository-scope validation returns structured issues, normalized contract, content/payload hashes and server executionProfileHash. Profile provisionability is not per-attempt isolation evidence.",
         "security": [
           {
             "BrowserSession": []
@@ -2685,7 +2685,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RecipeCreate"
+                "$ref": "#/components/schemas/RecipeValidationInput"
               }
             }
           }
@@ -2695,7 +2695,7 @@
     "/v1/recipes/{id}/revisions": {
       "post": {
         "operationId": "post_v1_recipes_id_revisions",
-        "description": "POST /v1/recipes/{id}/revisions",
+        "description": "Save a new inactive immutable revision only with exact current validation hashes/profile and entity revision. Omitted defaults and repository scope inherit the current saved revision.",
         "security": [
           {
             "BrowserSession": []
@@ -2930,7 +2930,7 @@
       },
       "patch": {
         "operationId": "patch_v1_recipes_id",
-        "description": "PATCH /v1/recipes/{id}",
+        "description": "Approval and active:true require exact current validation hashes/profile. Activation also requires exact explicit capability approval and current grant/reference/profile/readiness checks; active:false without approval needs no validation binding.",
         "security": [
           {
             "BrowserSession": []
@@ -8273,6 +8273,11 @@
           "required": {
             "$ref": "#/components/schemas/RequiredCapabilities"
           },
+          "executionProfileHash": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
           "grantedAt": {
             "format": "date-time",
             "pattern": "Z$",
@@ -10913,7 +10918,7 @@
           }
         }
       },
-      "RecipeCreate": {
+      "RecipeValidationInput": {
         "additionalProperties": false,
         "type": "object",
         "properties": {
@@ -10940,6 +10945,65 @@
         },
         "required": [
           "yaml"
+        ]
+      },
+      "RecipeValidationBinding": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "recipeHash": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "payloadHash": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "executionProfileHash": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipeHash",
+          "payloadHash",
+          "executionProfileHash"
+        ]
+      },
+      "RecipeCreate": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "yaml": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "inputDefaults": {
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          },
+          "repositoryIds": {
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "validation": {
+            "$ref": "#/components/schemas/RecipeValidationBinding"
+          }
+        },
+        "required": [
+          "yaml",
+          "validation"
         ]
       },
       "RecipeValidation": {
@@ -11034,6 +11098,11 @@
             "pattern": "\\S",
             "type": "string"
           },
+          "executionProfileHash": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
           "issues": {
             "type": "array",
             "items": {
@@ -11104,6 +11173,32 @@
         "additionalProperties": false,
         "type": "object",
         "properties": {
+          "validation": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "recipeHash": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "payloadHash": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "executionProfileHash": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "required": [
+              "recipeHash",
+              "payloadHash",
+              "executionProfileHash"
+            ]
+          },
           "active": {
             "type": "boolean"
           },

@@ -121,7 +121,7 @@ const ActorScope = object({
 });
 const FindingInput = object({ repositoryId: text(), recipeId: text(), findingKey: text(), task: TaskSpec, relatedTaskId: optionalText() });
 const Grant = object({ id: text(), recipeId: text(), recipeRevision: text(), repositoryIds: strings(),
-  required: RequiredCapabilities, grantedAt: timestamp(), expiresAt: T.Optional(timestamp()), revokedAt: T.Optional(timestamp()) });
+  required: RequiredCapabilities, executionProfileHash: optionalText(), grantedAt: timestamp(), expiresAt: T.Optional(timestamp()), revokedAt: T.Optional(timestamp()) });
 const probeFields = { scratchRepo: text(), outputDir: text(), endpoint: optionalText(), provider: T.Optional(ProviderId) };
 const ProbeOptions = T.Union([
   object({ ...probeFields, mode: T.Literal('fixture'), allowLive: T.Boolean() }),
@@ -227,12 +227,16 @@ const TagArchive = object({ reassignToTagId: text() });
 const TaskPatch = object({ title: optionalText(), description: optionalText(), goal: optionalText(),
   acceptanceCriteria: T.Optional(T.Array(text(), { minItems: 1 })), finishPolicy: T.Optional(FinishPolicy),
   ownerId: optionalText(), providerId: T.Optional(ProviderId), status: T.Optional(T.Literal('cancelled')) });
-const RecipeCreate = object({ yaml: text(), inputDefaults: T.Optional(jsonObject()), repositoryIds: T.Optional(strings()) });
+const recipeInputFields = { yaml: text(), inputDefaults: T.Optional(jsonObject()), repositoryIds: T.Optional(strings()) };
+// Validation is usable before a browser has any content or server-profile hashes.
+const RecipeValidationInput = object(recipeInputFields);
+const RecipeValidationBinding = object({ recipeHash: text(), payloadHash: text(), executionProfileHash: text() });
+const RecipeCreate = object({ ...recipeInputFields, validation: RecipeValidationBinding });
 const RecipeValidation = object({ valid: T.Boolean(), errors: T.Array(text()), contract: T.Optional(RecipeContract),
-  hash: optionalText(), payloadHash: optionalText(), issues: T.Optional(T.Array(object({ field: T.String(), message: text(), line: integer(1), column: integer(1) }))),
+  hash: optionalText(), payloadHash: optionalText(), executionProfileHash: optionalText(), issues: T.Optional(T.Array(object({ field: T.String(), message: text(), line: integer(1), column: integer(1) }))),
   readiness: T.Optional(object({ ready: T.Boolean(), reasons: T.Array(text()), requested: RequiredCapabilities, approved: T.Boolean() })),
 });
-const RecipePatch = object({ active: T.Optional(T.Boolean()), displayName: optionalText(), approval: T.Optional(object({
+const RecipePatch = object({ validation: T.Optional(RecipeValidationBinding), active: T.Optional(T.Boolean()), displayName: optionalText(), approval: T.Optional(object({
   recipeHash: text(), payloadHash: text(), repositoryIds: strings(), capabilities: RequiredCapabilities,
 })) });
 const DispatchResult = object({ admitted: T.Boolean(), taskId: optionalText(), attemptId: optionalText(), reason: optionalText() });
@@ -251,7 +255,7 @@ export const schemas = {
   FindingInput, Grant, ProbeOptions, ProbeEvidence, VerifiedProbeEvidence, ProfileSpec, ProfileEvidence, OwnerEvent, OwnerRpc, OwnerRpcResponse,
   Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse, WorkerTransport,
   SettingsPatch, Settings, RepositoryPatch, WeightsPatch, RotationPreview, RepositoryCatalogEntry, RepositorySelectionRequest, TagCreate, TagPatch, TagArchive,
-  TaskPatch, RecipeCreate, RecipeValidation, RecipePatch, DispatchResult, AttentionResponse, NativeOpenResult,
+  TaskPatch, RecipeValidationInput, RecipeValidationBinding, RecipeCreate, RecipeValidation, RecipePatch, DispatchResult, AttentionResponse, NativeOpenResult,
   DeviceFlow, Empty, Acknowledgement,
 } as const;
 export type ContractName = keyof typeof schemas;

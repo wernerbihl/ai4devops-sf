@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ApiError, AuthState, Clock, DeviceFlow, Health, OwnerReadiness, NativeIdentity, NativeOpenResult, RecipeCreate, RecipePatch, RecipeSummary, RecipeRevision, RecipeValidation } from '../contracts/domain.ts';
+import type { ApiError, AuthState, Clock, DeviceFlow, Health, OwnerReadiness, NativeIdentity, NativeOpenResult, RecipeCreate, RecipeValidationInput, RecipePatch, RecipeSummary, RecipeRevision, RecipeValidation } from '../contracts/domain.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import type { Scheduler } from '../scheduling/admission.ts';
 import type { Lifecycle } from '../scheduling/lifecycle.ts';
@@ -40,7 +40,7 @@ export interface RecipePort {
   /** E1 validates hash-bound explicit grants before activation; browser routes never set readiness. */
   patch(id: string, input: RecipePatch, context: RequestContext): Promise<RecipeSummary>;
   create(input: RecipeCreate, context: RequestContext): Promise<RecipeRevision>;
-  validate(input: RecipeCreate, context: RequestContext): Promise<RecipeValidation>;
+  validate(input: RecipeValidationInput, context: RequestContext): Promise<RecipeValidation>;
   revise(id: string, input: RecipeCreate, context: RequestContext): Promise<RecipeRevision>;
 }
 export interface OwnerPort {

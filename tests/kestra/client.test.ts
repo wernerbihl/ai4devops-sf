@@ -1,3 +1,4 @@
+import { boundRecipe, fixtureExecutionProfile } from '../helpers/recipe-validation.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -19,8 +20,8 @@ function fixture() {
   const source = parse(readFileSync(new URL('../../recipes/starter/focused-feature.yaml', import.meta.url), 'utf8'));
   source.variables.sf.tagId = store.snapshot().tags[0]!.id;
   store.createRepository({ id: 'repo', name: 'Repo', url: 'https://example.test/repo' });
-  const registry = new RecipeRegistry(store, { resolveReference: () => true, executionReadiness: () => [] });
-  const recipe = registry.createCommand({ yaml: JSON.stringify(source), repositoryIds: ['repo'] }, { key: 'recipe' });
+  const registry = new RecipeRegistry(store, { resolveReference: () => true, executionProfile: fixtureExecutionProfile, executionReadiness: () => [] });
+  const recipe = registry.createCommand(boundRecipe(registry, { yaml: JSON.stringify(source), repositoryIds: ['repo'] }), { key: 'recipe' });
   const start = { idempotencyKey: 'start-1', attemptId: 'attempt-1', recipe, inputs: {}, scopeId: 'scope-1', fence: 1 };
   const scope = { attemptId: 'attempt-1', recipeId: recipe.recipeId, recipeRevision: recipe.revision, repositoryIds: ['repo'], grantIds: ['grant-1'], expiresAt: '2099-01-01T00:00:00.000Z', fence: 1 };
   const task = materializeTask({ recipeId: recipe.recipeId, repositoryIds: ['repo'], title: literal, description: literal }, recipe, 'repo', { ownerId: 'vscode', providerId: 'copilot', finishPolicy: 'pr' });

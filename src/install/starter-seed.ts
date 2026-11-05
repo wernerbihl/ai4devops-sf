@@ -15,6 +15,9 @@ export function seedStarters(store:FactoryStore):void {
     const url=new URL(import.meta.url.endsWith('.ts')?`../../recipes/starter/${id}.yaml`:`../recipes/starter/${id}.yaml`,import.meta.url);
     const doc=parseDocument(readFileSync(url,'utf8'));if(doc.errors.length)throw new Error('Bundled starter recipe is invalid');
     doc.setIn(['variables','sf','tagId'],matches[0]!.id);
-    registry.createCommand({yaml:doc.toString(),repositoryIds:[],inputDefaults:{}},{key:`starter:${id}`});
+    const input={yaml:doc.toString(),repositoryIds:[],inputDefaults:{}};
+    const validation=registry.validate(input);
+    if(!validation.valid||!validation.hash||!validation.payloadHash||!validation.executionProfileHash)throw new Error('Bundled starter validation failed');
+    registry.createCommand({...input,validation:{recipeHash:validation.hash,payloadHash:validation.payloadHash,executionProfileHash:validation.executionProfileHash}},{key:`starter:${id}`});
   }
 }

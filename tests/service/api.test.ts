@@ -206,13 +206,13 @@ test('typed_auth_and_recipe_routes_delegate_stable_keys_and_overlay_real_readine
     const run = (path: string, key: string, body: unknown = {}, revision?: number) => fetch(api.url + path, { method: 'POST', headers: { ...headers, 'idempotency-key': key, ...(revision ? { 'if-match': String(revision) } : {}) }, body: JSON.stringify(body) });
     for (const [path, key] of [['/v1/auth/probe', 'probe'], ['/v1/auth/device-flow', 'start'], ['/v1/auth/device-flow/flow/complete', 'complete']]) assert.equal((await run(path!, key!)).status, 200);
     assert.equal((await fetch(api.url + '/v1/auth/device-flow/flow', { headers })).status, 200);
-    assert.equal((await run('/v1/recipes', 'create', { yaml: 'id: fake' })).status, 200);
+    assert.equal((await run('/v1/recipes', 'create', { yaml: 'id: fake', validation: { recipeHash: 'fixture', payloadHash: 'fixture', executionProfileHash: 'fixture' } })).status, 200);
     assert.equal((await run('/v1/recipes/validate', 'validate', { yaml: 'id: fake' })).status, 200);
-    assert.equal((await run('/v1/recipes/recipe-1/revisions', 'stale-recipe', { yaml: 'id: fake' }, 999)).status, 409);
-    assert.equal((await run('/v1/recipes/recipe-1/revisions', 'revise', { yaml: 'id: fake' }, 1)).status, 200);
+    assert.equal((await run('/v1/recipes/recipe-1/revisions', 'stale-recipe', { yaml: 'id: fake', validation: { recipeHash: 'fixture', payloadHash: 'fixture', executionProfileHash: 'fixture' } }, 999)).status, 409);
+    assert.equal((await run('/v1/recipes/recipe-1/revisions', 'revise', { yaml: 'id: fake', validation: { recipeHash: 'fixture', payloadHash: 'fixture', executionProfileHash: 'fixture' } }, 1)).status, 200);
     const snapshot = await (await fetch(api.url + '/v1/snapshot', { headers })).json(); assert.equal(snapshot.health.ready, true); assert.equal(snapshot.auth.status, 'ready');
     assert.deepEqual(calls, ['probe:probe', 'start:start', 'complete:complete', 'create:create', 'validate:validate', 'revise:revise']);
-    assert.equal((await run('/v1/recipes', 'create', { yaml: 'id: fake' })).status, 200); assert.equal(calls.length, 6);
+    assert.equal((await run('/v1/recipes', 'create', { yaml: 'id: fake', validation: { recipeHash: 'fixture', payloadHash: 'fixture', executionProfileHash: 'fixture' } })).status, 200); assert.equal(calls.length, 6);
     assert.equal((await fetch(api.url + '/v1/recipes/recipe-1', { method: 'PATCH', headers: { ...headers, 'idempotency-key': 'recipe-patch', 'if-match': '1' }, body: JSON.stringify({ active: false }) })).status, 200);
     assert.equal(f.fixture.store.snapshot().recipes[0]!.active, false);
   } finally { await api.close(); f.fixture.close(); }
@@ -336,7 +336,7 @@ test('definitive_auth_and_recipe_refusals_replay_exact_safe_errors_across_restar
   const run = (path: string, key: string, body: unknown) => { const session = api.sessions.provision(origin); return fetch(api.url + path, { method: 'POST', headers: { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'idempotency-key': key, 'content-type': 'application/json' }, body: JSON.stringify(body) }); };
   const cases = [
     { path: '/v1/auth/device-flow', key: 'known-app', body: {}, status: 503, error: { ...appError, message: 'Publisher App is missing: [redacted]' } },
-    { path: '/v1/recipes', key: 'known-yaml', body: { yaml: 'invalid:' }, status: 400, error: { ...recipeError, message: 'Invalid YAML [redacted]' } },
+    { path: '/v1/recipes', key: 'known-yaml', body: { yaml: 'invalid:', validation: { recipeHash: 'fixture', payloadHash: 'fixture', executionProfileHash: 'fixture' } }, status: 400, error: { ...recipeError, message: 'Invalid YAML [redacted]' } },
   ];
   try {
     for (const c of cases) { const response = await run(c.path, c.key, c.body); assert.equal(response.status, c.status); assert.deepEqual(await response.json(), c.error); }

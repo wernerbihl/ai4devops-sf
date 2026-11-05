@@ -1,3 +1,4 @@
+import { boundRecipe, boundPatch, fixtureExecutionProfile } from '../helpers/recipe-validation.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
@@ -31,7 +32,7 @@ function setup() {
   const store = openStore(':memory:', { materialize: recipeMaterializer });
   const tag = store.snapshot().tags[0]!;
   store.createRepository({ id: 'repo', name: 'Repo', url: 'https://example.test/repo' });
-  const registry = new RecipeRegistry(store, { resolveReference: () => true, executionReadiness: () => [] });
+  const registry = new RecipeRegistry(store, { resolveReference: () => true, executionProfile: fixtureExecutionProfile, executionReadiness: () => [] });
   const input = { yaml: JSON.stringify(flow(tag.id)), repositoryIds: ['repo'] };
   const port = new C5RecipePort(registry);
   return { store, registry, input, port };
@@ -42,7 +43,7 @@ test('materializes_one_tag_and_complete_task_without_extra_model_call', async ()
   try {
     const context = { notes: 'x'.repeat(90000), files: ['src/main.ts'] };
     const source = flow(f.store.snapshot().tags[0]!.id); source.variables.sf.taskTemplate.context = context;
-    const rev = await f.port.create({ ...f.input, yaml: JSON.stringify(source), inputDefaults: { area: 'payments' } }, { key: 'create' });
+    const rev = await f.port.create(boundRecipe(f.registry, { ...f.input, yaml: JSON.stringify(source), inputDefaults: { area: 'payments' } }), { key: 'create' });
     const request = { recipeId: rev.recipeId, repositoryIds: ['repo'], title: 'A title', description: 'A description' };
     const task = materializeTask(request, rev, 'repo', { ownerId: 'vscode', providerId: 'copilot', finishPolicy: 'pr' });
     validateContract('TaskSpec', task);
@@ -73,20 +74,20 @@ test('rejects_recipe_control_plane_escape', () => {
 test('explicit_hash_bound_approval_atomic_activation_and_immutable_history', async () => {
   const f = setup();
   try {
-    const rev = await f.port.create({ ...f.input, inputDefaults: { area: 'payments' } }, { key: 'create' });
+    const rev = await f.port.create(boundRecipe(f.registry, { ...f.input, inputDefaults: { area: 'payments' } }), { key: 'create' });
     let summary = f.store.snapshot().recipes[0]!;
     assert.equal(summary.ready, false); assert.equal(summary.active, false); assert.equal(f.store.getAdmissionState().grants.length, 0);
     const approval = { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required };
-    await assert.rejects(f.port.patch(rev.recipeId, { active: true }, { key: 'no-approval', expectedRevision: summary.revision }));
-    await assert.rejects(f.port.patch(rev.recipeId, { active: true, approval: { ...approval, recipeHash: 'sha256:stale' } }, { key: 'stale', expectedRevision: summary.revision }));
+    await assert.rejects(f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true }), { key: 'no-approval', expectedRevision: summary.revision }));
+    await assert.rejects(f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { ...approval, recipeHash: 'sha256:stale' } }), { key: 'stale', expectedRevision: summary.revision }));
     assert.equal(f.store.getAdmissionState().grants.length, 0);
-    summary = await f.port.patch(rev.recipeId, { active: true, approval }, { key: 'approve', expectedRevision: summary.revision });
+    summary = await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval }), { key: 'approve', expectedRevision: summary.revision });
     assert.equal(summary.ready, true); assert.equal(summary.active, true);
     assert.equal(f.store.getAdmissionState().grants.length, 1);
-    assert.deepEqual(await f.port.patch(rev.recipeId, { active: true, approval }, { key: 'approve', expectedRevision: summary.revision - 2 }), summary);
+    assert.deepEqual(await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval }), { key: 'approve', expectedRevision: summary.revision - 2 }), summary);
     const draft = await f.port.validate({ yaml: f.input.yaml + '\n' }, { key: 'draft' });
     assert.equal(draft.payloadHash, recipePayloadHash({ yaml: f.input.yaml + '\n', inputDefaults: rev.inputDefaults, repositoryIds: rev.repositoryIds }));
-    const edited = await f.port.revise(rev.recipeId, { ...f.input, yaml: f.input.yaml.replace('Verify boundaries', 'New goal') + '\n' }, { key: 'edit', expectedRevision: summary.revision });
+    const edited = await f.port.revise(rev.recipeId, boundRecipe(f.registry, { ...f.input, yaml: f.input.yaml.replace('Verify boundaries', 'New goal') + '\n' }), { key: 'edit', expectedRevision: summary.revision });
     assert.deepEqual(edited.inputDefaults, { area: 'payments' });
     assert.notEqual(edited.hash, rev.hash); assert.deepEqual(f.store.getRecipeRevision(rev.recipeId, rev.revision), rev);
     assert.equal(f.store.snapshot().recipes[0]!.ready, false);
@@ -113,9 +114,9 @@ test('repository_owner_and_recipe_provider_overrides_persist_clear_and_freeze', 
   const f = setup();
   try {
     const source = flow(f.store.snapshot().tags[0]!.id); source.variables.sf.defaultProviderId = 'codex';
-    const rev = await f.port.create({ ...f.input, yaml: JSON.stringify(source) }, { key: 'create' });
+    const rev = await f.port.create(boundRecipe(f.registry, { ...f.input, yaml: JSON.stringify(source) }), { key: 'create' });
     const summary = f.store.snapshot().recipes[0]!;
-    await f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }, { key: 'approve', expectedRevision: summary.revision });
+    await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }), { key: 'approve', expectedRevision: summary.revision });
     f.store.patchRepository('repo', { defaultOwnerId: 'bb' }, 1);
     const request = { recipeId: rev.recipeId, repositoryIds: ['repo'], title: 'Title', description: 'Description' };
     const [task] = f.store.createManualTasks(request, 'task');
@@ -131,9 +132,9 @@ test('repository_owner_and_recipe_provider_overrides_persist_clear_and_freeze', 
 test('tag_archive_preserves_user_display_name', async () => {
   const f = setup();
   try {
-    const rev = await f.port.create(f.input, { key: 'create' });
+    const rev = await f.port.create(boundRecipe(f.registry, f.input), { key: 'create' });
     let summary = f.store.snapshot().recipes[0]!;
-    summary = await f.port.patch(rev.recipeId, { active: true, displayName: 'My alias', approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }, { key: 'approve', expectedRevision: summary.revision });
+    summary = await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, displayName: 'My alias', approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }), { key: 'approve', expectedRevision: summary.revision });
     const replacement = f.store.createTag({ displayName: 'Replacement' });
     f.store.archiveTag(rev.tagId, replacement.id);
     assert.equal(f.store.snapshot().recipes[0]!.displayName, 'My alias');
@@ -145,11 +146,11 @@ test('tag_archive_preserves_user_display_name', async () => {
 test('activation_failure_rolls_back_grant_and_events_and_replays_exact_failure', async () => {
   const f = setup();
   try {
-    const rev = await f.port.create(f.input, { key: 'create' });
+    const rev = await f.port.create(boundRecipe(f.registry, f.input), { key: 'create' });
     const summary = f.store.snapshot().recipes[0]!;
     const unavailable = new C5RecipePort(new RecipeRegistry(f.store));
     const before = f.store.snapshot();
-    const input = { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } };
+    const input = boundPatch(unavailable.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } });
     await assert.rejects(unavailable.patch(rev.recipeId, input, { key: 'unavailable', expectedRevision: summary.revision }), /Definitive/);
     assert.deepEqual({ ...f.store.snapshot(), at: before.at }, before); assert.equal(f.store.getAdmissionState().grants.length, 0);
     const outcome = await unavailable.reconcile({ key: 'unavailable', method: 'PATCH', path: `/v1/recipes/${rev.recipeId}` });
@@ -162,23 +163,23 @@ test('activation_failure_rolls_back_grant_and_events_and_replays_exact_failure',
 test('revocation_updates_exact_revision_readiness_and_prevents_reactivation', async () => {
   const f = setup();
   try {
-    const rev = await f.port.create(f.input, { key: 'create' }); const summary = f.store.snapshot().recipes[0]!;
-    await f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }, { key: 'approve', expectedRevision: summary.revision });
+    const rev = await f.port.create(boundRecipe(f.registry, f.input), { key: 'create' }); const summary = f.store.snapshot().recipes[0]!;
+    await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }), { key: 'approve', expectedRevision: summary.revision });
     const grant = f.store.getAdmissionState().grants[0]!;
     f.registry.revokeGrant(grant.id, 'revoke');
     const blocked = f.store.snapshot().recipes[0]!; assert.equal(blocked.ready, false);
     assert.ok(f.store.getAdmissionState().grants[0]!.revokedAt);
-    await assert.rejects(f.port.patch(rev.recipeId, { active: true }, { key: 'reactivate', expectedRevision: blocked.revision }));
+    await assert.rejects(f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true }), { key: 'reactivate', expectedRevision: blocked.revision }));
   } finally { f.store.close(); }
 });
 
 test('typed_inputs_reject_reserved_defaults_and_expand_context_once_without_evaluation', async () => {
   const f = setup();
   try {
-    await assert.rejects(f.port.create({ ...f.input, inputDefaults: { sf_capability: 'stolen' } }, { key: 'reserved' }));
+    await assert.rejects(f.port.create(boundRecipe(f.registry, { ...f.input, inputDefaults: { sf_capability: 'stolen' } }), { key: 'reserved' }));
     const source = flow(f.store.snapshot().tags[0]!.id);
     source.variables.sf.taskTemplate.context = '{{ inputs.area }}';
-    const rev = await f.port.create({ ...f.input, yaml: JSON.stringify(source) }, { key: 'create' });
+    const rev = await f.port.create(boundRecipe(f.registry, { ...f.input, yaml: JSON.stringify(source) }), { key: 'create' });
     const task = materializeTask({ recipeId: rev.recipeId, repositoryIds: ['repo'], title: 'literal {{ secret() }}', description: 'Description', inputs: { area: '{{ envs.SECRET }}' } }, rev, 'repo', { ownerId: 'vscode', providerId: 'copilot', finishPolicy: 'pr' });
     assert.equal(task.context, '{{ envs.SECRET }}'); assert.equal(task.goal, 'Deliver {{ envs.SECRET }}: literal {{ secret() }}');
     assert.throws(() => materializeTask({ recipeId: rev.recipeId, repositoryIds: ['repo'], title: 'Title', description: 'Description', inputs: { area: 42 } }, rev, 'repo', { ownerId: 'vscode', providerId: 'copilot', finishPolicy: 'pr' }), /schema/);
@@ -211,14 +212,14 @@ test('reference_resolution_and_expired_grants_keep_valid_recipes_unready', async
   try {
     const source = flow(f.store.snapshot().tags[0]!.id);
     source.variables.sf.taskTemplate.skills = ['review']; source.variables.sf.skillVersions = { review: '1.2.3' };
-    const rev = await f.port.create({ ...f.input, yaml: JSON.stringify(source) }, { key: 'create' });
-    const missing = new RecipeRegistry(f.store, { resolveReference: () => false, executionReadiness: () => [] });
+    const rev = await f.port.create(boundRecipe(f.registry, { ...f.input, yaml: JSON.stringify(source) }), { key: 'create' });
+    const missing = new RecipeRegistry(f.store, { resolveReference: () => false, executionProfile: fixtureExecutionProfile, executionReadiness: () => [] });
     assert.ok(missing.readiness(rev).reasons.includes('Missing skill reference review@1.2.3'));
     f.store.saveGrant({ id: 'expired', recipeId: rev.recipeId, recipeRevision: rev.revision, repositoryIds: ['repo'], required: rev.contract.variables.sf.required, grantedAt: '2000-01-01T00:00:00Z', expiresAt: '2001-01-01T00:00:00Z' });
     assert.equal(f.registry.readiness(rev).approved, false);
     const summary = f.store.snapshot().recipes[0]!;
-    await assert.rejects(f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: 'sha256:stale-defaults', repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }, { key: 'bad-payload', expectedRevision: summary.revision }));
-    await assert.rejects(f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: { ...rev.contract.variables.sf.required, paths: [] } } }, { key: 'bad-caps', expectedRevision: summary.revision }));
+    await assert.rejects(f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: 'sha256:stale-defaults', repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required } }), { key: 'bad-payload', expectedRevision: summary.revision }));
+    await assert.rejects(f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: { ...rev.contract.variables.sf.required, paths: [] } } }), { key: 'bad-caps', expectedRevision: summary.revision }));
     assert.equal(f.store.getAdmissionState().grants.length, 1);
   } finally { f.store.close(); }
 });
@@ -228,9 +229,9 @@ test('actual_store_generated_children_inherit_one_tag_and_per_repository_hosts',
   try {
     f.store.createRepository({ id: 'repo2', name: 'Two', url: 'https://example.test/two' });
     f.store.patchRepository('repo2', { defaultOwnerId: 'bb' }, 1);
-    const rev = await f.port.create({ ...f.input, repositoryIds: ['repo', 'repo2'] }, { key: 'create' });
+    const rev = await f.port.create(boundRecipe(f.registry, { ...f.input, repositoryIds: ['repo', 'repo2'] }), { key: 'create' });
     const summary = f.store.snapshot().recipes[0]!;
-    await f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required } }, { key: 'approve', expectedRevision: summary.revision });
+    await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required } }), { key: 'approve', expectedRevision: summary.revision });
     const request = { title: 'Parent', description: 'Parent work', recipeId: rev.recipeId, repositoryIds: ['repo', 'repo2'] };
     const tasks = f.store.createManualTasks(request, 'multi');
     assert.deepEqual(tasks.map(task => task.ownerId), ['vscode', 'bb']);
@@ -249,8 +250,8 @@ test('C5_actual_adapter_reconciles_committed_lost_reply_after_sqlite_restart_wit
   const origin = 'http://127.0.0.1:5173';
   try {
     store.createRepository({ id: 'repo', name: 'Repo', url: 'https://example.test/repo' });
-    const input = { yaml: JSON.stringify(flow(store.snapshot().tags[0]!.id)), repositoryIds: ['repo'] };
-    let port = new C5RecipePort(new RecipeRegistry(store, { executionReadiness: () => [] }));
+    let port = new C5RecipePort(new RecipeRegistry(store, { executionProfile: fixtureExecutionProfile, executionReadiness: () => [] }));
+    const input = boundRecipe(port.registry, { yaml: JSON.stringify(flow(store.snapshot().tags[0]!.id)), repositoryIds: ['repo'] });
     let effects = 0;
     api = await startApi({ ...fakePorts(store).deps, recipes: { ...port,
       create: async (input, ctx) => { effects++; await port.create(input, ctx); throw new Error('reply lost after commit'); },
@@ -279,9 +280,9 @@ test('C5_actual_adapter_reconciles_committed_lost_reply_after_sqlite_restart_wit
 test('refreshing_historical_readiness_preserves_current_unapproved_revision', async () => {
   const f = setup();
   try {
-    const rev = await f.port.create(f.input, { key: 'create' }); let summary = f.store.snapshot().recipes[0]!;
-    summary = await f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required } }, { key: 'approve', expectedRevision: summary.revision });
-    const edited = await f.port.revise(rev.recipeId, { ...f.input, yaml: f.input.yaml + '\n' }, { key: 'edit', expectedRevision: summary.revision });
+    const rev = await f.port.create(boundRecipe(f.registry, f.input), { key: 'create' }); let summary = f.store.snapshot().recipes[0]!;
+    summary = await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required } }), { key: 'approve', expectedRevision: summary.revision });
+    const edited = await f.port.revise(rev.recipeId, boundRecipe(f.registry, { ...f.input, yaml: f.input.yaml + '\n' }), { key: 'edit', expectedRevision: summary.revision });
     f.registry.refreshReadiness(rev.recipeId, rev.revision, 'refresh-old');
     assert.equal(f.store.snapshot().recipes[0]!.currentRevision, edited.revision); assert.equal(f.store.snapshot().recipes[0]!.ready, false);
     assert.equal(f.store.getAdmissionState().recipeReadiness.find(record => record.recipeRevision === rev.revision)!.ready, true);
@@ -326,19 +327,19 @@ test('unmaterializable_default_templates_cannot_validate_import_or_activate', as
       else source.variables.sf.taskTemplate.acceptanceCriteria = ['{{ inputs.value }}'];
       const input = { ...f.input, yaml: JSON.stringify(source) };
       assert.equal((await f.port.validate(input, { key: 'validate' })).valid, false, scenario.name);
-      await assert.rejects(f.port.create(input, { key: 'invalid-import' }), scenario.name);
+      await assert.rejects(f.port.create(boundRecipe(f.registry, input), { key: 'invalid-import' }), scenario.name);
       assert.equal(f.store.snapshot().recipes.length, 0);
       // A revision persisted by an earlier trusted producer must not bypass the new readiness gate.
-      const good = await f.port.create(f.input, { key: 'good' });
+      const good = await f.port.create(boundRecipe(f.registry, f.input), { key: 'good' });
       const summary = f.store.snapshot().recipes[0]!;
       const invalid = { ...good, id: 'old-invalid', revision: 'old-invalid', yaml: input.yaml, contract: source,
         hash: `sha256:${createHash('sha256').update(input.yaml).digest('hex')}` };
       const stored = f.store.saveRecipeRevision(invalid, summary.revision);
       assert.equal(f.registry.readiness(invalid).ready, false, scenario.name);
       assert.ok(f.registry.readiness(invalid).reasons.some(reason => reason.startsWith('Default task cannot be materialized:')), scenario.name);
-      await assert.rejects(f.port.patch(good.recipeId, { active: true, approval: {
+      await assert.rejects(f.port.patch(good.recipeId, boundPatch(f.registry, good.recipeId, { active: true, approval: {
         recipeHash: invalid.hash, payloadHash: recipePayloadHash(invalid), repositoryIds: invalid.repositoryIds, capabilities: invalid.contract.variables.sf.required,
-      } }, { key: 'invalid-approval', expectedRevision: stored.revision }), scenario.name);
+      } }), { key: 'invalid-approval', expectedRevision: stored.revision }), scenario.name);
       assert.equal(f.store.snapshot().recipes[0]!.active, false); assert.equal(f.store.getAdmissionState().grants.length, 0);
     } finally { f.store.close(); }
   }
@@ -352,12 +353,101 @@ test('explicit_defaults_complete_the_template_and_task_input_overrides_still_val
     source.variables.sf.taskTemplate.goal = '{{ inputs.value }}';
     const input = { ...f.input, yaml: JSON.stringify(source), inputDefaults: { value: 'Stored goal' } };
     assert.equal((await f.port.validate(input, { key: 'validate' })).valid, true);
-    const rev = await f.port.create(input, { key: 'create' }); const summary = f.store.snapshot().recipes[0]!;
-    await f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required } }, { key: 'approve', expectedRevision: summary.revision });
+    const rev = await f.port.create(boundRecipe(f.registry, input), { key: 'create' }); const summary = f.store.snapshot().recipes[0]!;
+    await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required } }), { key: 'approve', expectedRevision: summary.revision });
     const request = { recipeId: rev.recipeId, repositoryIds: ['repo'], title: 'Title', description: 'Description' };
     assert.equal(f.store.createManualTasks(request, 'default-task')[0]!.goal, 'Stored goal');
     assert.equal(f.store.createManualTasks({ ...request, inputs: { value: 'Task goal' } }, 'override-task')[0]!.goal, 'Task goal');
     assert.throws(() => f.store.createManualTasks({ ...request, inputs: { value: '' } }, 'bad-task'));
     assert.equal(f.store.snapshot().tasks.length, 2);
+  } finally { f.store.close(); }
+});
+
+
+test('api_requires_exact_current_content_payload_and_profile_binding_before_any_write', async () => {
+  const f = setup(); let api: Awaited<ReturnType<typeof startApi>> | undefined;
+  let profile = { available: true, profileId: 'fixture-v2', hostCommit: 'reviewed-host-a' };
+  const registry = new RecipeRegistry(f.store, { resolveReference: () => true, executionReadiness: () => [], executionProfile: () => profile });
+  const port = new C5RecipePort(registry);
+  try {
+    api = await startApi({ ...fakePorts(f.store).deps, recipes: port, reconcileRequest: request => port.reconcile(request) });
+    const origin = 'http://127.0.0.1:5173'; const session = api.sessions.provision(origin);
+    const call = (path: string, body: unknown, key: string, revision?: number, method = 'POST') => fetch(api!.url + path, { method,
+      headers: { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'content-type': 'application/json', 'idempotency-key': key,
+        ...(revision === undefined ? {} : { 'if-match': String(revision) }) }, body: JSON.stringify(body) });
+    const validation = await (await call('/v1/recipes/validate', f.input, 'validate')).json();
+    assert.equal(validation.valid, true);
+    const binding = { recipeHash: validation.hash, payloadHash: validation.payloadHash, executionProfileHash: validation.executionProfileHash };
+    const before = f.store.snapshot();
+    for (const [key, input] of [
+      ['missing', f.input], ['content', { ...f.input, validation: { ...binding, recipeHash: 'wrong' } }],
+      ['payload', { ...f.input, validation: { ...binding, payloadHash: 'wrong' } }],
+      ['edited', { ...f.input, yaml: f.input.yaml + '\n', validation: binding }],
+      ['scope', { ...f.input, repositoryIds: [], validation: binding }],
+      ['defaults', { ...f.input, inputDefaults: { area: 'changed' }, validation: binding }],
+    ] as const) {
+      assert.equal((await call('/v1/recipes', input, key)).status, 400, key);
+      assert.deepEqual({ ...f.store.snapshot(), at: before.at }, before, key);
+      assert.equal(f.store.getAdmissionState().grants.length, 0);
+    }
+    assert.match(validation.executionProfileHash, /^sha256:[a-f0-9]{64}$/);
+    profile = { ...profile, hostCommit: 'reviewed-host-b' };
+    assert.equal((await call('/v1/recipes', { ...f.input, validation: binding }, 'profile')).status, 400);
+    assert.equal(f.store.snapshot().recipes.length, 0);
+    const fresh = await (await call('/v1/recipes/validate', f.input, 'fresh')).json();
+    const proof = { ...binding, executionProfileHash: fresh.executionProfileHash };
+    const created = await call('/v1/recipes', { ...f.input, validation: proof }, 'create');
+    assert.equal(created.status, 200); const recipe = await created.json();
+    let summary = f.store.snapshot().recipes[0]!;
+    const approval = { recipeHash: recipe.hash, payloadHash: fresh.payloadHash, repositoryIds: recipe.repositoryIds, capabilities: recipe.contract.variables.sf.required };
+    for (const [key, validation] of [['missing-active', undefined], ['stale-active', binding]] as const) {
+      assert.equal((await call('/v1/recipes/recipe-test', { active: true, approval, validation }, key, summary.revision, 'PATCH')).status, 400);
+      assert.equal(f.store.getAdmissionState().grants.length, 0); assert.equal(f.store.snapshot().recipes[0]!.active, false);
+    }
+    assert.equal((await call('/v1/recipes/recipe-test', { active: true, approval, validation: proof }, 'activate', summary.revision, 'PATCH')).status, 200);
+    summary = f.store.snapshot().recipes[0]!; assert.equal(summary.ready, true);
+    profile = { ...profile, hostCommit: 'reviewed-host-c' };
+    assert.equal(registry.readiness(recipe).approved, false, 'Approval cannot cover a changed profile even if provisionability reasons stay empty');
+    assert.equal((await call('/v1/recipes/recipe-test', { active: true, validation: proof }, 'changed-profile', summary.revision, 'PATCH')).status, 400);
+    const current = await (await call('/v1/recipes/validate', f.input, 'current')).json();
+    const currentProof = { ...proof, executionProfileHash: current.executionProfileHash };
+    assert.equal((await call('/v1/recipes/recipe-test', { active: true, validation: currentProof }, 'old-grant', summary.revision, 'PATCH')).status, 400);
+    assert.equal(f.store.getAdmissionState().grants.length, 1);
+    assert.equal((await call('/v1/recipes/recipe-test', { active: false }, 'deactivate', summary.revision, 'PATCH')).status, 200);
+    summary = f.store.snapshot().recipes[0]!;
+    assert.equal((await call('/v1/recipes/recipe-test/revisions', { ...f.input, validation: proof }, 'stale-revision', summary.revision)).status, 400);
+    assert.equal(f.store.getRecipe('recipe-test')!.revision, recipe.revision);
+    const editInput = { ...f.input, yaml: f.input.yaml + '\n' };
+    const edit = await (await call('/v1/recipes/validate', editInput, 'edit-validate')).json();
+    const edited = await call('/v1/recipes/recipe-test/revisions', { ...editInput, validation: { recipeHash: edit.hash, payloadHash: edit.payloadHash, executionProfileHash: edit.executionProfileHash } }, 'revise', summary.revision);
+    assert.equal(edited.status, 200); assert.equal(f.store.snapshot().recipes[0]!.active, false);
+    assert.equal((await call('/v1/recipes', { ...f.input, validation: proof }, 'create')).status, 200, 'Exact caller-key receipt must survive changed authority without executing again');
+    assert.equal(f.store.getRecipe('recipe-test')!.hash, edit.hash);
+    const rejected = await port.reconcile({ key: 'profile', method: 'POST', path: '/v1/recipes' }); assert.equal(rejected.state, 'failed');
+    assert.deepEqual(await port.reconcile({ key: 'profile', method: 'PATCH', path: '/v1/recipes/recipe-test' }), { state: 'pending' });
+  } finally { await api?.close(); f.store.close(); }
+});
+
+
+test('unknown_unavailable_and_legacy_profile_authority_cannot_be_approved_by_a_readiness_bypass', async () => {
+  for (const profile of [undefined, { available: false, isolatedProfileId: 'unavailable-v2' }]) {
+    const f = setup();
+    const registry = new RecipeRegistry(f.store, { resolveReference: () => true, executionReadiness: () => [], executionProfile: () => profile });
+    const port = new C5RecipePort(registry);
+    try {
+      const recipe = await port.create(boundRecipe(registry, f.input), { key: 'inactive' });
+      const before = f.store.snapshot();
+      const approval = { recipeHash: recipe.hash, payloadHash: recipePayloadHash(recipe), repositoryIds: recipe.repositoryIds, capabilities: recipe.contract.variables.sf.required };
+      await assert.rejects(port.patch(recipe.recipeId, boundPatch(registry, recipe.recipeId, { active: true, approval }), { key: 'approve-unavailable', expectedRevision: before.recipes[0]!.revision }));
+      assert.deepEqual({ ...f.store.snapshot(), at: before.at }, before); assert.equal(f.store.getAdmissionState().grants.length, 0);
+    } finally { f.store.close(); }
+  }
+  const f = setup();
+  try {
+    const recipe = await f.port.create(boundRecipe(f.registry, f.input), { key: 'create' });
+    f.store.saveGrant({ id: 'legacy', recipeId: recipe.recipeId, recipeRevision: recipe.revision, repositoryIds: recipe.repositoryIds, required: recipe.contract.variables.sf.required, grantedAt: new Date().toISOString() });
+    assert.equal(f.registry.readiness(recipe).approved, false, 'Legacy missing-profile grants remain historical and cannot qualify current activation');
+    const summary = f.store.snapshot().recipes[0]!;
+    await assert.rejects(f.port.patch(recipe.recipeId, boundPatch(f.registry, recipe.recipeId, { active: true }), { key: 'legacy', expectedRevision: summary.revision }));
   } finally { f.store.close(); }
 });

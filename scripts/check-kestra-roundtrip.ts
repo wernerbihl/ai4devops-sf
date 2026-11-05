@@ -1,3 +1,4 @@
+import { boundRecipe, fixtureExecutionProfile } from '../tests/helpers/recipe-validation.ts';
 /** Bounded integration check: real pinned engine + production client + explicit fixture broker.
  * Uses owned volumes because Windows Docker may not bind WSL files. This is NOT deployment-bind proof.
  * No native credentials/providers, no host mounts, no published ports, no user auth copying.
@@ -31,8 +32,8 @@ const receipt: Record<string, unknown> = { owner, engine: kestraImagePins.kestra
 try {
   const source = parse(readFileSync(new URL('../recipes/starter/focused-feature.yaml', import.meta.url), 'utf8'));
   source.variables.sf.tagId = store.snapshot().tags[0]!.id; store.createRepository({ id: 'repo', name: 'Repo', url: 'https://example.test/repo' });
-  const registry = new RecipeRegistry(store, { resolveReference: () => true, executionReadiness: () => [] });
-  const recipe = registry.createCommand({ yaml: JSON.stringify(source), repositoryIds: ['repo'] }, { key: 'recipe' });
+  const registry = new RecipeRegistry(store, { resolveReference: () => true, executionProfile: fixtureExecutionProfile, executionReadiness: () => [] });
+  const recipe = registry.createCommand(boundRecipe(registry, { yaml: JSON.stringify(source), repositoryIds: ['repo'] }), { key: 'recipe' });
   const task = materializeTask({ recipeId: recipe.recipeId, repositoryIds: ['repo'], title: literal, description: literal }, recipe, 'repo', { ownerId: 'vscode', providerId: 'copilot', finishPolicy: 'pr' });
   const scope = { attemptId: 'attempt-1', recipeId: recipe.recipeId, recipeRevision: recipe.revision, repositoryIds: ['repo'], grantIds: ['fixture-grant'], expiresAt: '2099-01-01T00:00:00.000Z', fence: 1 };
   const native: WorkerRequest = { requestId: 'native-request', idempotencyKey: 'native-key', scope, operation: 'native.start', payload: { idempotencyKey: 'native-key', attemptId: 'attempt-1', task, workspacePath: '/fixture', baseSha: 'abc', fence: 1, profileId: 'fixture-only' } };

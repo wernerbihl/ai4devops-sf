@@ -16,7 +16,7 @@ export async function copyRuntime(input:{sourceRoot:string;target:string;install
   if(input.target!==target||realpathSync(parent)!==parent||!stat.isDirectory()||(process.platform!=='win32'&&(stat.uid!==process.getuid!()||(stat.mode&0o077)!==0)))throw new Error('Private runtime parent directory required');
   if(process.platform==='win32')assertWindowsPrivateDirectory(parent);
   const pkg=JSON.parse(readFileSync(join(source,'package.json'),'utf8')) as {name:string;version:string;dependencies:Record<string,string>};
-  const lock=JSON.parse(readFileSync(join(source,'package-lock.json'),'utf8')) as {packages:Record<string,{dev?:boolean;optional?:boolean;link?:boolean;version?:string}>};
+  const lock=JSON.parse(readFileSync(join(source,'release/runtime-lock.json'),'utf8')) as {packages:Record<string,{dev?:boolean;optional?:boolean;link?:boolean;version?:string}>};
   if(!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(pkg.version)||!lock.packages)throw new Error('Invalid built package manifest');
   const version=input.installationVersion??pkg.version;if(!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)||(input.installationVersion!==undefined&&!version.startsWith(pkg.version+(pkg.version.includes('+')?'.reconfig.':'+reconfig.'))))throw new Error('Invalid installed runtime revision');
   const packages=Object.entries(lock.packages).filter(([name,entry])=>name.startsWith('node_modules/')&&!entry.dev);
@@ -36,14 +36,15 @@ export async function copyRuntime(input:{sourceRoot:string;target:string;install
   copyTree(join(source,'bin'),join(target,'bin'),false);
   mkdirSync(join(target,'release'),{mode:0o700});
   copyFileSync(join(source,'release/provenance.json'),join(target,'release/provenance.json'));
-  verifyReleaseProvenance(target);
-  copyFileSync(join(source,'package-lock.json'),join(target,'package-lock.json'));
+  copyFileSync(join(source,'release/runtime-lock.json'),join(target,'release/runtime-lock.json'));
+  copyFileSync(join(source,'release/runtime-lock.json'),join(target,'package-lock.json'));
   for(const [name,entry] of packages){
     const segments=name.split('/');if(segments.some(part=>!part||part==='.'||part==='..')||entry.link)throw new Error('Unsupported production dependency path');
     const from=join(source,...segments);if(!existsSync(from)){if(entry.optional)continue;throw new Error('Required production dependency unavailable')}
     if(realpathSync(from)!==from)throw new Error('Production dependency must be local to this package');
     const to=join(target,...segments);mkdirSync(dirname(to),{recursive:true,mode:0o700});copyTree(from,to,true);
   }
+  verifyReleaseProvenance(target);
   const node=join(target,process.platform==='win32'?'node.exe':'node');copyFileSync(realpathSync(process.execPath),node);if(process.platform==='win32')protectWindowsFile(node);else chmodSync(node,0o755);
   const nodeSha256=createHash('sha256').update(readFileSync(node)).digest('hex');
   writeFileSync(join(target,'package.json'),JSON.stringify({name:pkg.name,version,type:'module',bin:{'ai4devops-sf':'bin/ai4devops-sf.mjs'},dependencies:pkg.dependencies}),{flag:'wx',mode:0o600});

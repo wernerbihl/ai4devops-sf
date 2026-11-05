@@ -44,7 +44,7 @@
   "files": [
     "bin/",
     "dist/",
-    "package-lock.json",
+    "release/runtime-lock.json",
     "release/provenance.json",
     "README.md"
   ],

@@ -18,9 +18,10 @@ export function artifactFiles(root: string): string[] {
     }
   }
   walk('dist'); walk('bin');
-  if(existsSync(join(root,'package-lock.json'))){
-    files.push('package-lock.json');
-    const lock=JSON.parse(readFileSync(join(root,'package-lock.json'),'utf8'));
+  const lockPath=existsSync(join(root,'release/runtime-lock.json'))?'release/runtime-lock.json':'package-lock.json';
+  if(existsSync(join(root,lockPath))){
+    files.push(lockPath);
+    const lock=JSON.parse(readFileSync(join(root,lockPath),'utf8'));
     for(const [path,entry] of Object.entries(lock.packages??{}) as [string,{dev?:boolean;optional?:boolean;link?:boolean}][]){
       if(!path.startsWith('node_modules/')||entry.dev)continue;
       if(!/^[\w@./-]+$/.test(path)||path.split('/').some(part=>!part||part==='.'||part==='..')||entry.link)throw Error('Invalid production dependency inventory');

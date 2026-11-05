@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { artifactFiles, sha256, verifyReleaseProvenance } from '../src/release/provenance.ts';
@@ -21,6 +21,8 @@ export function produceReleaseProvenance(root=process.cwd(), check=false) {
     if(!bytes.equals(git('show',sourceCommit+':'+path)))throw Error('Commit exact release input first: '+path);
     return [path,sha256(bytes)];
   }));
+  if(check){if(!readFileSync(join(root,'release/runtime-lock.json')).equals(readFileSync(join(root,'package-lock.json'))))throw Error('Runtime dependency lock differs');}
+  else copyFileSync(join(root,'package-lock.json'),join(root,'release/runtime-lock.json'));
   const artifacts=Object.fromEntries(artifactFiles(root).map(path=>[path,sha256(readFileSync(join(root,path)))]));
   const core={schemaVersion:1,version:JSON.parse(readFileSync(join(root,'package.json'),'utf8')).version,sourceCommit,sourceFiles,artifacts};
   const bytes=JSON.stringify({...core,releaseDigest:sha256(JSON.stringify(core))},null,2)+'\n';

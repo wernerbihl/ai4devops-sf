@@ -67,6 +67,13 @@ test('real runtime opens API and private control honestly unavailable without pr
     const denied=await fetch(runtime.controlUrl+'/health'); assert.equal(denied.status,401);
     const health=await fetch(runtime.controlUrl+'/health',{headers:{authorization:'Bearer '+Buffer.alloc(32,9).toString('base64url')}});
     assert.equal(health.status,200); assert.equal((await health.json()).ready,false);
+    const headers={authorization:'Bearer '+Buffer.alloc(32,9).toString('base64url'),'content-type':'application/json'};
+    const missing=await fetch(runtime.controlUrl+'/next',{method:'POST',headers,body:'{}'}); assert.equal(missing.status,409);
+    const send=()=>fetch(runtime!.controlUrl+'/next',{method:'POST',headers,body:JSON.stringify({key:'cli-fixture-key'})});
+    const first=await send(); assert.equal(first.status,200); const firstBody=await first.json();
+    const second=await send(); assert.equal(second.status,200); assert.deepEqual(await second.json(),firstBody);
+    assert.ok(runtime.store.getActionByKey('dispatch:request:cli-fixture-key'));
+
   } finally {await runtime?.stop();rmSync(root,{recursive:true,force:true})}
 });
 

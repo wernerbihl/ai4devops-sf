@@ -1,11 +1,11 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ProcessDocker, PosixInstallationSecrets } from '../kestra/deployment.ts';
+import { ProcessDocker, PosixInstallationSecrets, WindowsInstallationSecrets } from '../kestra/deployment.ts';
 import { startRuntime } from './runtime.ts';
 /** Private installation service entry. Public CLI remains setup/next/uninstall. */
 export async function main(args=process.argv.slice(2)) {
   if(args.length!==2||!args[0]||!args[1])throw new Error('Private service requires installation ID and absolute installation directory');
-  const runtime=await startRuntime({id:args[0],root:resolve(args[1]),docker:new ProcessDocker(process.env.SF_DOCKER_EXECUTABLE??'docker'),secrets:new PosixInstallationSecrets()});
+  const runtime=await startRuntime({id:args[0],root:resolve(args[1]),docker:new ProcessDocker(process.env.SF_DOCKER_EXECUTABLE??'docker'),secrets:process.platform==='win32'?new WindowsInstallationSecrets():new PosixInstallationSecrets()});
   const stop=()=>{void runtime.stop().then(()=>{process.exitCode=0})};process.once('SIGTERM',stop);process.once('SIGINT',stop);
   return runtime;
 }

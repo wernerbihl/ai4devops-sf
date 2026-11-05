@@ -1,3 +1,4 @@
+import { assertWindowsPrivateFile, readWindowsPrivateFile, replaceWindowsPrivateFile, writeWindowsPrivateFile } from '../platform/windows-private.ts';
 import { imageMatches, isImagePin } from '../isolation/image.ts';
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync, readFileSync, unlinkSync, openSync, closeSync, fsyncSync } from 'node:fs';
@@ -60,6 +61,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
     const controlIntentPath = join(dirname(options.nativeState.markerPath), 'control-start.json');
     const pauseReceiptPath = join(dirname(options.nativeState.markerPath), 'control-pause.json');
     const syncControlDirectory = () => {
+        if(process.platform==='win32')return;
         const fd = openSync(dirname(controlIntentPath), 'r');
         try {
             fsyncSync(fd);
@@ -68,7 +70,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
             closeSync(fd);
         }
     };
-    const clearControlIntent = () => { unlinkSync(controlIntentPath); syncControlDirectory(); };
+    const clearControlIntent = () => { if(process.platform==='win32')assertWindowsPrivateFile(controlIntentPath);unlinkSync(controlIntentPath); syncControlDirectory(); };
     const assertSettled = () => ensure(!existsSync(controlIntentPath), 'owner_control_unknown', 'Native control start is pending or outcome unknown; retain exclusion');
     async function processes() { const state = await verifyNativeStateMount(options.nativeState, options.nativeState.taskId, options.nativeStateOwnership); const c = JSON.parse(await docker.command(['container', 'inspect', options.containerId]))[0]; const image = JSON.parse(await docker.command(['image', 'inspect', options.image]))[0]; ensure(c?.Id === options.containerId && c.State?.Running && !c.State.Paused && c.Config?.Labels?.['sf.runtime-owner'] === options.runtimeOwnerId && c.Config.User && !/^(0|root)(:|$)/.test(c.Config.User) && image?.Id === c.Image && imageMatches(options.image,image), 'owner_managed', 'Native runtime ownership/image changed'); ensure(c.Mounts?.some((m: any) => m.Type === 'bind' && m.Source === state.source && m.Destination === state.target && m.RW === true), 'owner_managed', 'Actual persistent native state mount is missing'); const value = JSON.parse(await docker.command(['exec', options.containerId, 'node', '-e', inspectProgram, JSON.stringify({ entrypoint: options.entrypoint, userDataDir: options.userDataDir, tokenFile: options.tokenFile, port: options.port })])); ensure(value.entrypointHash === options.entrypointSha256 && Array.isArray(value.processes) && value.processes.length <= 1, 'owner_managed', 'Native entrypoint digest or process identity mismatch'); return value.processes as NativeProcess[]; }
     async function start() {
@@ -93,7 +95,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         ensure(c.HostConfig?.RestartPolicy?.Name === 'no' && c.HostConfig.AutoRemove === false, 'owner_quiescence', 'Managed runtime must disable automatic restart and removal');
         return c;
     }
-    const durableWrite = (path: string, value: unknown, exclusive = false) => { const fd = openSync(path, exclusive ? 'wx' : 'w', 0o600); try {
+    const durableWrite = (path: string, value: unknown, exclusive = false) => { if(process.platform==='win32'){const data=Buffer.from(JSON.stringify(value));if(!exclusive&&existsSync(path))replaceWindowsPrivateFile(path,data);else writeWindowsPrivateFile(path,data);return}const fd = openSync(path, exclusive ? 'wx' : 'w', 0o600); try {
         writeFileSync(fd, JSON.stringify(value));
         fsyncSync(fd);
     }
@@ -106,7 +108,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
             return undefined;
         const c = await stoppedContainer();
         assertSettled();
-        const proof = JSON.parse(readFileSync(pauseReceiptPath, 'utf8'));
+        const proof = JSON.parse(process.platform==='win32'?readWindowsPrivateFile(pauseReceiptPath).toString('utf8'):readFileSync(pauseReceiptPath, 'utf8'));
         if (!c.State?.Paused)
             return undefined;
         ensure(c.State.Running === true && c.State.Pid > 0 && c.State.StartedAt && proof.schemaVersion === 1 && proof.runtimeId === options.containerId && proof.containerPid === c.State.Pid && proof.startedAt === c.State.StartedAt && proof.processIdentity === nativeProcessIdentity(proof.native), 'owner_quiescence', 'Frozen runtime/process identity changed');
@@ -150,15 +152,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         const c = await stoppedContainer();
         ensure(frozen || c.State?.Running === false && c.State.Paused === false && c.State.Pid === 0 && c.State.Status === 'exited', 'owner_quiescence', 'Resume requires a fully stopped or independently frozen native runtime');
         assertCurrent();
-        const fd = openSync(controlIntentPath, 'wx', 0o600);
-        try {
-            writeFileSync(fd, JSON.stringify({ schemaVersion: 1, mode, containerId: options.containerId, taskId: start.task.id, key: start.idempotencyKey }));
-            fsyncSync(fd);
-        }
-        finally {
-            closeSync(fd);
-        }
-        syncControlDirectory();
+        durableWrite(controlIntentPath,{ schemaVersion: 1, mode, containerId: options.containerId, taskId: start.task.id, key: start.idempotencyKey },true);
         // Mutating Docker failures are unknown: never erase this durable exclusion merely because an inspect sees stopped.
         let settled = false;
         try {
@@ -174,6 +168,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
             assertCurrent();
             clearControlIntent();
             if (existsSync(pauseReceiptPath)) {
+                if(process.platform==='win32')assertWindowsPrivateFile(pauseReceiptPath);
                 unlinkSync(pauseReceiptPath);
                 syncControlDirectory();
             }

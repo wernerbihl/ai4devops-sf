@@ -1,3 +1,4 @@
+import { createWindowsCredentialStore } from './windows-store.ts';
 import {
   constants,
   closeSync,
@@ -58,8 +59,9 @@ export interface CredentialStore {
 }
 const queues = new Map<string, Promise<unknown>>();
 export function createFileCredentialStore(directory: string): CredentialStore {
+  if(process.platform==='win32')return createWindowsCredentialStore(directory);
   if (!isAbsolute(directory)) throw new TypeError('Absolute protected authentication directory required');
-  const protectsSecrets = process.platform !== 'win32';
+  const protectsSecrets = true;
   directory = resolve(directory);
   const file = join(directory, 'auth.json');
   const assertOwned = (path: string, mode: number, directoryExpected: boolean) => {

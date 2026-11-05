@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { protectWindowsDirectory, assertWindowsPrivateFile, writeWindowsPrivateFile } from '../platform/windows-private.ts';
 import { fingerprint } from '../storage/database.ts';
 import type { NativeIdentity, TaskResult, WorkflowIdentity, WorkflowStart } from '../contracts/domain.ts';
 
@@ -18,7 +19,8 @@ export function privateDirectory(path: string): string {
   const absolute = resolve(path); mkdirSync(absolute, { recursive: true, mode: 0o700 });
   check(realpathSync(absolute) === absolute, 'Private directory must be canonical, without symlinks');
   const stat = lstatSync(absolute); check(stat.isDirectory(), 'Private directory required');
-  if (process.platform !== 'win32') {
+  if (process.platform === 'win32') protectWindowsDirectory(absolute);
+  else {
     check(stat.uid === process.getuid!(), 'Private directory ownership mismatch');
     check((stat.mode & 0o077) === 0, 'Private directory permissions must be 0700');
   }
@@ -31,8 +33,9 @@ export class ExecutionJournal {
   private db: DatabaseSync;
   constructor(directory: string) {
     const path = join(privateDirectory(directory), 'execution-intents.sqlite');
-    try { const s = lstatSync(path); check(s.isFile() && !s.isSymbolicLink() && (process.platform === 'win32' || s.uid === process.getuid!() && (s.mode & 0o077) === 0), 'Unsafe execution journal'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-    this.db = new DatabaseSync(path); chmodSync(path, 0o600);
+    if(process.platform==='win32'){if(!existsSync(path))writeWindowsPrivateFile(path,Buffer.alloc(0));assertWindowsPrivateFile(path)}
+    else {try { const s = lstatSync(path); check(s.isFile() && !s.isSymbolicLink() && s.uid === process.getuid!() && (s.mode & 0o077) === 0, 'Unsafe execution journal'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }}
+    this.db = new DatabaseSync(path); if(process.platform!=='win32')chmodSync(path, 0o600);
     this.db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS intents (attempt TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL);');
   }
   get(attempt: string): ExecutionIntent | undefined { const r = this.db.prepare('SELECT body FROM intents WHERE attempt=?').get(attempt); return r ? JSON.parse(String(r.body)) : undefined; }

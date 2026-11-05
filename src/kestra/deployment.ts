@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { constants, closeSync, fsyncSync, lstatSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parse } from 'yaml';
+import { protectWindowsDirectory, readWindowsPrivateFile, readWindowsSecret, writeWindowsPrivateFile, writeWindowsSecret } from '../platform/windows-private.ts';
 import { canonical, fingerprint } from '../storage/database.ts';
 import { check, KestraError, privateDirectory } from './executions.ts';
 import type { EngineTransport } from './executions.ts';
@@ -32,10 +33,12 @@ export interface InstallationSecretStore {
   protectRuntimeDirectory?(path: string): Promise<void>;
 }
 function readPrivate(path: string): string {
-  const s = lstatSync(path); check(s.isFile() && !s.isSymbolicLink() && (process.platform === 'win32' || s.uid === process.getuid!() && (s.mode & 0o077) === 0), 'Unsafe private file permissions/ownership');
+  if(process.platform==='win32')return readWindowsPrivateFile(path).toString('utf8');
+  const s = lstatSync(path); check(s.isFile() && !s.isSymbolicLink() && (s.uid === process.getuid!() && (s.mode & 0o077) === 0), 'Unsafe private file permissions/ownership');
   return readFileSync(path, 'utf8');
 }
 function createPrivate(path: string, content: string): void {
+  if(process.platform==='win32'){if(existsSync(path)){const error=new Error('File exists') as NodeJS.ErrnoException;error.code='EEXIST';throw error}writeWindowsPrivateFile(path,Buffer.from(content));return}
   const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try { writeFileSync(fd, content); fsyncSync(fd); } finally { closeSync(fd); }
 }
@@ -51,6 +54,17 @@ export class PosixInstallationSecrets implements InstallationSecretStore {
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; }
     const value = JSON.parse(readPrivate(path)); check(value.id === id, 'Installation secret identity mismatch');
     return { username: value.username, password: value.password, encryptionKey: value.encryptionKey };
+  }
+}
+/** DPAPI CurrentUser protects persisted Windows engine credentials; ACLs protect runtime directories. */
+export class WindowsInstallationSecrets implements InstallationSecretStore {
+  async protectRuntimeDirectory(path:string):Promise<void>{protectWindowsDirectory(path)}
+  async loadOrCreate(id:string,root:string):Promise<InstallationSecrets>{
+    if(process.platform!=='win32')throw new Error('Windows secret storage requires Windows');
+    const path=join(privateDirectory(root),'kestra-secrets.dpapi');
+    if(!existsSync(path))writeWindowsSecret(path,Buffer.from(JSON.stringify({id,username:'factory@localhost.invalid',password:randomBytes(32).toString('base64url'),encryptionKey:randomBytes(32).toString('base64')})));
+    const value=JSON.parse(readWindowsSecret(path).toString('utf8')) as InstallationSecrets & {id:string};
+    check(value.id===id,'Installation secret identity mismatch');return {username:value.username,password:value.password,encryptionKey:value.encryptionKey};
   }
 }
 export interface Installation { id: string; root: string; docker: DockerPort; secrets: InstallationSecretStore; }

@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { readWindowsPrivateFile, readWindowsSecret } from '../platform/windows-private.ts';
 import { isImagePin } from '../isolation/image.ts';
 import { expectedImageBuild, type OwnedImageBuild } from '../install/images.ts';
 import type { RepositoryAccess } from '../github/capabilities.ts';
@@ -24,7 +25,7 @@ export interface RuntimeConfig {
   apiPort?: number;
 }
 export function readPrivateFile(path: string): Buffer {
-  ensure(process.platform !== 'win32', 'private_acl_unavailable', 'Windows requires the owning-OS private ACL/vault producer');
+  if(process.platform==='win32'){const value=readWindowsPrivateFile(path);ensure(value.length<=1_048_576,'private_size','Private file exceeds the size limit');return value}
   ensure(resolve(path) === path && realpathSync(path) === path, 'private_path', 'Private file must be canonical');
   const stat = lstatSync(path);
   ensure(stat.isFile() && !stat.isSymbolicLink() && stat.uid === process.getuid!() && (stat.mode & 0o077) === 0 && stat.size <= 1_048_576, 'private_permissions', 'Private file permissions or ownership are invalid');
@@ -74,5 +75,6 @@ export function loadRuntimeConfig(root: string, installationId: string): Runtime
 }
 export function readVaultSecret(root: string, ref: string): Buffer {
   ensure(/^[a-zA-Z0-9_-]{1,100}$/.test(ref), 'vault_reference', 'Invalid vault reference');
-  return readPrivateFile(join(root, 'vault', ref));
+  const path=join(root,'vault',ref);if(process.platform==='win32'){const value=readWindowsSecret(path);ensure(value.length<=1_048_576,'vault_size','Vault item exceeds the size limit');return value}
+  return readPrivateFile(path);
 }

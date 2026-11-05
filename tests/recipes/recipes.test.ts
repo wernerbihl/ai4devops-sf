@@ -190,6 +190,10 @@ test('starter_flows_use_only_fixed_broker_native_and_fresh_result_capability_gra
     const recipe = validateRecipe(readFileSync(new URL(`../../recipes/starter/${name}.yaml`, import.meta.url), 'utf8'), []);
     const [start, pause, result] = recipe.contract.tasks;
     assert.equal(start!.uri, 'http://sf-broker:8080/worker/v1/native/start');
+    assert.equal(recipe.contract.inputs!.find(input => input.id === 'sf_native_start')!.type, 'STRING');
+    assert.equal(start!.body, '{{ inputs.sf_native_start }}');
+    assert.equal(result!.body, '{{ outputs.await_result.onResume.sf_result }}');
+    assert.equal((pause!.onResume as Record<string, unknown>[]).find(input => input.id === 'sf_result')!.type, 'STRING');
     assert.equal(result!.uri, 'http://sf-broker:8080/worker/v1/results');
     assert.equal((result!.headers as Record<string, string>).Authorization, 'Bearer {{ outputs.await_result.onResume.sf_result_capability }}');
     assert.equal((pause!.onResume as Record<string, unknown>[]).find(input => input.id === 'sf_result_capability')!.type, 'SECRET');
@@ -301,4 +305,59 @@ test('reserved_authorization_scalar_spelling_is_canonical_for_lossless_redaction
   assert.notEqual(folded, yaml);
   assert.throws(() => validateRecipe(folded, []), /canonical/);
   assert.equal(sanitize({ Authorization: 'Bearer {{ inputs.sf_capability }}' }, ['inputs.sf_capability']).Authorization, 'Bearer {{ [redacted] }}');
+});
+
+test('unmaterializable_default_templates_cannot_validate_import_or_activate', async () => {
+  const cases = [
+    { name: 'optional-absent', schema: { type: 'string' }, field: 'goal' },
+    { name: 'integer-goal', schema: { type: 'integer', default: 42 }, field: 'goal' },
+    { name: 'empty-goal', schema: { type: 'string', default: '' }, field: 'goal' },
+    { name: 'blank-criterion', schema: { type: 'string', default: ' ' }, field: 'acceptanceCriteria' },
+    { name: 'object-goal', schema: { type: 'object', properties: {}, additionalProperties: false, default: {} }, field: 'goal' },
+    { name: 'null-criterion', schema: { type: 'null', default: null }, field: 'acceptanceCriteria' },
+  ];
+  for (const scenario of cases) {
+    const f = setup();
+    try {
+      const source = flow(f.store.snapshot().tags[0]!.id);
+      source.variables.sf.inputSchema = { type: 'object', properties: { value: scenario.schema }, additionalProperties: false };
+      source.variables.sf.taskTemplate.goal = 'A valid goal';
+      if (scenario.field === 'goal') source.variables.sf.taskTemplate.goal = '{{ inputs.value }}';
+      else source.variables.sf.taskTemplate.acceptanceCriteria = ['{{ inputs.value }}'];
+      const input = { ...f.input, yaml: JSON.stringify(source) };
+      assert.equal((await f.port.validate(input, { key: 'validate' })).valid, false, scenario.name);
+      await assert.rejects(f.port.create(input, { key: 'invalid-import' }), scenario.name);
+      assert.equal(f.store.snapshot().recipes.length, 0);
+      // A revision persisted by an earlier trusted producer must not bypass the new readiness gate.
+      const good = await f.port.create(f.input, { key: 'good' });
+      const summary = f.store.snapshot().recipes[0]!;
+      const invalid = { ...good, id: 'old-invalid', revision: 'old-invalid', yaml: input.yaml, contract: source,
+        hash: `sha256:${createHash('sha256').update(input.yaml).digest('hex')}` };
+      const stored = f.store.saveRecipeRevision(invalid, summary.revision);
+      assert.equal(f.registry.readiness(invalid).ready, false, scenario.name);
+      assert.ok(f.registry.readiness(invalid).reasons.some(reason => reason.startsWith('Default task cannot be materialized:')), scenario.name);
+      await assert.rejects(f.port.patch(good.recipeId, { active: true, approval: {
+        recipeHash: invalid.hash, payloadHash: recipePayloadHash(invalid), repositoryIds: invalid.repositoryIds, capabilities: invalid.contract.variables.sf.required,
+      } }, { key: 'invalid-approval', expectedRevision: stored.revision }), scenario.name);
+      assert.equal(f.store.snapshot().recipes[0]!.active, false); assert.equal(f.store.getAdmissionState().grants.length, 0);
+    } finally { f.store.close(); }
+  }
+});
+
+test('explicit_defaults_complete_the_template_and_task_input_overrides_still_validate', async () => {
+  const f = setup();
+  try {
+    const source = flow(f.store.snapshot().tags[0]!.id);
+    source.variables.sf.inputSchema = { type: 'object', properties: { value: { type: 'string' } }, additionalProperties: false };
+    source.variables.sf.taskTemplate.goal = '{{ inputs.value }}';
+    const input = { ...f.input, yaml: JSON.stringify(source), inputDefaults: { value: 'Stored goal' } };
+    assert.equal((await f.port.validate(input, { key: 'validate' })).valid, true);
+    const rev = await f.port.create(input, { key: 'create' }); const summary = f.store.snapshot().recipes[0]!;
+    await f.port.patch(rev.recipeId, { active: true, approval: { recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: rev.repositoryIds, capabilities: rev.contract.variables.sf.required } }, { key: 'approve', expectedRevision: summary.revision });
+    const request = { recipeId: rev.recipeId, repositoryIds: ['repo'], title: 'Title', description: 'Description' };
+    assert.equal(f.store.createManualTasks(request, 'default-task')[0]!.goal, 'Stored goal');
+    assert.equal(f.store.createManualTasks({ ...request, inputs: { value: 'Task goal' } }, 'override-task')[0]!.goal, 'Task goal');
+    assert.throws(() => f.store.createManualTasks({ ...request, inputs: { value: '' } }, 'bad-task'));
+    assert.equal(f.store.snapshot().tasks.length, 2);
+  } finally { f.store.close(); }
 });

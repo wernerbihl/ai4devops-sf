@@ -207,6 +207,9 @@ const WorkerResponse = T.Union([
   object({ requestId: text(), ok: T.Literal(false), error: ApiError }),
 ]);
 
+// The engine sees only this opaque envelope; logical worker contracts and authorization are unchanged.
+const WorkerTransport = object({ encoding: T.Literal('sf-base64url-json-v1'), payload: T.String({ minLength: 1, pattern: '^[A-Za-z0-9_-]+$' }) });
+
 const SettingsPatch = object({
   taktSeconds: T.Optional(integer(1)), limits: T.Optional(FactoryConfig.properties.limits),
   defaultOwnerId: optionalText(), defaultProviderId: T.Optional(ProviderId), paused: T.Optional(T.Boolean()),
@@ -242,7 +245,7 @@ export const schemas = {
   NativeIdentity, Usage, NativeInput, NativeSnapshot, NativeStart, CapabilityReport, TaskResult, CloseoutResult, ApiError,
   TaskRecord, WorkflowIdentity, WorkflowStart, WorkflowSnapshot, Attempt, AttentionRequest, ActorScope,
   FindingInput, Grant, ProbeOptions, ProbeEvidence, VerifiedProbeEvidence, ProfileSpec, ProfileEvidence, OwnerEvent, OwnerRpc, OwnerRpcResponse,
-  Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse,
+  Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse, WorkerTransport,
   SettingsPatch, Settings, RepositoryPatch, WeightsPatch, RotationPreview, TagCreate, TagPatch, TagArchive,
   TaskPatch, RecipeCreate, RecipeValidation, RecipePatch, DispatchResult, AttentionResponse, NativeOpenResult,
   DeviceFlow, Empty, Acknowledgement,

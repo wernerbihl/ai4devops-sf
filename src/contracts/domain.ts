@@ -49,6 +49,7 @@ export type FactoryEvent = Contract<'FactoryEvent'>;
 export type Artifact = Contract<'Artifact'>;
 export type WorkerRequest = Contract<'WorkerRequest'>;
 export type WorkerResponse = Contract<'WorkerResponse'>;
+export type WorkerTransport = Contract<'WorkerTransport'>;
 
 export interface Clock {
   wallNow(): Date;

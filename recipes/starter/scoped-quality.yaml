@@ -52,7 +52,7 @@ inputs:
     type: SECRET
     required: true
   - id: sf_native_start
-    type: JSON
+    type: STRING
     required: true
 tasks:
   - id: native_start
@@ -62,7 +62,7 @@ tasks:
     contentType: application/json
     headers:
       Authorization: Bearer {{ inputs.sf_capability }}
-    body: "{{ inputs.sf_native_start | toJson }}"
+    body: "{{ inputs.sf_native_start }}"
     options:
       followRedirects: false
       allowFailed: false
@@ -72,7 +72,7 @@ tasks:
     type: io.kestra.plugin.core.flow.Pause
     onResume:
       - id: sf_result
-        type: JSON
+        type: STRING
         required: true
       - id: sf_result_capability
         type: SECRET
@@ -84,7 +84,7 @@ tasks:
     contentType: application/json
     headers:
       Authorization: Bearer {{ outputs.await_result.onResume.sf_result_capability }}
-    body: "{{ outputs.await_result.onResume.sf_result | toJson }}"
+    body: "{{ outputs.await_result.onResume.sf_result }}"
     options:
       followRedirects: false
       allowFailed: false

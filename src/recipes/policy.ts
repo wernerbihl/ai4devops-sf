@@ -68,13 +68,13 @@ export function brokerEngineContract(): Pick<RecipeContract, 'inputs' | 'tasks'>
     options: { followRedirects: false, allowFailed: false, allowedResponseCodes: [200] },
   });
   return {
-    inputs: [{ id: 'sf_capability', type: 'SECRET', required: true }, { id: 'sf_native_start', type: 'JSON', required: true }],
+    inputs: [{ id: 'sf_capability', type: 'SECRET', required: true }, { id: 'sf_native_start', type: 'STRING', required: true }],
     tasks: [
-      http('native_start', 'native/start', 'inputs.sf_capability', '{{ inputs.sf_native_start | toJson }}'),
+      http('native_start', 'native/start', 'inputs.sf_capability', '{{ inputs.sf_native_start }}'),
       { id: 'await_result', type: 'io.kestra.plugin.core.flow.Pause', onResume: [
-        { id: 'sf_result', type: 'JSON', required: true }, { id: 'sf_result_capability', type: 'SECRET', required: true },
+        { id: 'sf_result', type: 'STRING', required: true }, { id: 'sf_result_capability', type: 'SECRET', required: true },
       ] },
-      http('submit_result', 'results', 'outputs.await_result.onResume.sf_result_capability', '{{ outputs.await_result.onResume.sf_result | toJson }}'),
+      http('submit_result', 'results', 'outputs.await_result.onResume.sf_result_capability', '{{ outputs.await_result.onResume.sf_result }}'),
     ],
   };
 }

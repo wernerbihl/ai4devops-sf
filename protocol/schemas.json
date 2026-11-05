@@ -4484,6 +4484,25 @@
         }
       ]
     },
+    "WorkerTransport": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "encoding": {
+          "const": "sf-base64url-json-v1",
+          "type": "string"
+        },
+        "payload": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "encoding",
+        "payload"
+      ]
+    },
     "SettingsPatch": {
       "additionalProperties": false,
       "type": "object",

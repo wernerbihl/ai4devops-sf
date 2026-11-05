@@ -5,8 +5,9 @@ import { canonical, fingerprint, StoreError } from '../storage/database.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import { DefinitiveNoEffect } from '../service/api.ts';
 import type { ApiFailureStatus, PendingRequest, RecipePort, Reconciliation, RequestContext } from '../service/api.ts';
-import { inputValues, RecipeValidationError, validateRecipe } from './validate.ts';
+import { RecipeValidationError, validateRecipe } from './validate.ts';
 import type { ValidatedRecipe } from './validate.ts';
+import { validateDefaultMaterialization } from './materialize.ts';
 import { RecipePolicyError, requirePolicy, isBrokerFlow } from './policy.ts';
 
 export interface RecipeResolvers {
@@ -50,6 +51,11 @@ export class RecipeRegistry {
     const grants = this.store.getAdmissionState().grants;
     const approved = recipe.repositoryIds.length > 0 && grants.some(grant => approvalCovers(grant, recipe, this.now()));
     const reasons = this.references(validated);
+    try { validateDefaultMaterialization(validated.contract.variables.sf, recipe.inputDefaults); }
+    catch (error) {
+      if (!(error instanceof RecipePolicyError || error instanceof TypeError)) throw error;
+      reasons.push(`Default task cannot be materialized: ${error.message}`);
+    }
     if (!recipe.repositoryIds.length) reasons.push('Assign at least one repository');
     if (!approved) reasons.push('Explicit capability approval is required for this exact revision and repository scope');
     return { ready: reasons.length === 0, reasons, requested: recipe.contract.variables.sf.required, approved };
@@ -60,7 +66,7 @@ export class RecipeRegistry {
       const validated = validateRecipe(input.yaml, []);
       const current = this.store.getRecipe(validated.contract.variables.sf.recipeId);
       const effective = { yaml: input.yaml, inputDefaults: input.inputDefaults ?? current?.inputDefaults ?? {}, repositoryIds: input.repositoryIds ?? current?.repositoryIds ?? [] };
-      inputValues(validated.contract.variables.sf.inputSchema, effective.inputDefaults);
+      validateDefaultMaterialization(validated.contract.variables.sf, effective.inputDefaults);
       const same = current && current.hash === validated.hash && recipePayloadHash(current) === recipePayloadHash(effective);
       const readiness = same ? this.readiness(current) : {
         ready: false, reasons: [...this.references(validated), 'Explicit capability approval is required for this exact revision and repository scope'], requested: validated.contract.variables.sf.required, approved: false,
@@ -76,7 +82,7 @@ export class RecipeRegistry {
   saveRecipeRevision(input: ValidatedRecipe, options: { repositoryIds: string[]; inputDefaults: Record<string, unknown>; expectedRevision?: number }): RecipeRevision {
     const validated = validateRecipe(input.yaml, []);
     requirePolicy(validated.hash === input.hash && canonical(validated.contract) === canonical(input.contract), '/hash', 'Validated recipe has been modified');
-    inputValues(validated.contract.variables.sf.inputSchema, options.inputDefaults);
+    validateDefaultMaterialization(validated.contract.variables.sf, options.inputDefaults);
     const metadata = validated.contract.variables.sf;
     const recipe = validateContract('RecipeRevision', { id: randomUUID(), recipeId: metadata.recipeId, revision: randomUUID(), hash: validated.hash,
       name: metadata.displayName, description: validated.contract.description ?? metadata.taskTemplate.description, tagId: metadata.tagId,

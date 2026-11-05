@@ -1,0 +1,72 @@
+{
+  "mode": "live",
+  "check": "starter-schema-only",
+  "kestra": {
+    "version": "2.0.8",
+    "tag": "kestra/kestra:v2.0.8-slim",
+    "image": "kestra/kestra@sha256:d7bb1af55f4b5730247e5c8c852e2c912ccd36a58c7846ac96d2d749295ba365",
+    "plugins": {
+      "core": "2.0.8 (bundled)",
+      "additional": []
+    },
+    "autoInstall": false
+  },
+  "status": "passed",
+  "assertions": [
+    {
+      "name": "focused-feature",
+      "hash": "sha256:7bfbb198399b0d8f239f6d692de57c957bdad1423c488a3c07a80e8bce368d33",
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "index": 0,
+            "namespace": "sf.recipes",
+            "flow": "focused-feature",
+            "outdated": false,
+            "deprecationPaths": [],
+            "warnings": [],
+            "infos": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "focused-bug-fix",
+      "hash": "sha256:0b8d469b2b49e9d2f50d571fd6571f15c79f47a92008d6a6489e01b8d6c2d235",
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "index": 0,
+            "namespace": "sf.recipes",
+            "flow": "focused-bug-fix",
+            "outdated": false,
+            "deprecationPaths": [],
+            "warnings": [],
+            "infos": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "scoped-quality",
+      "hash": "sha256:cf2af93d01d4211bbabe1d8dfc438615925bed2e596f938ba2304fc6defca1e8",
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "index": 0,
+            "namespace": "sf.recipes",
+            "flow": "scoped-quality",
+            "outdated": false,
+            "deprecationPaths": [],
+            "warnings": [],
+            "infos": []
+          }
+        ]
+      }
+    }
+  ],
+  "cleanup": "complete"
+}

@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
   "version": "0.1.0",
-  "sourceCommit": "5b8ce3988a022b491b505edc78f3ee4ece4a17dc",
-  "sourceSha256": "87be7654b41708e67fac09e68fd7f1adc2d695f6c03b08eb6c90eb1bb2ae47c2",
+  "sourceCommit": "86e5b61e989594349caee63dcc169f3dce9b9cbb",
+  "sourceSha256": "87fbe673692401501b5a0adc14506231c916b99286f44404fbd6190df74f4710",
   "sourceFiles": {
+    ".gitattributes": "f38bc934f69ae9f0a9f7e6c38eca045251c05a5190535d520b0f6b0d78f7b480",
     ".gitignore": "0224f30e789c332a5abd8dbde01dbcc99415da1ef4eeb958ecef694f6879d276",
     "adapters/bb/README.md": "f73670aeb54bcba6ced39d57a92eab79b20363b40c7161d00bc617a5353d57d1",
     "adapters/bb/SvelteMount.tsx": "2c70d582466c8c7e9dbcfd17f8d93dbdecef241da0ca1aa79b303aed6f13af39",
@@ -41,8 +42,9 @@
     "protocol/compatibility.json": "e97acae55af17d8ca4e8899bfb78d6dd83e8e627e9782880dff0a2cd29a30807",
     "protocol/openapi.json": "5d2050ba7be3f116e8a95488fb9b2cab31fe5e0a361bb7884cc3fb66bc31f6d9",
     "protocol/schemas.json": "4187399cfa82b2250f6ea6273cecef6d18b254ba3075ab7d11ee59310f46c33f",
+    "scripts/adapter-source.ts": "465888cf116ad944805fb92c5c0c93cfade00334d9a747f0954ff1cec45954a7",
     "scripts/bb.ts": "b2c2c0b7bcf9a050ecd7d778f639b1c497cfa5c9999697a030e5e4680e868932",
-    "scripts/build-adapters.ts": "5a2a5f22ae8fd31e6e88392796e4b863c329ec08dd32fb487e4f5268395f79d7",
+    "scripts/build-adapters.ts": "58395e1189a6c3c45610c3f5d7cdbf346a12dc62fa882e5c413dcb5e994ab50b",
     "scripts/build-probe.ts": "3213af1f0c8b138840b6cd8e8fb1df88cbe73110fbc351ddbd28aecbe84bd529",
     "scripts/build.ts": "243f06dde20a6fdf55539ac259c2b9bb95465f5384690f9506132ee4c9de9f03",
     "scripts/check-owner-contracts.ts": "622c8c03cda378a6d80ee1ad5f6f21b13785a7211baf85b9af55ab02c53618fb",

@@ -1,5 +1,5 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import type { Attempt, Clock, NativeIdentity, OwnerEvent, TaskSpec } from '../contracts/domain.ts';
+import type { Attempt, Clock, CloseoutResult, NativeIdentity, OwnerEvent, TaskResult, TaskSpec } from '../contracts/domain.ts';
 import type { NativeOwner } from '../contracts/owner.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { StoreError, ensure, fingerprint } from '../storage/database.ts';
@@ -35,6 +35,10 @@ export interface Lifecycle {
   dispatchPending(): Promise<{ kind: 'started'; attemptId: string } | null>;
   reconnect(): Promise<void>;
   waitForCI(attemptId: string): Promise<void>;
+  /** Trusted C8 handoff: quiesce but retain writer lease for protected metadata operations. */
+  prepareCloseout(attemptId: string, result: TaskResult): Promise<void>;
+  finishCloseout(attemptId: string, result: TaskResult, outcome: CloseoutResult): Promise<void>;
+  rejectCloseout(attemptId: string, outcome: CloseoutResult): Promise<void>;
 }
 
 /** Trusted source controller. HTTP/worker callers receive none of its persistence capabilities. */
@@ -48,8 +52,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     const r = record(id); const value = accountActive(r.reservation.attempt, r.state, clock, epoch, stop, budget());
     return { state: value.state, activeDurationMs: value.duration };
   }
-  async function quiet(id: string): Promise<Quiescence> {
+  async function quiet(id: string, closeout = false): Promise<Quiescence> {
     const r = record(id).reservation;
+    ensure(closeout || record(id).state.closeout?.phase !== 'metadata', 'closeout_inflight', 'Trusted Git closeout must finish before releasing ownership');
     ensure(r.attempt.native && r.attempt.workflow, 'identity_missing', 'Reconnect original native and workflow identities');
     const effectAtRequest = record(id).state.effect;
     const generation = effectAtRequest ? `${effectAtRequest.token}:${effectAtRequest.phase}` : 'none';
@@ -162,6 +167,34 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     await deps.owner(r.attempt.native!).open(r.attempt.native!); store.completeAction(action.id);
   }
   const api: Lifecycle = {
+    prepareCloseout: async (id, result) => {
+      validateContract('TaskResult', result);
+      ensure(result.attemptId === id, 'invalid_result', 'Result attempt identity changed');
+      const r = record(id).reservation;
+      store.enqueueAction({ key: `closeout:${id}:input`, kind: 'closeout.input', payload: { result } });
+      if (!r.lease.active) {
+        ensure(record(id).state.closeout?.phase === 'monitoring', 'stale_fence', 'Closeout requires the current frozen attempt'); return;
+      }
+      store.assertLifecycleAuthority(id, r.lease.fence);
+      const state = record(id).state;
+      store.updateLifecycle(id, r.lease.fence, { state: { ...state, stopRequested: true, closeout: { phase: 'metadata', fence: r.lease.fence } } });
+      await quiet(id, true);
+      const stopped = account(id, true);
+      store.updateLifecycle(id, r.lease.fence, { ...stopped, state: { ...stopped.state!, quiescent: true } });
+    },
+    finishCloseout: async (id, result, outcome) => {
+      const r = record(id).reservation;
+      if (r.lease.active) {
+        await quiet(id, true);
+        const stopped = account(id, true);
+        store.updateLifecycle(id, r.lease.fence, { ...stopped, state: { ...stopped.state!, quiescent: true } });
+      }
+      store.saveCloseout(id, result, outcome, true);
+    },
+    rejectCloseout: async (id, outcome) => {
+      ensure(outcome.kind === 'needs_attention', 'invalid_closeout', 'Rejected closeout cannot report completion');
+      store.saveCloseout(id, undefined, outcome, false);
+    },
     applyOwnerEvent: (id, event) => operation(async () => {
       validateContract('OwnerEvent', event);
       if (event.type === 'identity') store.bindLifecycleIdentity(id, event.identity);

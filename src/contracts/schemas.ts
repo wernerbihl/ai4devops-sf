@@ -82,11 +82,17 @@ const TaskResult = object({
   attemptId: text(), summary: text(), evidence: strings(), createdTaskIds: strings(),
   outcome: choice('result', 'changes', 'needs_input'), headSha: optionalText(),
 });
+// Server-owned verification receipt. It is deliberately absent from TaskResult/worker inputs.
+const CloseoutResult = object({
+  kind: choice('completed', 'waiting_ci', 'needs_attention'), attemptId: text(), headSha: optionalText(),
+  pullRequest: T.Optional(object({ repositoryId: text(), number: integer(1), url: text(), headSha: text(), baseRef: text() })),
+  mergeSha: optionalText(), reason: optionalText(),
+});
 const ApiError = object({ code: text(), message: text(), recovery: text(), retryable: T.Boolean() });
 const TaskRecord = object({
   spec: TaskSpec, status: TaskStatus, revision: integer(1), controlMode: choice('factory', 'human'),
   createdAt: timestamp(), updatedAt: timestamp(), attemptIds: strings(), childTaskIds: strings(),
-  reason: optionalText(), recovery: optionalText(), result: T.Optional(TaskResult), archivedAt: T.Optional(timestamp()),
+  reason: optionalText(), recovery: optionalText(), result: T.Optional(TaskResult), closeout: T.Optional(CloseoutResult), archivedAt: T.Optional(timestamp()),
 });
 const WorkflowIdentity = object({ executionId: text(), namespace: text(), flowId: text(), revision: text() });
 const WorkflowStart = object({ idempotencyKey: text(), attemptId: text(), recipe: RecipeRevision, inputs: jsonObject(), scopeId: text(), fence: integer(1) });
@@ -98,7 +104,7 @@ const Attempt = object({
   id: text(), taskId: text(), recipeRevision: text(), baseSha: text(), workspacePath: text(), profileId: text(),
   fence: integer(1), status: TaskStatus, native: T.Optional(NativeIdentity), workflow: T.Optional(WorkflowIdentity),
   createdAt: timestamp(), startedAt: T.Optional(timestamp()), endedAt: T.Optional(timestamp()),
-  activeDurationMs: integer(), usage: T.Optional(Usage), result: T.Optional(TaskResult), retryOfAttemptId: optionalText(),
+  activeDurationMs: integer(), usage: T.Optional(Usage), result: T.Optional(TaskResult), closeout: T.Optional(CloseoutResult), retryOfAttemptId: optionalText(),
 });
 const AttentionRequest = object({
   id: text(), taskId: text(), attemptId: optionalText(), repositoryId: text(),
@@ -227,7 +233,7 @@ const Acknowledgement = object({ accepted: T.Boolean() });
 export const schemas = {
   ProviderId, FinishPolicy, TaskStatus, TaskSource, RequiredCapabilities, ExecutionDefaults, FactoryConfig,
   TaskSpec, CreateTaskRequest, TaskTemplate, RecipeMetadata, RecipeContract, RecipeRevision,
-  NativeIdentity, Usage, NativeInput, NativeSnapshot, NativeStart, CapabilityReport, TaskResult, ApiError,
+  NativeIdentity, Usage, NativeInput, NativeSnapshot, NativeStart, CapabilityReport, TaskResult, CloseoutResult, ApiError,
   TaskRecord, WorkflowIdentity, WorkflowStart, WorkflowSnapshot, Attempt, AttentionRequest, ActorScope,
   FindingInput, Grant, ProbeOptions, ProbeEvidence, VerifiedProbeEvidence, ProfileSpec, ProfileEvidence, OwnerEvent, OwnerRpc, OwnerRpcResponse,
   Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse,

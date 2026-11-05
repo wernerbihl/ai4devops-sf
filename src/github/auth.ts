@@ -187,7 +187,7 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
             method,
             headers: {
               accept: 'application/vnd.github+json',
-              'x-github-api-version': '2022-11-28',
+              'x-github-api-version': '2026-03-10',
               authorization: `Bearer ${token}`,
               ...(body === undefined ? {} : { 'content-type': 'application/json' }),
             },
@@ -564,6 +564,8 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
             'denied',
             'GitHub credentials do not prove permission for this repository operation',
           );
+        // Credential/repository preflight awaits external work; recheck live grants at effect time.
+        await grant(authorization.repository, authorization.operation, key);
         // The server remains authoritative: 401/403/SSO/429 are classified, never treated as absent.
         return (await bound.request(method, path, body)).data as T;
       });
@@ -671,6 +673,8 @@ export function createGitHubBackend(options: GitHubBackendOptions): GitHubBacken
         `https://github.com/${repository.owner}/${repository.name}.git`,
         ...(input.ref ? [input.ref] : []),
       ];
+      // This refusal is still before a credential-bearing writer exists.
+      await grant(repository, operation, input.key);
       try {
         writer.completion = 'unknown';
         const result = await processPort({ command: 'git', args, env, cwd: input.cwd, timeoutMs, maxBytes });

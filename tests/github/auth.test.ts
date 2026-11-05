@@ -1252,3 +1252,51 @@ test('bound_app_catalog_is_selected_user_and_installation_repository_id_intersec
     f.close();
   }
 });
+
+test('private_http_failure_keeps_only_safe_status_for_closeout_reconciliation', async () => {
+  const { GitHubHttpFailure } = await import('../../src/github/gh.ts');
+  for (const status of [400, 409, 422, 503]) {
+    const f = fixture({ fetch: async input => {
+      const url = String(input);
+      if (url.endsWith('/user')) return Response.json(user, { headers: { 'x-oauth-scopes': 'repo' } });
+      if (url.endsWith('/repos/owner/repo')) return Response.json(repository, { headers: { 'x-oauth-scopes': 'repo' } });
+      return Response.json({ message: 'private-fixture-token', extra: 'secret' }, { status, headers: { 'x-private': 'private-fixture-token' } });
+    } });
+    try {
+      await assert.rejects(f.backend.github.request('PUT', '/repos/owner/repo/pulls/17/merge-async', { sha: 'a'.repeat(40), bypass_rules: false, merge_action: 'default' }, 'stable-merge'), error => {
+        assert.ok(error instanceof GitHubHttpFailure); assert.equal(error.status, status);
+        assert.equal(error.kind, 'unavailable');
+        assert.doesNotMatch(JSON.stringify(error), /private-fixture-token|x-private|secret/);
+        return true;
+      });
+      await assert.rejects(f.backend.github.request('POST', '/graphql', {}, 'escape'));
+      await assert.rejects(f.backend.github.request('PUT', '/repos/other/repo/pulls/17/merge-async', {}, 'escape'));
+    } finally { f.close(); }
+  }
+});
+
+test('revoked_operation_grants_are_rechecked_after_async_preflight_before_writes', async () => {
+  for (const kind of ['api', 'git']) {
+    let granted = true; let effects = 0;
+    const f = fixture({ fetch: async input => {
+      const url = String(input);
+      if (url.endsWith('/user')) return Response.json(user, { headers: { 'x-oauth-scopes': 'repo' } });
+      if (url.endsWith('/repos/owner/repo')) { granted = false; return Response.json(repository, { headers: { 'x-oauth-scopes': 'repo' } }); }
+      effects++; return Response.json({ status: 'pending' });
+    } });
+    try {
+      const backend = createGitHubBackend({ ...f.config, authorizeOperation: async () => granted,
+        process: async request => {
+          if (request.command !== 'git') return f.config.process(request);
+          if (request.args.includes('--get-url')) return { code: 0, stdout: 'https://github.com/owner/repo.git', stderr: '' };
+          if (request.args[0] === 'config') return { code: 1, stdout: '', stderr: '' };
+          effects++; return { code: 0, stdout: '', stderr: '' };
+        },
+      });
+      await assert.rejects(kind === 'api'
+        ? backend.github.request('PUT', '/repos/owner/repo/pulls/17/merge-async', { sha: 'a'.repeat(40), bypass_rules: false }, 'current-grant')
+        : backend.git.push({ repositoryId: 'repo-1', cwd: f.directory, ref: 'refs/heads/task', key: 'current-grant' }), /grant/);
+      assert.equal(effects, 0);
+    } finally { f.close(); }
+  }
+});

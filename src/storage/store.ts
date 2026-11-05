@@ -202,6 +202,10 @@ export class FactoryStore {
   getLifecycleActionBinding(actionId: string) { return this.lifecycle.actionBinding(actionId); }
   finishLifecycleAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number, effectToken: string): void { this.db.transaction(() => this.lifecycle.finishAction(actionId, attemptId, fence, state, activeDurationMs, effectToken)); }
   enqueueAction(input: ActionInput) { return this.db.transaction(() => this.outbox.enqueue(input)); }
+  getActionByKey(key: string) { return this.outbox.byKey(key); }
+  /** Atomic intent-before-effect claim. Existing intents never authorize another blind external write. */
+  claimAction(input: ActionInput) { return this.db.transaction(() => { const fresh = !this.outbox.byKey(input.key); return { action: this.outbox.enqueue(input), fresh }; }); }
+  saveCloseout(attemptId: string, result: import('../contracts/domain.ts').TaskResult | undefined, outcome: import('../contracts/domain.ts').CloseoutResult, release: boolean) { return this.db.transaction(() => this.lifecycle.closeout(attemptId, result, outcome, release)); }
   pendingActions() { return this.outbox.pending(); }
   completeAction(id: string): void { this.db.transaction(() => this.outbox.complete(id)); }
   /** Trusted service only: the callback must be synchronous, returning a sanitized public DTO. */

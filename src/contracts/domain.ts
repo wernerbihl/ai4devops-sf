@@ -21,6 +21,7 @@ export type NativeSnapshot = Contract<'NativeSnapshot'>;
 export type NativeStart = Contract<'NativeStart'>;
 export type CapabilityReport = Contract<'CapabilityReport'>;
 export type TaskResult = Contract<'TaskResult'>;
+export type CloseoutResult = Contract<'CloseoutResult'>;
 export type ApiError = Contract<'ApiError'>;
 export type TaskRecord = Contract<'TaskRecord'>;
 export type WorkflowIdentity = Contract<'WorkflowIdentity'>;

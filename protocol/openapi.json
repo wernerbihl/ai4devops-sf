@@ -6481,6 +6481,81 @@
           "outcome"
         ]
       },
+      "CloseoutResult": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "waiting_ci",
+              "needs_attention"
+            ]
+          },
+          "attemptId": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "headSha": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "pullRequest": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "repositoryId": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "number": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "url": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "headSha": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "baseRef": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "required": [
+              "repositoryId",
+              "number",
+              "url",
+              "headSha",
+              "baseRef"
+            ]
+          },
+          "mergeSha": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "attemptId"
+        ]
+      },
       "ApiError": {
         "additionalProperties": false,
         "type": "object",
@@ -6622,6 +6697,81 @@
               "evidence",
               "createdTaskIds",
               "outcome"
+            ]
+          },
+          "closeout": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "waiting_ci",
+                  "needs_attention"
+                ]
+              },
+              "attemptId": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "headSha": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "pullRequest": {
+                "additionalProperties": false,
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "number": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "url": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "headSha": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "baseRef": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "number",
+                  "url",
+                  "headSha",
+                  "baseRef"
+                ]
+              },
+              "mergeSha": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "reason": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "attemptId"
             ]
           },
           "archivedAt": {
@@ -6999,6 +7149,81 @@
               "evidence",
               "createdTaskIds",
               "outcome"
+            ]
+          },
+          "closeout": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "waiting_ci",
+                  "needs_attention"
+                ]
+              },
+              "attemptId": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "headSha": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "pullRequest": {
+                "additionalProperties": false,
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "number": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "url": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "headSha": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "baseRef": {
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "number",
+                  "url",
+                  "headSha",
+                  "baseRef"
+                ]
+              },
+              "mergeSha": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "reason": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "attemptId"
             ]
           },
           "retryOfAttemptId": {

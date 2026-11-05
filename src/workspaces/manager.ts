@@ -36,6 +36,8 @@ export interface WorkspaceManager {
   withTrustedMetadata<T>(operation: (scope: TrustedMetadataScope) => Promise<T>): Promise<T>;
 }
 export interface TrustedMetadataScope {
+  /** Read only the owned retained manifest. Never fetch, initialize or replace a workspace. */
+  readWorkspace(repositoryId: string, taskId: string): Promise<Workspace>;
   /** Validates under the already-held installation lock; invalid once the callback completes. */
   revalidateWorkspace(workspace: Workspace, expectedBase: string): Promise<WorkspaceValidation>;
 }
@@ -154,13 +156,16 @@ export function createWorkspaceManager(options: WorkspaceManagerOptions): Worksp
   function repositoryIdentity(repository: ManagedRepository, commonGitDirectory: string) {
     return { version: 1, repositoryId: repository.id, url: repository.url, commonGitDirectory };
   }
-  async function ownedRepository(repository: ManagedRepository, taskId: string) {
+  async function ownedRepositoryManifest(repository: ManagedRepository, taskId: string) {
     const target = paths(repository.id, taskId);
     const stored = record(await readPrivateJson(root, target.repoManifest));
     if (stored.status !== 'ready'
       || Object.entries(repositoryIdentity(repository, target.commonGitDirectory)).some(([key, value]) => stored[key] !== value))
       throw new WorkspaceAttention('Repository creation interrupted or identity changed; reconcile trusted clone state');
-    await verifyRepository(repository, target.commonGitDirectory);
+  }
+  async function ownedRepository(repository: ManagedRepository, taskId: string) {
+    await ownedRepositoryManifest(repository, taskId);
+    await verifyRepository(repository, paths(repository.id, taskId).commonGitDirectory);
   }
   async function manifestWorkspace(repository: ManagedRepository, taskId: string, allowPreparing = false): Promise<Workspace> {
     const expected = paths(repository.id, taskId);
@@ -242,6 +247,12 @@ export function createWorkspaceManager(options: WorkspaceManagerOptions): Worksp
       return exclusive(async () => {
         let active = true;
         const scope: TrustedMetadataScope = {
+          async readWorkspace(repositoryId, taskId) {
+            if (!active) throw new WorkspaceAttention('Trusted metadata scope expired');
+            const repository = await repositoryFor(repositoryId);
+            await ownedRepositoryManifest(repository, taskId);
+            return manifestWorkspace(repository, taskId);
+          },
           async revalidateWorkspace(workspace, expectedBase) {
             if (!active) throw new WorkspaceAttention('Trusted metadata scope expired');
             return revalidate(workspace, expectedBase);

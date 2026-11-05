@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AttentionRequest, Attempt, NativeIdentity, TaskStatus, Usage } from '../contracts/domain.ts';
+import type { AttentionRequest, Attempt, CloseoutResult, NativeIdentity, TaskResult, TaskStatus, Usage } from '../contracts/domain.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { continuationAllowed } from '../scheduling/leases.ts';
 import type { LifecycleState, Quiescence } from '../scheduling/leases.ts';
@@ -67,6 +67,39 @@ export class LifecycleStorage {
     }
     return record;
   }
+  /** Trusted lifecycle closeout persistence. Detached CI may update only this exact frozen attempt. */
+  closeout(attemptId: string, result: TaskResult | undefined, outcome: CloseoutResult, release: boolean): void {
+    validateContract('CloseoutResult', outcome);
+    const record = this.get(attemptId); const r = record.reservation;
+    const task = this.tasks.get(r.attempt.taskId)!;
+    ensure(outcome.attemptId === attemptId && task.attemptIds.at(-1) === attemptId, 'stale_attempt', 'Closeout requires the current attempt');
+    if (task.status === 'completed') {
+      ensure(canonical(task.closeout) === canonical(outcome), 'closed_task', 'Completed verification is immutable'); return;
+    }
+    ensure(!['failed', 'cancelled'].includes(task.status), 'closed_task', 'Closed task cannot finish');
+    if (result) {
+      validateContract('TaskResult', result);
+      ensure(result.attemptId === attemptId && record.state.closeout, 'invalid_result', 'Result requires the frozen closeout attempt');
+      const input = this.outbox.byKey(`closeout:${attemptId}:input`);
+      ensure(input && canonical(input.payload.result) === canonical(result), 'invalid_result', 'Closeout result changed');
+    }
+    if (r.lease.active) {
+      this.fence(record, r.lease.fence);
+      if (release) {
+        ensure(record.state.closeout && record.state.quiescent && !record.state.active, 'quiescence_unknown', 'Closeout release requires fresh quiescence');
+        r.lease.active = false;
+        this.db.sql.prepare('DELETE FROM actor_scopes WHERE attempt_id = ?').run(attemptId);
+        record.state.closeout.phase = 'monitoring'; delete record.state.effect;
+      }
+    } else ensure(record.state.closeout?.phase === 'monitoring' && record.state.quiescent, 'stale_fence', 'Only frozen quiescent closeout can monitor without a lease');
+    const status = outcome.kind;
+    r.attempt = validateContract('Attempt', { ...r.attempt, status, closeout: outcome,
+      ...(result ? { result } : {}), ...(status === 'completed' ? { endedAt: this.db.now() } : {}) });
+    r.task = this.tasks.write({ ...task, status, closeout: outcome, ...(result ? { result } : {}), revision: task.revision + 1, updatedAt: this.db.now() });
+    this.db.sql.prepare('UPDATE lifecycle_state SET payload = ? WHERE attempt_id = ?').run(JSON.stringify(record.state), attemptId);
+    this.write(r); this.db.emit('attempt', r.attempt);
+    if (status === 'completed') { const input = this.outbox.byKey(`closeout:${attemptId}:input`); if (input) this.outbox.complete(input.id); }
+  }
   queueReply(requestId: string, value: unknown, key: string): OutboxAction {
     const request = this.admission.records().attention.find(a => a.id === requestId);
     ensure(request?.attemptId && request.nativeInputId && request.kind === 'input', 'not_found', 'Native attention request not found');
@@ -88,6 +121,7 @@ export class LifecycleStorage {
     const old = original.reservation; const task = this.tasks.get(old.attempt.taskId)!;
     ensure(old.attempt.native && old.attempt.workflow && original.state.quiescent, 'identity_missing', 'Original identity and proven quiescence are required');
     ensure(!old.lease.active && task.attemptIds.at(-1) === attemptId && !['completed', 'cancelled'].includes(task.status), 'stale_attempt', 'Continuation must use the current quiescent attempt');
+    ensure(!original.state.closeout, 'closeout_started', 'Closeout cannot resume native execution');
     continuationAllowed(task.spec, state, this.db.clock, retry);
     if (retry) ensure(this.admission.records().attempts.filter(a => a.taskId === task.spec.id && a.retryOfAttemptId).length < state.settings.config.limits.transientRetries, 'retry_limit', 'Automatic retry limit reached');
     const row = this.db.sql.prepare('SELECT fence FROM admission_fences WHERE repository_id = ?').get(task.spec.repositoryId)!;
@@ -143,6 +177,7 @@ export class LifecycleStorage {
   }
   beginAction(attemptId: string, fence: number, epoch: string, actionId: string): string {
     const record = this.get(attemptId); this.authority(attemptId, fence);
+    ensure(!record.state.closeout, 'closeout_started', 'Closeout cannot resume native execution');
     ensure(!record.state.stopRequested, 'effect_interrupted', 'Execution was interrupted before this effect');
     ensure(!record.state.effect || record.state.effect.phase !== 'inflight', 'effect_inflight', 'An external effect is still in flight');
     ensure(!record.state.uncertain && (!record.state.active || record.state.active.epoch === epoch), 'active_time_uncertain', 'Inspect interrupted native send before replay');

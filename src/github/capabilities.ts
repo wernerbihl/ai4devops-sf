@@ -69,7 +69,7 @@ export function authorizePath(
       ))
   )
     operation = 'read';
-  else if (method === 'PUT' && /^\/pulls\/\d+\/merge$/.test(suffix)) operation = 'merge';
+  else if (method === 'PUT' && /^\/pulls\/\d+\/merge(?:-async)?$/.test(suffix)) operation = 'merge';
   else if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method) && /^\/pulls(?:\/\d+)?$/.test(suffix))
     operation = 'pull_requests_write';
   else if (

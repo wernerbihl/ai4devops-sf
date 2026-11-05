@@ -318,3 +318,25 @@ test('converted_attention_retains_unknown_fetch_lock_but_proven_refusal_and_nonz
     await assert.rejects(createWorkspaceManager(f.options).prepareWorkspace(task('other')), /active|recovery/);
   } finally { await f.close(); }
 });
+
+test('trusted_closeout_reads_retained_manifest_without_recreating_missing_workspace', async () => {
+  const f = await fixture();
+  try {
+    const currentTask = task(); const workspace = await f.manager.prepareWorkspace(currentTask);
+    const before = f.invocations.length; let escaped: (() => Promise<unknown>) | undefined;
+    await f.manager.withTrustedMetadata(async scope => {
+      assert.deepEqual(await scope.readWorkspace(currentTask.repositoryId, currentTask.id), workspace);
+      escaped = () => scope.readWorkspace(currentTask.repositoryId, currentTask.id);
+    });
+    assert.equal(f.invocations.length, before);
+    await assert.rejects(escaped!(), /expired/);
+    await rm(workspace.path, { recursive: true });
+    const manifests = join(f.factoryRoot, 'workspace-manifests');
+    const manifest = (await readdir(manifests)).find(name => name.startsWith('task-'))!;
+    await rm(join(manifests, manifest));
+    await assert.rejects(f.manager.withTrustedMetadata(scope => scope.readWorkspace(currentTask.repositoryId, currentTask.id)));
+    await assert.rejects(readFile(join(workspace.path, 'file.txt')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(manifests, manifest)), { code: 'ENOENT' });
+    assert.equal(f.invocations.length, before);
+  } finally { await f.close(); }
+});

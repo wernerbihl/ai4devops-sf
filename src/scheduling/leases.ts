@@ -7,6 +7,8 @@ export type Quiescence = 'stopped' | 'waiting' | 'unknown';
 export interface ActiveSegment { epoch: string; started: number; ended: number }
 export interface LifecycleState {
   segments: ActiveSegment[];
+  /** Durable closeout exclusion; only C8 may advance metadata to monitoring. */
+  closeout?: { phase: 'metadata' | 'monitoring'; fence: number };
   active?: { epoch: string; started: number };
   uncertain?: boolean;
   quiescent?: boolean;

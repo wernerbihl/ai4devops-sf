@@ -101,7 +101,17 @@ export class GitWriterFailure extends GitHubFailure {
     super(kind, recovery); this.name = 'GitWriterFailure'; this.writerCompletion = completion;
   }
 }
+/** Sanitized response fact for closeout reconciliation; never carries provider body or headers. */
+export class GitHubHttpFailure extends GitHubFailure {
+  readonly status: number;
+  constructor(status: number, failure: GitHubFailure) {
+    super(failure.kind, failure.message); this.name = 'GitHubHttpFailure'; this.status = status;
+  }
+}
 export function failureFor(status: number, headers: Headers): GitHubFailure {
+  return new GitHubHttpFailure(status, classifyHttpFailure(status, headers));
+}
+function classifyHttpFailure(status: number, headers: Headers): GitHubFailure {
   if (status === 401)
     return new GitHubFailure(
       'expired',

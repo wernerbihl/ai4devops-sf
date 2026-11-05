@@ -144,3 +144,18 @@ test('rejects_wrong_engine_revision_and_broker_error_completion', async () => {
     try { assert.equal((await broken.snapshot(id)).state, 'unknown'); } finally { broken.close(); }
   } finally { c.close(); f.cleanup(); }
 });
+
+test('ordinary quiescence proves exact internal result pause and no HTTP writer', async () => {
+  const f = fixture(); const c = f.client();
+  try {
+    assert.equal(typeof c.quiescence, 'function', 'workflow needs a read-only writer quiescence proof');
+    const id = await c.ensureExecution(f.start);
+    assert.equal(await c.quiescence(id), 'unknown');
+    f.pause();
+    assert.equal(await c.quiescence(id), 'unknown', 'missing native HTTP acknowledgement is not quiet');
+    f.executions[0].taskRunList.push({ id: 'native-1', taskId: 'native_start', state: { current: 'SUCCESS' } });
+    assert.equal(await c.quiescence(id), 'waiting');
+    f.executions[0].taskRunList.push({ id: 'http-2', taskId: 'submit_result', state: { current: 'RUNNING' } });
+    assert.equal(await c.quiescence(id), 'unknown');
+  } finally { c.close(); f.cleanup(); }
+});

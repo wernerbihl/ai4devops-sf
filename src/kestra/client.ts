@@ -131,6 +131,19 @@ export class KestraClient implements KestraPort {
       return { identity, state: 'completed', inputs: [], result };
     } catch { return { identity, state: 'unknown', inputs: [], reason: 'Engine/result observation uncertain; reconcile the durable intent' }; }
   }
+  /** Read-only proof for ordinary native waits; never kills the retained workflow. */
+  async quiescence(identity: WorkflowIdentity): Promise<'waiting' | 'stopped' | 'unknown'> {
+    try {
+      const record = this.journal.identity(identity); const execution = await this.get(record);
+      if (['SUCCESS', 'FAILED', 'KILLED', 'CANCELLED'].includes(execution.state.current)) return 'stopped';
+      const runs = execution.taskRunList ?? [];
+      if (record.resume?.phase === 'sent' || execution.state.current !== 'PAUSED'
+        || !runs.some(run => run.taskId === 'await_result' && run.state.current === 'PAUSED')
+        || !runs.some(run => run.taskId === 'native_start' && run.state.current === 'SUCCESS')
+        || runs.some(run => run.taskId !== 'await_result' && !['SUCCESS', 'SKIPPED'].includes(run.state.current))) return 'unknown';
+      return 'waiting';
+    } catch { return 'unknown'; }
+  }
   async stop(identity: WorkflowIdentity): Promise<void> {
     const record = this.journal.identity(identity); const e = await this.get(record);
     if (['SUCCESS', 'FAILED', 'KILLED', 'CANCELLED'].includes(e.state.current)) return;

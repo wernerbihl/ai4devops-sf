@@ -52,7 +52,7 @@ export class LifecycleStorage {
     });
     if (patch.status || patch.human !== undefined) r.task = this.tasks.write({ ...old, status: patch.status ?? old.status,
       controlMode: patch.human ? 'human' : old.controlMode, revision: old.revision + 1, updatedAt: this.db.now() });
-    if (patch.release) { r.lease.active = false; this.db.sql.prepare('DELETE FROM actor_scopes WHERE attempt_id = ?').run(attemptId); }
+    if (patch.release) { r.lease.active = false; /* Retain creator attribution; authorize() rejects the inactive lease/fence. */ }
     if (patch.state) record.state = { ...patch.state,
       ...(record.state.effect ? { effect: record.state.effect } : {}),
       ...(record.state.closeout ? { closeout: record.state.closeout } : {}),
@@ -94,7 +94,7 @@ export class LifecycleStorage {
       if (release) {
         ensure(record.state.closeout && record.state.quiescent && !record.state.active, 'quiescence_unknown', 'Closeout release requires fresh quiescence');
         r.lease.active = false;
-        this.db.sql.prepare('DELETE FROM actor_scopes WHERE attempt_id = ?').run(attemptId);
+        /* Retain creator attribution; authorize() rejects the inactive lease/fence. */
         record.state.closeout.phase = 'monitoring'; delete record.state.effect;
       }
     } else ensure(record.state.closeout?.phase === 'monitoring' && record.state.quiescent, 'stale_fence', 'Only frozen quiescent closeout can monitor without a lease');

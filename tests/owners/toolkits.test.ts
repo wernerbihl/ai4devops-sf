@@ -11,7 +11,7 @@ test('native toolkit catalog resolves exact versions and grants no implicit nati
     task.tools = [];
     assert.deepEqual(m.nativeToolAllowlist(task), ['custom:sf_factory_operation']);
     assert.equal(m.resolveNativeToolReference('tool', 'native-files', '1'), true);
-    for (const [kind, id, version] of [['skill', 'native-files', '1'], ['tool', 'native-files', '2'], ['tool', 'builtin:view', '1']])
+    for (const [kind, id, version] of [['skill', 'native-files', '1'], ['tool', 'native-files', '3'], ['tool', 'builtin:view', '1']])
         assert.equal(m.resolveNativeToolReference(kind as any, id!, version!), false);
     task.tools = task.required.tools = ['native-files'];
     task.required.paths = [{ root: '.', mode: 'read' }];
@@ -32,8 +32,16 @@ test('all code changing starters explicitly pin requested native tools without c
         const sf = v.contract.variables.sf;
         assert.deepEqual(sf.taskTemplate.tools, ['native-files', 'native-terminal']);
         assert.deepEqual(sf.required.tools, sf.taskTemplate.tools);
-        assert.deepEqual(v.toolVersions, { 'native-files': '1', 'native-terminal': '1' });
+        assert.deepEqual(v.toolVersions, { 'native-files': '2', 'native-terminal': '2' });
         for (const [id, version] of Object.entries(v.toolVersions))
             assert.equal(m.resolveNativeToolReference('tool', id, version), true);
     }
+});
+
+test('isolated worker version two is independently resolvable while legacy revision stays unchanged', async () => {
+  const m=await catalog();
+  assert.equal(m.resolveNativeToolReference('tool','native-files','2'),true);
+  assert.equal(m.resolveNativeToolReference('tool','native-terminal','2'),true);
+  assert.equal(m.resolveNativeToolReference('tool','native-files','1'),true);
+  assert.equal(m.resolveNativeToolReference('tool','native-files','3'),false);
 });

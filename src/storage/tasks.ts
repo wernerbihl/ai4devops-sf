@@ -80,7 +80,12 @@ export class TaskStorage {
   }
   private owned(task: TaskRecord, actor: RegisteredActor): void {
     const created = this.db.sql.prepare('SELECT creator_attempt_id FROM tasks WHERE id = ?').get(task.spec.id);
-    ensure(actor.scope.repositoryIds.includes(task.spec.repositoryId) && task.spec.recipeId === actor.scope.recipeId && task.spec.recipeRevision === actor.scope.recipeRevision && (actor.taskId === task.spec.id || created?.creator_attempt_id === actor.scope.attemptId), 'task_scope', 'Unrelated task is outside actor ownership and scope');
+    const parent = this.db.read<TaskRecord>('tasks', actor.taskId);
+    const creator = created?.creator_attempt_id ? this.db.read<RegisteredActor>('actor_scopes', String(created.creator_attempt_id)) : undefined;
+    const sameParentLineage = task.spec.parentId === actor.taskId && creator?.taskId === actor.taskId
+      && parent?.attemptIds.includes(String(created?.creator_attempt_id)) && parent.attemptIds.includes(actor.scope.attemptId);
+
+    ensure(actor.scope.repositoryIds.includes(task.spec.repositoryId) && task.spec.recipeId === actor.scope.recipeId && task.spec.recipeRevision === actor.scope.recipeRevision && (actor.taskId === task.spec.id || created?.creator_attempt_id === actor.scope.attemptId || sameParentLineage), 'task_scope', 'Unrelated task is outside actor ownership and scope');
   }
   private availableRecipe(id: string, actor?: ActorScope): RecipeRevision {
     const summary = this.recipes.summary(id);
@@ -188,12 +193,13 @@ export class TaskStorage {
       ensure(task.revision === expectedRevision, 'revision_conflict', 'Task revision conflict');
       ensure(!this.db.sql.prepare('SELECT id FROM admission_reservations WHERE task_id = ? AND lease_active = 1').get(id), 'task_reserved', 'Reserved tasks require launch reconciliation or lifecycle control');
       ensure(!this.db.sql.prepare("SELECT id FROM admission_reservations WHERE task_id = ? AND status = 'confirmed'").get(id), 'immutable_task', 'Started execution identity and authority are fixed');
-      ensure(task.status === 'queued', 'immutable_task', 'Only queued tasks can be edited or cancelled through CRUD');
+      ensure(task.status === 'queued' || !actor && task.status === 'needs_attention', 'immutable_task', 'Only unstarted queued or preflight attention tasks can be edited');
       const { status, ...specPatch } = patch;
+      const { reason: _reason, recovery: _recovery, ...recovered } = task;
       const spec = { ...task.spec, ...specPatch };
       const recipe = this.recipes.revision(spec.recipeId, spec.recipeRevision)!;
       this.checkSpec(spec, recipe, spec.repositoryId);
-      return this.write({ ...task, spec, status: status ?? task.status, revision: task.revision + 1, updatedAt: this.db.now() });
+      return this.write({ ...recovered, spec, status: status ?? 'queued', revision: task.revision + 1, updatedAt: this.db.now() });
     };
     // Authorize the object even on replay: possession of another task ID is never sufficient.
     if (registration) { const task = this.get(id)!; ensure(task, 'not_found', 'Task not found'); this.owned(task, registration); }

@@ -175,19 +175,19 @@ test('reconnect_reconciles_before_replaying_only_lifecycle_actions_and_retains_u
   } finally { f.close(); }
 });
 
-test('idle_and_ci_wait_do_not_restart_active_segments_and_restart_never_resets_budget', async () => {
+test('native_idle_keeps_accounting_but_proven_ci_wait_stops_it_and_restart_never_resets_budget', async () => {
   const x = await fixture(); const { f } = x;
   try {
     x.clock.advance(60000);
     await x.event({ type: 'snapshot', snapshot: { identity: x.native, state: 'idle', inputs: [] } });
     x.clock.advance(600000); await x.lifecycle.checkBudgets();
-    assert.equal(f.store.snapshot().attempts[0]!.activeDurationMs, 60000);
+    assert.equal(f.store.snapshot().attempts[0]!.activeDurationMs, 660000);
     await x.event({ type: 'activity', active: true });
     x.clock.advance(60000); await x.lifecycle.waitForCI(x.attempt.id);
     assert.equal(f.store.getTask(f.task.id)!.status, 'waiting_ci');
-    assert.equal(f.store.snapshot().attempts[0]!.activeDurationMs, 120000);
+    assert.equal(f.store.snapshot().attempts[0]!.activeDurationMs, 720000);
     x.clock.advance(36000000); await x.lifecycle.checkBudgets();
-    assert.equal(f.store.snapshot().attempts[0]!.activeDurationMs, 120000);
+    assert.equal(f.store.snapshot().attempts[0]!.activeDurationMs, 720000);
   } finally { f.close(); }
   const y = await fixture();
   try {
@@ -519,4 +519,70 @@ test('E4 I4 separate human control cycles each open once and same handoff replay
 
 test('E4 I3 rejects a native identity ambiguous across distinct current tasks',async()=>{
  const x=await fixture();try{await x.event({type:'input',input});x.f.store.createManualTasks(x.f.request,'ambiguous-other');await createScheduler({store:x.f.store,clock:x.clock,materialize:materializeFixture,readiness:async()=>({ready:true,baseSha:'base',workspacePath:'/original/worktree',profileId:'profile'}),start:async()=>({kind:'started',identity:{native:x.native,workflow:{executionId:'other',namespace:'sf',flowId:'quality',revision:'1'}}})}).dispatch('manual');await assert.rejects(x.lifecycle.requestTakeover(x.f.task.id),/one current reservation/);assert.equal(x.opened.length,0);}finally{x.f.close();}
+});
+
+test('native idle without result keeps background writer budget until physical stop', async () => {
+  const x = await fixture();
+  try {
+    x.clock.advance(60_000);
+    await x.event({ type: 'snapshot', snapshot: { identity: x.native, state: 'idle', inputs: [] } });
+    x.clock.advance(29 * 60_000);
+    await x.lifecycle.checkBudgets();
+    assert.equal(x.f.store.getTask(x.f.task.id)!.status, 'needs_attention');
+    assert.equal(x.f.store.getLifecycle(x.attempt.id).reservation.attempt.activeDurationMs, 1_800_000);
+    assert.equal(x.f.store.getAdmissionState().activeLeases.length, 0);
+  } finally { x.f.close(); }
+});
+
+test('explicit human return queues original unfinished task before new automatic work', async () => {
+  const x=await fixture();
+  try {
+    await x.lifecycle.requestTakeover(x.f.task.id);
+    await x.lifecycle.returnControl('repo-1');
+    const pending=x.f.store.pendingActions().find(a=>a.kind==='lifecycle.send'&&a.payload.attemptId===x.attempt.id);
+    assert.ok(pending,'return must retain an explicit continuation for the unfinished original task');
+    await x.lifecycle.dispatchPending();
+    assert.equal(x.sent.length,1);
+    assert.deepEqual(x.sent[0]!.identity,x.native);
+    assert.equal(x.f.store.getQuotaState().confirmed,1);
+  } finally{x.f.close()}
+});
+
+test('retry retains exact parent child ownership without widening to unrelated tasks', async () => {
+  const x=await fixture();
+  try {
+    const {createAttemptBroker}=await import('../../src/broker/operations.ts');
+    const {createFactoryToolGate}=await import('../../src/owners/tools.ts');
+    const broker=createAttemptBroker({store:x.f.store,clock:x.clock,signingKey:Buffer.alloc(32,7)});
+    const gate=createFactoryToolGate({store:x.f.store,broker});
+    gate.prepare(broker.nativeStart(x.attempt.id,'start'),'first');
+    const child=await gate.invoke(x.native,'child-create','sf_factory_operation',{operation:'task.create',payload:{...x.f.task,id:'requested-child',source:'recipe',title:'Child'}});
+    const childId=(child.result as {spec:{id:string}}).spec.id;
+    const retry=await x.lifecycle.retryTransient(x.attempt.id,{transient:true,reason:'provider disconnect'});assert.ok(retry);
+    gate.prepare(broker.nativeStart(retry.id,'retry'),'second');
+    const result=await gate.invoke(x.native,'read-child','sf_factory_operation',{operation:'task.read',payload:{taskId:childId}});
+    assert.equal((result.result as {spec:{id:string}}).spec.id,childId);
+    const [unrelated]=x.f.store.createManualTasks(x.f.request,'unrelated');
+    await assert.rejects(gate.invoke(x.native,'read-unrelated','sf_factory_operation',{operation:'task.read',payload:{taskId:unrelated!.id}}));
+  } finally{x.f.close()}
+});
+
+test('pending broker native writer prevents lease release even after a physical freeze',async()=>{
+ const x=await fixture();try{
+  x.f.store.broker.claim({attemptId:x.attempt.id,fence:x.attempt.fence,key:'native-inflight',payload:{}});
+  await assert.rejects(x.lifecycle.requestTakeover(x.f.task.id),{code:'effect_unresolved'});
+  assert.equal(x.f.store.getAdmissionState().activeLeases.length,1);
+ }finally{x.f.close()}
+});
+
+test('unknown original native navigation is never reissued by reconnect or same-key open',async()=>{
+ const x=await fixture();try{
+  let opens=0;const owner=x.deps().owner(x.native);owner.open=async()=>{opens++;x.setQuiet('unknown');throw Error('OS navigation acceptance unknown')};
+  x.setQuiet('waiting');
+  await assert.rejects(x.lifecycle.requestTakeover(x.f.task.id));
+  assert.equal(opens,1);
+  x.setQuiet('waiting');
+  await x.lifecycle.reconnect();
+  assert.equal(opens,1,'reconnect must not repeat uncertain OS navigation');
+ }finally{x.f.close()}
 });

@@ -39,10 +39,10 @@ export interface LifecycleDeps {
 }
 export interface Lifecycle {
   applyOwnerEvent(attemptId: string, event: OwnerEvent): Promise<void>;
-  requestTakeover(taskId: string): Promise<void>;
+  requestTakeover(taskId: string, key?: string): Promise<void>;
   /** Existing C5 OwnerPort.open delegates here, including already-human focus. */
   openNative(identity:NativeIdentity,key:string):Promise<{uri?:string}>;
-  returnControl(repositoryId: string): Promise<void>;
+  returnControl(repositoryId: string, key?: string): Promise<void>;
   resumeInput(requestId: string, value: unknown, key: string): Promise<void>;
   retryTransient(attemptId: string, failure: TransientFailure): Promise<Attempt | null>;
   checkBudgets(): Promise<void>;
@@ -81,6 +81,8 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     ensure(current.reservation.lease.fence === r.lease.fence, 'stale_fence', 'Quiescence belongs to an obsolete repository fence');
     ensure(!effectAtRequest || effectAtRequest.phase === 'accepted', 'effect_unresolved', 'Quiescence raced an external effect that may still accept');
     ensure(!current.state.effect || (current.state.effect.phase === 'accepted' && current.state.effect.token === effectAtRequest?.token), 'effect_unresolved', 'Execution changed while proving quiescence');
+    const nativeWrite = store.broker.write(id, r.lease.fence);
+    ensure(!nativeWrite || nativeWrite.state === 'done', 'effect_unresolved', 'Broker native write may still accept; retain the fence until its original response is proven');
     store.completeAction(action.id); return native;
   }
   async function pause(id: string, status: NonNullable<LifecycleUpdate['status']>, attention?: LifecycleUpdate['attention'], human = false): Promise<void> {
@@ -187,15 +189,16 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     const assertCurrent=()=>{const current=store.getTask(task.spec.id);const repository=store.getRepository(repo.id);const actual=record(r.attempt.id).reservation;
       ensure(repository?.controlMode==='human'&&repository.revision===repo.revision&&current?.revision===task.revision&&current.status!=='cancelled'&&current.attemptIds.at(-1)===r.attempt.id&&fingerprint(actual.attempt.native)===fingerprint(identity)&&!store.getAdmissionState().activeLeases.some(l=>l.repositoryId===repo.id),'human_open_unadmitted','Human navigation admission changed; retain original runtime');};
     assertCurrent();
+    const prior=store.getActionByKey(`lifecycle:human-open:${key}`);
+    if(prior){const receipt=store.getActionByKey(`lifecycle:human-open-result:${key}`);ensure(receipt?.payload.intentId===prior.id,'effect_unresolved','Original native open is pending or unknown; never repeat navigation');return receipt.payload.result as {uri?:string}}
     const action=store.enqueueAction({key:`lifecycle:human-open:${key}`,kind:'lifecycle.human_open',payload:{attemptId:r.attempt.id,repositoryId:repo.id,identity}});
-    if(action.completedAt)return {};
     const start:NativeStart={idempotencyKey:key,attemptId:r.attempt.id,task:task.spec,workspacePath:r.attempt.workspacePath,baseSha:r.attempt.baseSha,fence:r.lease.fence,profileId:r.attempt.profileId};
     try {
       await deps.managedHumanOpen?.prepare(r.attempt,key,{start,assertCurrent});assertCurrent();
-      const result=await deps.owner(identity).open(identity);assertCurrent();store.completeAction(action.id);return result;
+      const result=await deps.owner(identity).open(identity);assertCurrent();const receipt=store.enqueueAction({key:`lifecycle:human-open-result:${key}`,kind:'lifecycle.human_open_result',payload:{intentId:action.id,result}});store.completeAction(receipt.id);store.completeAction(action.id);return result;
     } catch(error) {
       // An unknown/late restart must keep repository control excluded from automatic admission.
-      try {if(await deps.owner(identity).quiesce(identity)!=='unknown')store.completeAction(action.id);}catch{}
+      try {await deps.owner(identity).quiesce(identity);}catch{}
       throw error;
     }
   }
@@ -269,8 +272,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
         store.updateLifecycle(id, r.lease.fence, { ...account(id, !record(id).state.active), status: 'needs_attention', state: { ...account(id, !record(id).state.active).state!, uncertain: true }, attention: { kind: 'blocked', prompt: 'Native connection lost', recovery: 'Reconnect original session and prove quiescence; lease expiry does not release ownership' } }); return;
       }
       const active = event.type === 'activity' ? event.active : event.type === 'snapshot' ? event.snapshot.state === 'active' : undefined;
-      store.updateLifecycle(id, r.lease.fence, { ...(active !== undefined ? account(id, !active) : {}), ...(event.type === 'usage' ? { usage: event.usage } : event.type === 'snapshot' && event.snapshot.usage ? { usage: event.snapshot.usage } : {}) });
-      // Idle changes activity only; TaskResult/closeout owns completion.
+      store.updateLifecycle(id, r.lease.fence, { ...(active !== undefined ? account(id, false) : {}), ...(event.type === 'usage' ? { usage: event.usage } : event.type === 'snapshot' && event.snapshot.usage ? { usage: event.snapshot.usage } : {}) });
+      // Native idle is observational: detached tools may still write. Only proven
+      // quiescence/input/CI/closeout may end an admitted active segment.
       await checkBudgets();
     }),
     requestTakeover: taskId => operation(() => takeover(taskId)),
@@ -291,6 +295,13 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       }
       ensure(!store.pendingActions().some(a=>a.kind==='lifecycle.human_open'&&a.payload.repositoryId===repositoryId),'human_open_pending','Human native control start/open began during return; reconcile before release');
       store.returnLifecycleControl(repositoryId, repo.revision, store.getAdmissionState().token);
+      for (const r of attempts.filter(r => store.getTask(r.attempt.taskId)?.attemptIds.at(-1) === r.attempt.id)) {
+        const task = store.getTask(r.attempt.taskId)!;
+        if (['completed', 'failed', 'cancelled'].includes(task.status)) continue;
+        // An original unanswered native question remains frozen for its exact typed answer.
+        if (store.snapshot().attention.some(a => a.attemptId === r.attempt.id && a.nativeInputId && a.status === 'open')) continue;
+        store.enqueueAction({ key: `lifecycle:return:${repositoryId}:${repo.revision}:${r.attempt.id}`, kind: 'lifecycle.send', payload: { attemptId: r.attempt.id, input: { text: 'Human control has explicitly returned to the factory. Continue the original task and report its explicit result.' } } });
+      }
       // An explicit return cancels an unfinished open request; reconnect must not take control back.
       for (const action of store.pendingActions().filter(a => a.kind === 'lifecycle.takeover' && store.getTask(String(a.payload.taskId))?.spec.repositoryId === repositoryId)) store.completeAction(action.id);
     }),

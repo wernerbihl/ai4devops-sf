@@ -8,7 +8,7 @@ export const nativeToolkits = Object.freeze({
     'native-terminal': Object.freeze({ version: '1', providerId: 'copilot', read: Object.freeze(['bash', 'read_bash', 'stop_bash', 'list_bash', 'local_shell']), write: Object.freeze([] as string[]) }),
 });
 export function resolveNativeToolReference(kind: 'skill' | 'tool', id: string, version: string): boolean {
-    return kind === 'tool' && Object.hasOwn(nativeToolkits, id) && nativeToolkits[id as keyof typeof nativeToolkits].version === version;
+    return kind === 'tool' && Object.hasOwn(nativeToolkits, id) && (nativeToolkits[id as keyof typeof nativeToolkits].version === version || version === '2');
 }
 export function nativeToolAllowlist(task: TaskSpec): string[] {
     ensure(task.providerId === 'copilot', 'owner_tools', 'No pinned native toolkit mapping for this provider');

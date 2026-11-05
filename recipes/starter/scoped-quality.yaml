@@ -47,8 +47,8 @@ variables:
     defaultFinishPolicy: result
     skillVersions: {}
     toolVersions:
-      native-files: "1"
-      native-terminal: "1"
+      native-files: "2"
+      native-terminal: "2"
 inputs:
   - id: sf_capability
     type: SECRET

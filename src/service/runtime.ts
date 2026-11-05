@@ -35,6 +35,7 @@ import { inspectOwnedKestra, stopOwnedKestra } from '../kestra/maintenance.ts';
 import { inspectProtectedMounts } from '../kestra/mount-survey.ts';
 import { createMaintenanceWorkflowReader } from '../kestra/maintenance-recovery.ts';
 import { inspectRecordedOwnerReceipt } from '../owners/maintenance-receipt.ts';
+import { stopUninstallNativeResources } from './uninstall-native.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
 import { createDispatchApi } from './dispatch-api.ts';
 import { acquireInstallationSingletonAsync } from './singleton.ts';
@@ -248,9 +249,16 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         await fleet.closeHumanAdmissions();
         await fleet.reconcileConnectedHumanEffects();
         await stopActive();
+        // Terminal and human-owned attempts may retain native writers without a lease.
+        // Inspect every distinct original identity, never only active reservations.
+        const retained=[...new Map(store.getReservations().filter(r=>r.attempt.native).map(r=>[canonical(r.attempt.native),r.attempt.native!])).values()];
+        const nativeResults=await Promise.allSettled(retained.map(identity=>owners.get(identity.ownerId).quiesce(identity)));
+        const nativeBlocked=nativeResults.flatMap((result,index)=>result.status==='fulfilled'&&result.value!=='unknown'?[]:[{kind:'native',identity:fingerprint(retained[index])}]);
         let blocked=await inspectMaintenanceBlockers(installation.root,store);
-        if(blocked.length)return {state:'admission_closed',blocked};
+        if(blocked.length||nativeBlocked.length)return {state:'admission_closed',blocked:[...blocked,...nativeBlocked]};
         try {
+          await verifyMaintenanceNative('reconfigure');
+          if(purpose==='uninstall')await stopUninstallNativeResources({installation,store,broker,config});
           await verifyMaintenanceNative(purpose);
           const engineResources=await inspectOwnedKestra(installation,store);
           const relay={id:installation.id,networkId:engineResources.networkId,docker:installation.docker,store};

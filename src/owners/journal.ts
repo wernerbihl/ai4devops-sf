@@ -1,4 +1,4 @@
-import { assertWindowsPrivateFileAsync, writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
+import { assertWindowsPrivateDirectoryAsync, assertWindowsPrivateFileAsync, writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
 import { privateDirectoryAsync } from '../kestra/executions.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync, existsSync } from 'node:fs';
@@ -18,7 +18,7 @@ export interface SessionIntent {
 }
 export const digest = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex');
 const prepared=new WeakMap<object,string>();
-export async function prepareOwnerJournal(path:string):Promise<object|undefined>{if(process.platform!=='win32')return;await privateDirectoryAsync(dirname(path));if(!existsSync(path))await writeWindowsPrivateFileAsync(path,Buffer.alloc(0));await assertWindowsPrivateFileAsync(path);const token={};prepared.set(token,path);return token}
+export async function prepareOwnerJournal(path:string,options:{existingOnly?:boolean}={}):Promise<object|undefined>{if(process.platform!=='win32')return;if(options.existingOnly)await assertWindowsPrivateDirectoryAsync(dirname(path));else await privateDirectoryAsync(dirname(path));if(!existsSync(path)){if(options.existingOnly)throw new Error('Original owner journal is unavailable');await writeWindowsPrivateFileAsync(path,Buffer.alloc(0))}await assertWindowsPrivateFileAsync(path);const token={};prepared.set(token,path);return token}
 /** Protected runner metadata; never mounted into native workspaces. Intent precedes wire I/O. */
 export class OwnerJournal {
     private db: DatabaseSync;

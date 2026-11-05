@@ -7,6 +7,9 @@ import { readPrivateFileAsync } from '../service/config.ts';
 import { canonical } from '../storage/database.ts';
 import type { NativeIdentity } from '../contracts/domain.ts';
 import { nativeProcessIdentity } from './managed.ts';
+import type { createManagedVsCodeLauncher } from './managed.ts';
+import { OwnerJournal, prepareOwnerJournal } from './journal.ts';
+import { ensure } from '../storage/database.ts';
 /** Read a retained receipt without connecting to, starting, or unpausing its native owner. */
 export async function inspectRecordedOwnerReceipt(input:{directory:string;identity:NativeIdentity;taskId:string;workspacePath:string;baseSha:string;container:{id:string;stopped:boolean;frozen:boolean;pid:number;startedAt?:string};entrypoint?:string}):Promise<'stopped'|'waiting'|'unknown'> {
   try {
@@ -34,4 +37,14 @@ export async function inspectRecordedOwnerReceipt(input:{directory:string;identi
     if(proof.schemaVersion!==1||proof.runtimeId!==container.id||proof.containerPid!==container.pid||proof.startedAt!==container.startedAt||!proof.native||proof.native.entrypoint!==input.entrypoint||proof.processIdentity!==nativeProcessIdentity(proof.native)||!absent(control))return 'unknown';
     return 'waiting';
   } catch {return 'unknown'}
+}
+/** Uninstall only: terminate the proven original container, then record actual stop receipts. */
+export async function stopRecordedNativeOwner(input:{directory:string;launcher:ReturnType<typeof createManagedVsCodeLauncher>;identities:{identity:NativeIdentity;taskId:string;workspacePath:string;baseSha:string}[];container:{id:string;stopped:boolean;frozen:boolean;pid:number;startedAt?:string};entrypoint:string}):Promise<void> {
+  ensure(input.identities.length>0&&input.launcher.options.containerId===input.container.id&&input.launcher.options.entrypoint===input.entrypoint&&join(input.directory,'owner.json')===input.launcher.options.nativeState.markerPath,'owner_quiescence','Original native identity is unavailable');
+  for(const original of input.identities)ensure(await inspectRecordedOwnerReceipt({...original,directory:input.directory,container:input.container,entrypoint:input.entrypoint})!=='unknown','owner_quiescence','Original native receipt is unavailable');
+  if(input.container.stopped)return;
+  ensure(input.container.frozen,'owner_quiescence','Native process must be frozen before uninstall');
+  await input.launcher.stop!();ensure(await input.launcher.stopped!(),'owner_quiescence','Native container stop is unknown');
+  const path=join(input.directory,'owner.sqlite');lstatSync(path);const protection=await prepareOwnerJournal(path,{existingOnly:true});const journal=new OwnerJournal(path,protection);
+  try{for(const original of input.identities)journal.recordStopped(original.identity)}finally{journal.close()}
 }

@@ -269,3 +269,15 @@ test('I2_continuation_receipt_and_unknown_effect_reconcile_after_quiescence_chan
     } finally { f.close(); }
   }
 });
+
+test('closed maintenance gate refuses a valid worker result without recording it', async () => {
+ const { createAttemptBroker } = await implementation(); const { f, reservation:r } = await fixture();
+ try {
+  const { MaintenanceGate } = await import('../../src/service/maintenance-gate.ts'); const { startWorkerBroker } = await import('../../src/broker/server.ts'); const { encodeWorkerRequest } = await import('../../src/contracts/worker-transport.ts');
+  const gate = new MaintenanceGate(); const broker = createAttemptBroker({store:f.store,clock:f.clock,signingKey:Buffer.alloc(32,7)}); const token=broker.issueAttemptCapability(r.attempt.id,['grant-1']); const scope=broker.authorizeAttempt(token,'result.submit',{});
+  const request:WorkerRequest={requestId:'maintenance-result',idempotencyKey:'maintenance-result',scope,operation:'result.submit',payload:{attemptId:r.attempt.id,summary:'result',evidence:[],createdTaskIds:[],outcome:'result'}};
+  const api=await startWorkerBroker({broker,maintenanceGate:gate}); await gate.close();
+  const response=await api.handle({method:'POST',path:'/worker/v1/results',authorization:'Bearer '+token,body:encodeWorkerRequest(request)});
+  assert.equal(response.status,503);assert.equal(broker.getResultProposal(r.attempt.id),undefined);
+ } finally { f.close(); }
+});

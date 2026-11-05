@@ -148,3 +148,37 @@ for(const boundary of ['native-recovery','engine-adoption','config-stall','confi
   assert.equal(f.store.getAdmissionState().activeLeases.length,2,'unknown physical writers retain their original fences');
  } finally {release();await runtime?.stop();f.close()}
 });
+
+test('durable maintenance intent survives reconstruction without restarting Kestra or admitting mutations', async () => {
+ const {mkdirSync,writeFileSync}=await import('node:fs'); const {openStore}=await import('../../src/storage/store.ts'); const {startRuntime}=await import('../../src/service/runtime.ts');
+ const root=mkdtempSync(join(tmpdir(),'sf-maintenance-restart-'));mkdirSync(join(root,'vault'),{mode:0o700});
+ writeFileSync(join(root,'runtime.json'),JSON.stringify({schemaVersion:1,installationId:'fixture',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[],native:[]}),{mode:0o600});
+ for(const name of ['broker-signing','private-control'])writeFileSync(join(root,'vault',name),Buffer.alloc(32,7),{mode:0o600});
+ const store=openStore(join(root,'factory.sqlite'));store.enqueueAction({key:'maintenance:fixture',kind:'maintenance.intent',payload:{installationId:'fixture'}});store.close();
+ let calls=0;let runtime:Awaited<ReturnType<typeof startRuntime>>|undefined;
+ try {
+  runtime=await startRuntime({id:'fixture',root,docker:{async command(){calls++;throw Error('must not touch Docker')}},secrets:{async loadOrCreate(){throw Error('must not create secrets')}}});
+  assert.equal(calls,0);
+  const headers={authorization:'Bearer '+Buffer.alloc(32,7).toString('base64url'),'content-type':'application/json'};
+  assert.equal((await fetch(runtime.controlUrl+'/next',{method:'POST',headers,body:JSON.stringify({key:'blocked'})})).status,409);
+  const session=runtime.api.sessions.provision('http://127.0.0.1:4000');
+  assert.equal((await fetch(runtime.api.url+'/v1/tags',{method:'POST',headers:{origin:'http://127.0.0.1:4000',cookie:session.cookie,'x-sf-csrf':session.csrfToken,'content-type':'application/json','idempotency-key':'blocked'},body:JSON.stringify({displayName:'blocked'})})).status,503);
+ } finally {await runtime?.stop();rmSync(root,{recursive:true,force:true})}
+});
+
+test('private maintenance admission persists before refusing new dispatch and survives restart', async () => {
+ const {mkdirSync,writeFileSync}=await import('node:fs'); const {startRuntime}=await import('../../src/service/runtime.ts');
+ const root=mkdtempSync(join(tmpdir(),'sf-maintenance-intent-'));mkdirSync(join(root,'vault'),{mode:0o700});
+ writeFileSync(join(root,'runtime.json'),JSON.stringify({schemaVersion:1,installationId:'fixture',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[],native:[]}),{mode:0o600});for(const name of ['broker-signing','private-control'])writeFileSync(join(root,'vault',name),Buffer.alloc(32,7),{mode:0o600});
+ const installation={id:'fixture',root,docker:{async command(){throw Error('no docker')}},secrets:{async loadOrCreate(){throw Error('no engine')}}};let runtime:Awaited<ReturnType<typeof startRuntime>>|undefined;
+ const headers={authorization:'Bearer '+Buffer.alloc(32,7).toString('base64url'),'content-type':'application/json'};
+ try {
+  runtime=await startRuntime(installation);
+  const response=await fetch(runtime.controlUrl+'/maintenance',{method:'POST',headers,body:'{}'});assert.equal(response.status,200);
+  assert.ok(runtime.store.pendingActions().some(action=>action.kind==='maintenance.intent'));
+  assert.equal((await fetch(runtime.controlUrl+'/next',{method:'POST',headers,body:JSON.stringify({key:'after-maintenance'})})).status,409);
+  await runtime.stop();runtime=await startRuntime(installation);
+  assert.ok(runtime.store.pendingActions().some(action=>action.kind==='maintenance.intent'));
+  assert.equal((await fetch(runtime.controlUrl+'/next',{method:'POST',headers,body:JSON.stringify({key:'after-restart'})})).status,409);
+ } finally {await runtime?.stop();rmSync(root,{recursive:true,force:true})}
+});

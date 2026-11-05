@@ -3,6 +3,7 @@ import type { WorkerRequest } from '../contracts/domain.ts';
 import { decodeWorkerRequest, encodeWorkerResponse, WORKER_TRANSPORT_MAX_WIRE_BYTES, WorkerTransportError } from '../contracts/worker-transport.ts';
 import { ensure, StoreError } from '../storage/database.ts';
 import type { AttemptBroker } from './operations.ts';
+import type { MaintenanceGate } from '../service/maintenance-gate.ts';
 export const workerRoutes = [
   ['POST','/worker/v1/tasks','task.create'], ['GET','/worker/v1/tasks/{id}','task.read'],
   ['PATCH','/worker/v1/tasks/{id}','task.update'], ['DELETE','/worker/v1/tasks/{id}','task.cancel'],
@@ -15,10 +16,12 @@ export interface BrokerHttpRequest { method: string; path: string; authorization
 export interface BrokerHttpResponse { status: number; body: string }
 export interface WorkerBroker { handle(input: BrokerHttpRequest): Promise<BrokerHttpResponse> }
 /** Private dispatch only. E3's stdio relay supplies HTTP; never mount on browser/admin server. */
-export async function startWorkerBroker(deps: { broker: AttemptBroker }): Promise<WorkerBroker> {
+export async function startWorkerBroker(deps: { broker: AttemptBroker; maintenanceGate?: MaintenanceGate }): Promise<WorkerBroker> {
   return { async handle(input) {
     let requestId = 'invalid-request';
+    let releaseMaintenance: (() => void) | undefined;
     try {
+      releaseMaintenance = deps.maintenanceGate?.enter();
       ensure(input.path.length <= 2048 && !/[?#\r\n]/.test(input.path), 'route_missing', 'Unknown broker route');
       const route = workerRoutes.find(([method,path]) => method === input.method && new RegExp('^'+path.replace('{id}','([^/]+)')+'$').test(input.path));
       ensure(route, 'route_missing', 'Unknown broker route');
@@ -43,6 +46,6 @@ export async function startWorkerBroker(deps: { broker: AttemptBroker }): Promis
       const code = error instanceof WorkerTransportError ? 'invalid_body' : error instanceof StoreError ? error.code : 'broker_unavailable';
       const status = code === 'route_missing' ? 404 : code === 'invalid_body' ? 400 : code === 'invalid_capability' ? 401 : code === 'broker_unavailable' || code.includes('unsupported') || code === 'native_unknown' ? 503 : 403;
       return { status, body: encodeWorkerResponse({ requestId, ok: false, error: { code, message: 'Broker request was not authorized or could not be confirmed', recovery: code === 'attention_input_unsupported' ? 'Open the actual native owner input; trusted pending-input correlation is unavailable' : 'Use current attempt authority; reconcile uncertain native effects through the trusted runtime', retryable: false } }) };
-    }
+    } finally { releaseMaintenance?.(); }
   } };
 }

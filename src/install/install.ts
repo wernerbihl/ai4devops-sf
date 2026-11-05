@@ -12,6 +12,7 @@ import { copyRuntime } from './runtime-copy.ts';
 import { seedStarters } from './starter-seed.ts';
 import { installationLocatorPath, locateInstallation, saveInstallation, type Installation } from './locator.ts';
 import { LinuxStartup } from './service-linux.ts';
+import { MacOSStartup } from './service-macos.ts';
 import type { InstallPlan } from './plan.ts';
 
 function writePrivate(path:string,value:string|Buffer):void {
@@ -20,7 +21,7 @@ function writePrivate(path:string,value:string|Buffer):void {
 }
 /** Apply only after explicit Install (Y/n). Unknown partial work remains owned for inspection. */
 export async function applyInstall(plan:InstallPlan,options:{docker?:DockerPort;locatorPath?:string;configHome?:string;systemctl?:string}={}):Promise<Installation> {
-  if(process.platform!=='linux')throw new Error('This platform does not yet have a protected installation adapter');
+  if(!['linux','darwin'].includes(process.platform))throw new Error('This platform does not yet have a protected installation adapter');
   const locator=options.locatorPath??installationLocatorPath();if(await locateInstallation(locator))throw new Error('An installation already exists');
   const credential=loadCompanionCredential(plan.stagedAuthRoot,{ref:'native-copilot',resource:'https://api.github.com',scopes:['read:user','user:email']});
   if(credential.account.id!==plan.account.id)throw new Error('Selected Copilot account changed since preview');
@@ -51,8 +52,10 @@ export async function applyInstall(plan:InstallPlan,options:{docker?:DockerPort;
     writePrivate(join(plan.directory,'factory.sqlite'),Buffer.alloc(0));
     const store=openStore(join(plan.directory,'factory.sqlite'),{materialize:recipeMaterializer});try{const settings=store.getSettings();if(settings.config.taktSeconds!==plan.taktSeconds)store.patchSettings({taktSeconds:plan.taktSeconds},settings.revision);seedStarters(store)}finally{store.close()}
     const installation:Installation={schemaVersion:1,id:plan.id,root:plan.directory,node:runtime.node,serviceEntry:runtime.serviceEntry,version:runtime.version};
-    const service=new LinuxStartup({node:runtime.node,entry:runtime.serviceEntry,id:plan.id,root:plan.directory,...(plan.dockerExecutable?{dockerExecutable:plan.dockerExecutable}:{}),...(options.configHome?{configHome:options.configHome}:{}),...(options.systemctl?{systemctl:options.systemctl}:{})});
-    writePrivate(join(plan.directory,'startup.json'),JSON.stringify({schemaVersion:1,installationId:plan.id,kind:'systemd-user',unitPath:service.unitPath,codeExecutable:plan.codeExecutable,requestDir,...(plan.dockerExecutable?{dockerExecutable:plan.dockerExecutable}:{})}));
+    const spec={node:runtime.node,entry:runtime.serviceEntry,id:plan.id,root:plan.directory,...(plan.dockerExecutable?{dockerExecutable:plan.dockerExecutable}:{})};
+    const service=process.platform==='darwin'?new MacOSStartup(spec):new LinuxStartup({...spec,...(options.configHome?{configHome:options.configHome}:{}),...(options.systemctl?{systemctl:options.systemctl}:{})});
+    const serviceRecord=service instanceof MacOSStartup?{kind:'launchagent',plistPath:service.plistPath}:{kind:'systemd-user',unitPath:service.unitPath};
+    writePrivate(join(plan.directory,'startup.json'),JSON.stringify({schemaVersion:1,installationId:plan.id,...serviceRecord,codeExecutable:plan.codeExecutable,requestDir,...(plan.dockerExecutable?{dockerExecutable:plan.dockerExecutable}:{})}));
     await service.install();await saveInstallation(installation,locator);await service.start();
     return installation;
   } catch(error) {

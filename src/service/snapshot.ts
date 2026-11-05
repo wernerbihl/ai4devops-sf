@@ -1,6 +1,7 @@
 import type { FactorySnapshot } from '../contracts/domain.ts';
 import type { ApiDeps } from './api.ts';
 import { validateContract } from '../contracts/schemas.ts';
+import { PUBLIC_BROKER_AUTHORIZATION } from '../recipes/policy.ts';
 /** Defense in depth: adapters return DTOs, never raw credential/error/process objects. */
 export function sanitize<T>(value: T, secrets: readonly string[] = []): T {
   const sensitive = /^(access_?token|refresh_?token|authorization|password|secret|client_?secret|cookie|csrfToken|deviceCode)$/i;
@@ -11,7 +12,7 @@ export function sanitize<T>(value: T, secrets: readonly string[] = []): T {
   const identifiers = new Set(['type', '$ref', '$dynamicRef', '$schema', '$id', '$anchor', '$dynamicAnchor', 'format', 'pattern', 'contentEncoding', 'contentMediaType', 'required', 'dependentRequired']);
   const cleanString = (item: string): string => {
     let result = item.replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{12,})\b/g, '[redacted]')
-      .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [redacted]').replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@');
+      .replace(/Bearer\s+(?:\{\{ inputs\.sf_capability \}\}|\{\{ outputs\.await_result\.onResume\.sf_result_capability \}\}|[^\s"']+)/gi, match => PUBLIC_BROKER_AUTHORIZATION.includes(match) ? match : 'Bearer [redacted]').replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@');
     for (const secret of secrets) if (secret) result = result.split(secret).join('[redacted]');
     return result;
   };
@@ -32,7 +33,7 @@ export function sanitize<T>(value: T, secrets: readonly string[] = []): T {
     }));
   };
   const clean = (item: unknown, key = ''): unknown => {
-    if (sensitive.test(key)) return '[redacted]';
+    if (sensitive.test(key) && !(key.toLowerCase() === 'authorization' && typeof item === 'string' && PUBLIC_BROKER_AUTHORIZATION.includes(item))) return '[redacted]';
     if (schemaContainers.has(key) && (object(item) || typeof item === 'boolean')) return cleanSchema(item);
     if (typeof item === 'string') return cleanString(item);
     if (Array.isArray(item)) return item.map(child => clean(child));

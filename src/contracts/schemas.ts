@@ -43,7 +43,7 @@ const TaskSpec = withAllowedPolicy(object({
 }), 'finishPolicy');
 const CreateTaskRequest = object({
   title: text(), description: text(), recipeId: text(), repositoryIds: T.Array(text(), { minItems: 1, uniqueItems: true }),
-  finishPolicy: T.Optional(FinishPolicy), ownerId: optionalText(), providerId: T.Optional(ProviderId),
+  finishPolicy: T.Optional(FinishPolicy), ownerId: optionalText(), providerId: T.Optional(ProviderId), inputs: T.Optional(jsonObject()),
 });
 const TaskTemplate = object({
   title: text(), description: text(), goal: text(), acceptanceCriteria: T.Array(text(), { minItems: 1 }),
@@ -54,6 +54,7 @@ const RecipeMetadata = withAllowedPolicy(object({
   inputSchema: jsonObject(), taskTemplate: TaskTemplate, required: RequiredCapabilities,
   compatibleOwners: T.Array(text(), { minItems: 1, uniqueItems: true }),
   compatibleProviders: T.Array(ProviderId, { minItems: 1, uniqueItems: true }), defaultFinishPolicy: FinishPolicy,
+  defaultProviderId: T.Optional(ProviderId), skillVersions: T.Optional(T.Record(T.String(), text())), toolVersions: T.Optional(T.Record(T.String(), text())),
 }), 'defaultFinishPolicy');
 // Standard Kestra fields stay under Kestra's schema authority. Only variables.sf is factory metadata.
 const RecipeContract = T.Object({
@@ -167,7 +168,7 @@ const Repository = object({
   id: text(), name: text(), url: text(), active: T.Boolean(), controlMode: choice('factory', 'human'),
   revision: integer(1), createdAt: timestamp(), lastServicedAt: T.Optional(timestamp()),
   weights: T.Record(T.String(), T.Integer({ minimum: 0, maximum: 100 })),
-  currentTaskId: optionalText(), reason: optionalText(), recovery: optionalText(),
+  currentTaskId: optionalText(), reason: optionalText(), recovery: optionalText(), defaultOwnerId: optionalText(),
 });
 const RecipeSummary = object({ id: text(), displayName: text(), description: text(), tagId: text(), currentRevision: text(),
   revision: integer(1), active: T.Boolean(), ready: T.Boolean(), reasons: T.Array(text()) });
@@ -210,7 +211,7 @@ const SettingsPatch = object({
   taktSeconds: T.Optional(integer(1)), limits: T.Optional(FactoryConfig.properties.limits),
   defaultOwnerId: optionalText(), defaultProviderId: T.Optional(ProviderId), paused: T.Optional(T.Boolean()),
 });
-const RepositoryPatch = object({ active: T.Optional(T.Boolean()) });
+const RepositoryPatch = object({ active: T.Optional(T.Boolean()), defaultOwnerId: T.Optional(T.Union([text(), T.Null()])) });
 const WeightsPatch = object({ weights: T.Record(T.String(), T.Integer({ minimum: 0, maximum: 100 })) });
 const RotationPreview = object({ repositoryId: text(), tagIds: strings(), nextTagIds: T.Array(text()), reason: optionalText() });
 const TagCreate = object({ displayName: text() });
@@ -220,8 +221,13 @@ const TaskPatch = object({ title: optionalText(), description: optionalText(), g
   acceptanceCriteria: T.Optional(T.Array(text(), { minItems: 1 })), finishPolicy: T.Optional(FinishPolicy),
   ownerId: optionalText(), providerId: T.Optional(ProviderId), status: T.Optional(T.Literal('cancelled')) });
 const RecipeCreate = object({ yaml: text(), inputDefaults: T.Optional(jsonObject()), repositoryIds: T.Optional(strings()) });
-const RecipeValidation = object({ valid: T.Boolean(), errors: T.Array(text()), contract: T.Optional(RecipeContract) });
-const RecipePatch = object({ active: T.Optional(T.Boolean()), displayName: optionalText() });
+const RecipeValidation = object({ valid: T.Boolean(), errors: T.Array(text()), contract: T.Optional(RecipeContract),
+  hash: optionalText(), payloadHash: optionalText(), issues: T.Optional(T.Array(object({ field: T.String(), message: text(), line: integer(1), column: integer(1) }))),
+  readiness: T.Optional(object({ ready: T.Boolean(), reasons: T.Array(text()), requested: RequiredCapabilities, approved: T.Boolean() })),
+});
+const RecipePatch = object({ active: T.Optional(T.Boolean()), displayName: optionalText(), approval: T.Optional(object({
+  recipeHash: text(), payloadHash: text(), repositoryIds: strings(), capabilities: RequiredCapabilities,
+})) });
 const DispatchResult = object({ admitted: T.Boolean(), taskId: optionalText(), attemptId: optionalText(), reason: optionalText() });
 const AttentionResponse = object({ input: jsonObject() });
 const NativeOpenResult = object({ uri: optionalText() });

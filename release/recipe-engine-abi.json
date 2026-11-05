@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "kestraVersion": "2.0.8",
+  "policy": "src/recipes/policy.ts",
+  "status": "source verified and all three starter schemas accepted by pinned live Kestra; end-to-end broker/native execution remains E2/E3/E6",
+  "flow": "fixed core.http.Request native_start -> core.flow.Pause await_result -> core.http.Request submit_result",
+  "brokerOrigin": "http://sf-broker:8080",
+  "routes": [
+    "/worker/v1/native/start",
+    "/worker/v1/results"
+  ],
+  "initialInputs": {
+    "sf_capability": "SECRET",
+    "sf_native_start": "JSON WorkerRequest native.start"
+  },
+  "internalResultResume": {
+    "sf_result": "JSON WorkerRequest result.submit",
+    "sf_result_capability": "SECRET current attempt/fence capability"
+  },
+  "requiredEngineConfiguration": {
+    "kestra.variables.recursive-rendering": false,
+    "kestra.encryption.secret-key": "setup-managed secret; must be configured"
+  },
+  "capabilityAlphabet": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+  "runtimeObligations": [
+    "E2 validates fixed engine configuration and refuses readiness on mismatch; recipe cannot override it",
+    "E2/E3 supplies only authenticated runtime-owned initial inputs, never recipe defaults or arbitrary browser inputs",
+    "E6 resumes await_result only after a genuine structured result; ordinary human replies go to native continuation",
+    "E2/E3/E6 supplies a fresh result capability for the current attempt/fence, not the original start capability",
+    "E3 validates WorkerRequest operation, scope, fence, immutable owner/provider, granted paths/tools and result authority",
+    "HTTP body uses one render with toJson; recursive rendering must stay false to preserve arbitrary context/result text",
+    "HTTP headers are rendered twice; capability alphabet is enforced before engine rendering",
+    "No redirects or non-200 broker responses are accepted; no caller-defined headers, proxy, logging, retries or TLS overrides",
+    "Engine completion and verified lifecycle quiescence are still required for closeout; native idle is not a result"
+  ],
+  "sources": [
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/plugin/core/http/AbstractHttp.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/http/client/configurations/HttpConfiguration.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/plugin/core/flow/Pause.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/VariableRenderer.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/configuration/VariableConfiguration.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/DefaultRunContext.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/webserver/src/main/java/io/kestra/webserver/controllers/api/FlowController.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/FlowInputOutput.java",
+    "https://github.com/kestra-io/kestra/blob/v2.0.8/core/src/main/java/io/kestra/core/runners/pebble/filters/ToJsonFilter.java"
+  ],
+  "liveSchemaReceipt": "release/evidence/e1/schema/starter-schema.json"
+}

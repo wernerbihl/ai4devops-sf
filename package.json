@@ -9,7 +9,7 @@
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/storage/migrations', 'dist/storage/migrations', { recursive: true })\"",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-runtime-assets.mjs",
     "protocol:generate": "node scripts/generate-protocol.ts",
     "protocol:check": "node scripts/generate-protocol.ts --check",
     "probe:vscode": "node scripts/probe-vscode.ts",
@@ -23,7 +23,8 @@
     "@sinclair/typebox": "0.34.41",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/node": "24.10.0",

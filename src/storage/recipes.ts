@@ -40,7 +40,9 @@ export class RecipeStorage {
     const old = this.summary(id);
     ensure(old, 'not_found', 'Recipe not found');
     ensure(old.revision === expectedRevision, 'revision_conflict', 'Recipe revision conflict');
-    const value = validateContract('RecipeSummary', { ...old, ...patch, revision: old.revision + 1 });
+    const { approval, ...summaryPatch } = patch;
+    ensure(!approval, 'invalid_authority', 'Capability approval requires the recipe registry');
+    const value = validateContract('RecipeSummary', { ...old, ...summaryPatch, revision: old.revision + 1 });
     const tag = this.db.read<Tag>('tags', old.tagId);
     ensure(!value.active || (tag && !tag.archivedAt), 'archived_tag', 'Cannot activate a recipe with an archived tag');
     this.db.sql.prepare('UPDATE recipes SET payload = ? WHERE id = ?').run(JSON.stringify(value), id);
@@ -53,7 +55,8 @@ export class RecipeStorage {
       if (recipe.tagId !== id || !recipe.active) continue;
       const old = this.current(recipe.id)!;
       const revision = this.withTag(old, replacementId);
-      this.save(revision, recipe.revision);
+      const saved = this.save(revision, recipe.revision);
+      if (saved.displayName !== recipe.displayName) this.patch(recipe.id, { displayName: recipe.displayName }, saved.revision);
       replacements.set(`${old.recipeId}:${old.revision}`, revision);
     }
     return replacements;

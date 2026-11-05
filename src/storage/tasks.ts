@@ -117,7 +117,6 @@ export class TaskStorage {
       const recipe = this.availableRecipe(request.recipeId, actor);
       ensure(this.materialize, 'materializer_missing', 'A recipe materializer is required to create tasks');
       const settings = this.db.read<Settings>('settings', 1)!;
-      const defaults: ExecutionDefaults = { ownerId: request.ownerId ?? settings.config.defaultOwnerId, providerId: request.providerId ?? settings.config.defaultProviderId, finishPolicy: request.finishPolicy ?? recipe.contract.variables.sf.defaultFinishPolicy };
       let parentId = registered?.taskId;
       if (request.repositoryIds.length > 1) {
         parentId = randomUUID();
@@ -127,6 +126,7 @@ export class TaskStorage {
       const tasks = request.repositoryIds.map(repositoryId => {
         const repository = this.db.read<Repository>('repositories', repositoryId);
         ensure(repository, 'invalid_repository', 'Requested repository does not exist');
+        const defaults: ExecutionDefaults = { ownerId: request.ownerId ?? repository.defaultOwnerId ?? settings.config.defaultOwnerId, providerId: request.providerId ?? recipe.contract.variables.sf.defaultProviderId ?? settings.config.defaultProviderId, finishPolicy: request.finishPolicy ?? recipe.contract.variables.sf.defaultFinishPolicy };
         const id = randomUUID();
         const source = actor ? 'recipe' : 'manual';
         const spec = structuredClone(this.materialize!({ id, ...(parentId ? { parentId } : {}), repository, recipe: structuredClone(recipe), request: structuredClone(request), defaults: structuredClone(defaults), source }));

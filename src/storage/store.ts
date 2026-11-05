@@ -100,7 +100,9 @@ export class FactoryStore {
     validateContract('RepositoryPatch', patch);
     return this.db.transaction(() => {
       const old = this.repositoryAtRevision(id, expectedRevision);
-      return this.writeRepository({ ...old, ...patch, revision: old.revision + 1 });
+      const value = { ...old, ...patch, revision: old.revision + 1 };
+      if (value.defaultOwnerId === null) delete value.defaultOwnerId;
+      return this.writeRepository(validateContract('Repository', value));
     });
   }
   patchWeights(id: string, patch: WeightsPatch, expectedRevision: number): Repository {
@@ -215,6 +217,19 @@ export class FactoryStore {
       if (!claim.fresh) { ensure(claim.result, 'request_pending', 'Reconcile pending request'); return { fresh: false, result: claim.result }; }
       const result = mutate(); this.apiRequests.finish(key, input, result); return { fresh: true, result };
     });
+  }
+  /** Trusted E1 seam: synchronous local writes and exact stable-key outcome share one transaction. */
+  runRecipeMutation<T>(key: string, input: unknown, mutate: () => T): T {
+    return this.db.transaction(() => this.db.idempotent('recipe-registry', key, input, () => {
+      const result = mutate();
+      ensure(!(result instanceof Promise), 'invalid_recipe_mutation', 'Recipe mutations must be synchronous');
+      return result;
+    }));
+  }
+  /** Read-only reconciliation; never invokes an action or revalidates mutable current state. */
+  readRecipeMutation<T>(key: string): T | undefined {
+    const row = this.db.sql.prepare('SELECT result FROM idempotency WHERE namespace = ? AND key = ?').get('recipe-registry', key);
+    return row ? JSON.parse(String(row.result)) as T : undefined;
   }
   claimApiRequest(key: string, input: unknown) { return this.db.transaction(() => this.apiRequests.claim(key, input)); }
   finishApiRequest(key: string, input: unknown, result: ApiRequestResult): void { this.db.transaction(() => this.apiRequests.finish(key, input, result)); }

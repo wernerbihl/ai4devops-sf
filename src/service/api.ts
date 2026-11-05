@@ -166,7 +166,7 @@ export async function startApi(input: ApiDeps): Promise<ApiServer> {
           if (value instanceof Promise) throw new Error('Local mutation must be synchronous');
           return safeResult(value);
         });
-        if (saved.fresh && route.afterCreate) {
+        if (saved.fresh && (typeof route.afterCreate === 'function' ? route.afterCreate(saved.result.body) : route.afterCreate)) {
           // Creation/result are already committed. Unknown dispatch is reconciled by C3/E6; replay never creates or dispatches twice.
           try { await deps.scheduler.dispatch('manual'); } catch { /* Persisted queued tasks remain available to runtime recovery. */ }
         }

@@ -503,3 +503,67 @@ test('catalog_only_repository_cannot_be_activated_until_explicitly_selected', as
     assert.equal(response.status, 403); assert.equal(fixture.store.getRepository('repo-1')!.active, false);
   } finally { await api.close(); fixture.close(); }
 });
+
+test('manual_preflight_patch_dispatches_once_and_resolves_only_original_preflight_attention', async () => {
+  const f = await setup(); try {
+    const id = f.fixture.task.id;
+    f.fixture.store.markAdmissionAttention(id, 1, 'owner_unavailable', 'Restore original owner');
+    const original = f.fixture.store.snapshot().attention[0]!;
+    const unrelated = { ...original, id: 'other-native-input', kind: 'input', source: 'owner', attemptId: 'native-attempt', nativeInputId: 'native-question' };
+    const db = new DatabaseSync(f.fixture.path); db.prepare('INSERT INTO admission_attention(id,payload) VALUES (?,?)').run(unrelated.id, JSON.stringify(unrelated)); db.close();
+    const headers = { 'idempotency-key': 'requeue-manual', 'if-match': '2' };
+    const result = await f.call('/v1/tasks/'+id, 'PATCH', {}, headers); assert.equal(result.status, 200); assert.equal((await result.json()).status, 'queued');
+    assert.equal(f.ports.dispatches, 1);
+    assert.equal(f.fixture.store.snapshot().attention.find(a=>a.id===original.id)?.status, 'resolved');
+    assert.equal(f.fixture.store.snapshot().attention.find(a=>a.id===unrelated.id)?.status, 'open');
+    const replay = await f.call('/v1/tasks/'+id, 'PATCH', {}, headers); assert.equal(replay.status, 200); assert.equal(f.ports.dispatches, 1);
+    assert.equal((await f.call('/v1/tasks/'+id, 'PATCH', {}, { 'idempotency-key':'stale-requeue', 'if-match':'2' })).status, 409);
+    assert.equal(f.ports.dispatches, 1);
+  } finally { await f.close(); }
+});
+
+test('manual_patch_respects_pause_and_limit_without_activating_repository_or_advancing_rotation', async () => {
+  for (const gate of ['paused','capacity','day_limit'] as const) {
+    const x = fakeRuntime(); const store = x.fixture.store;
+    try {
+      if(gate==='capacity'||gate==='day_limit') await x.scheduler.dispatch('manual');
+      if(gate==='paused') store.patchSettings({paused:true},store.getSettings().revision);
+      if(gate==='day_limit') store.patchSettings({limits:{...store.getSettings().config.limits,concurrency:2,startsPerDay:1}},store.getSettings().revision);
+      const t = store.createManualTasks({...x.fixture.request,repositoryIds:['repo-2']},'blocked-'+gate)[0]!;
+      store.markAdmissionAttention(t.id,1,'owner_unavailable','Restore owner');
+      const before=store.getRotationState('repo-2'); let dispatched=0;let outcome='';
+      const api=await startApi({...x.deps,scheduler:{async dispatch(trigger,key){dispatched++;const result=await x.scheduler.dispatch(trigger,key);outcome=result.kind==='noop'?result.code:result.kind;return result;}}});
+      try {
+        const session=api.sessions.provision(origin);const res=await fetch(api.url+'/v1/tasks/'+t.id,{method:'PATCH',headers:{origin,cookie:session.cookie,'x-sf-csrf':session.csrfToken,'content-type':'application/json','idempotency-key':'gate-'+gate,'if-match':'2'},body:'{}'});
+        assert.equal(res.status,200);assert.equal(dispatched,1);assert.equal(outcome,gate);
+        assert.equal(store.getTask(t.id)!.status,'queued');assert.equal(store.getRepository('repo-2')!.active,false);assert.deepEqual(store.getRotationState('repo-2'),before);
+      }finally{await api.close();}
+    }finally{x.fixture.close();}
+  }
+});
+
+test('manual_requeue_runs_immediately_after_repair_and_cancellation_does_not_dispatch',async()=>{
+  const x=fakeRuntime();const store=x.fixture.store;const id=x.fixture.task.id;let dispatches=0;
+  store.markAdmissionAttention(id,1,'owner_unavailable','Restore owner');
+  const api=await startApi({...x.deps,scheduler:{async dispatch(trigger,key){dispatches++;return x.scheduler.dispatch(trigger,key);}}});
+  try{
+    const session=api.sessions.provision(origin);const headers={origin,cookie:session.cookie,'x-sf-csrf':session.csrfToken,'content-type':'application/json'};
+    const res=await fetch(api.url+'/v1/tasks/'+id,{method:'PATCH',headers:{...headers,'idempotency-key':'repair-start','if-match':'2'},body:JSON.stringify({description:'Repaired work'})});
+    assert.equal(res.status,200);assert.equal((await res.json()).status,'queued');assert.equal(store.getTask(id)!.status,'running');assert.equal(dispatches,1);assert.equal(store.getRepository('repo-1')!.active,false);
+    const t=store.createManualTasks({...x.fixture.request,repositoryIds:['repo-2']},'cancelled')[0]!;store.markAdmissionAttention(t.id,1,'blocked','Repair or cancel');
+    const cancel=await fetch(api.url+'/v1/tasks/'+t.id,{method:'PATCH',headers:{...headers,'idempotency-key':'cancel-only','if-match':'2'},body:JSON.stringify({status:'cancelled'})});
+    assert.equal(cancel.status,200);assert.equal(dispatches,1);assert.equal(store.snapshot().attention.find(a=>a.taskId===t.id)!.status,'resolved');
+  }finally{await api.close();x.fixture.close();}
+});
+
+test('generated_task_requeue_preserves_takt_dispatch_and_stale_patch_keeps_attention_open',async()=>{
+ const f=await setup();try{
+  const [child]=f.fixture.store.createTasks(f.fixture.request,f.fixture.actor,'generated');
+  f.fixture.store.markAdmissionAttention(child!.id,1,'preflight_unavailable','Restore boundary');
+  const attention=f.fixture.store.snapshot().attention.find(a=>a.taskId===child!.id)!;
+  const stale=await f.call('/v1/tasks/'+child!.id,'PATCH',{}, {'idempotency-key':'generated-stale','if-match':'1'});
+  assert.equal(stale.status,409);assert.equal(f.fixture.store.snapshot().attention.find(a=>a.id===attention.id)!.status,'open');assert.equal(f.ports.dispatches,0);
+  const response=await f.call('/v1/tasks/'+child!.id,'PATCH',{}, {'idempotency-key':'generated-requeue','if-match':'2'});
+  assert.equal(response.status,200);assert.equal(f.ports.dispatches,0);assert.equal(f.fixture.store.getTask(child!.id)!.status,'queued');assert.equal(f.fixture.store.snapshot().attention.find(a=>a.id===attention.id)!.status,'resolved');
+ }finally{await f.close();}
+});

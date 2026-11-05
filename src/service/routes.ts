@@ -18,7 +18,7 @@ function revision<T extends { revision: number }>(value: T | undefined, expected
 }
 export interface Route {
   method: string; path: string; input?: ContractName; output: ContractName; array?: boolean;
-  versioned?: boolean; external?: boolean; afterCreate?: boolean;
+  versioned?: boolean; external?: boolean; afterCreate?: boolean | ((value: unknown) => boolean);
   check?(id: string, expected: number | undefined): void;
   run(body: unknown, id: string, expected: number | undefined, key: string): unknown | Promise<unknown>;
 }
@@ -63,7 +63,7 @@ export function routes(deps: ApiDeps): Route[] {
     { method: 'GET', path: '/v1/tasks', output: 'TaskRecord', array: true, run: () => s.snapshot().tasks },
     { method: 'POST', path: '/v1/tasks', input: 'CreateTaskRequest', output: 'TaskRecord', array: true, afterCreate: true, run: (b, _id, _v, key) => s.createManualTasks(validate('CreateTaskRequest', b), `api:${key}`).map(t => task(t.id)) },
     { method: 'GET', path: '/v1/tasks/:id', output: 'TaskRecord', run: (_b, id) => task(id) },
-    { method: 'PATCH', path: '/v1/tasks/:id', input: 'TaskPatch', output: 'TaskRecord', versioned: true, run: (b, id, v) => s.patchTask(id, validate('TaskPatch', b), v!) },
+    { method: 'PATCH', path: '/v1/tasks/:id', input: 'TaskPatch', output: 'TaskRecord', versioned: true, afterCreate: value => { const result = value as Contract<'TaskRecord'>; return result.spec.source === 'manual' && result.status === 'queued'; }, run: (b, id, v) => s.patchTask(id, validate('TaskPatch', b), v!) },
     { method: 'DELETE', path: '/v1/tasks/:id', output: 'TaskRecord', versioned: true, run: (_b, id, v) => s.archiveTask(id, v!) },
     { method: 'GET', path: '/v1/recipes', output: 'RecipeSummary', array: true, run: () => s.snapshot().recipes },
     { method: 'POST', path: '/v1/recipes', input: 'RecipeCreate', output: 'RecipeRevision', external: true, check: () => { recipes(); }, run: (b, _id, v, key) => recipes().create(validate('RecipeCreate', b), ctx(key, v)) },

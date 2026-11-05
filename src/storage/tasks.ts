@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ActorScope, CreateTaskRequest, ExecutionDefaults, FindingInput, Grant, RecipeRevision, Repository, Settings, Tag, TaskPatch, TaskRecord, TaskSource, TaskSpec, TaskStatus } from '../contracts/domain.ts';
+import type { ActorScope, AttentionRequest, CreateTaskRequest, ExecutionDefaults, FindingInput, Grant, RecipeRevision, Repository, Settings, Tag, TaskPatch, TaskRecord, TaskSource, TaskSpec, TaskStatus } from '../contracts/domain.ts';
 import { validateContract } from '../contracts/schemas.ts';
 import { StoreDatabase, canonical, ensure } from './database.ts';
 import type { RecipeStorage } from './recipes.ts';
@@ -199,6 +199,20 @@ export class TaskStorage {
       const spec = { ...task.spec, ...specPatch };
       const recipe = this.recipes.revision(spec.recipeId, spec.recipeRevision)!;
       this.checkSpec(spec, recipe, spec.repositoryId);
+      // Only the exact unstarted preflight block is obsolete after this atomic recovery/cancellation.
+      // A native question, another task, or a later unresolved failure retains its own authority.
+      if (task.status === 'needs_attention' && task.attemptIds.length === 0) {
+        const rows = this.db.sql.prepare("SELECT payload FROM admission_attention WHERE json_extract(payload, '$.taskId') = ?").all(id);
+        for (const row of rows) {
+          const attention = JSON.parse(String(row.payload)) as AttentionRequest;
+          if (attention.status !== 'open' || attention.source !== 'factory' || attention.kind !== 'blocked'
+            || attention.attemptId || attention.nativeInputId || attention.repositoryId !== task.spec.repositoryId
+            || attention.prompt !== task.reason || attention.recovery !== task.recovery || attention.createdAt !== task.updatedAt) continue;
+          const resolved = validateContract('AttentionRequest', { ...attention, status: 'resolved', resolvedAt: this.db.now(), revision: attention.revision + 1 });
+          this.db.sql.prepare('UPDATE admission_attention SET payload = ? WHERE id = ?').run(JSON.stringify(resolved), attention.id);
+          this.db.emit('attention', resolved);
+        }
+      }
       return this.write({ ...recovered, spec, status: status ?? 'queued', revision: task.revision + 1, updatedAt: this.db.now() });
     };
     // Authorize the object even on replay: possession of another task ID is never sufficient.

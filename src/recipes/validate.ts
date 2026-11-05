@@ -24,6 +24,7 @@ function inspectNode(node: Node | null | undefined, depth = 0): void {
   requirePolicy(!node.tag && !node.anchor, '', 'YAML tags and anchors are forbidden');
   if (isMap(node)) for (const pair of node.items) {
     requirePolicy(isScalar(pair.key) && typeof pair.key.value === 'string' && !['__proto__', 'constructor', 'prototype', '<<'].includes(pair.key.value), '', 'YAML keys must be safe strings');
+    inspectNode(pair.key, depth + 1);
     inspectNode(pair.value as Node, depth + 1);
   }
   if (isSeq(node)) for (const item of node.items) inspectNode(item as Node, depth + 1);

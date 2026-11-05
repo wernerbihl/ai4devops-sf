@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startApi } from '../../src/service/api.ts';
+import { startApi, DefinitiveNoEffect } from '../../src/service/api.ts';
 import { sanitize } from '../../src/service/snapshot.ts';
 import { fakePorts } from '../helpers/fake-ports.ts';
 import { openStore } from '../../src/storage/store.ts';
@@ -449,5 +449,42 @@ test('unknown_unavailable_and_legacy_profile_authority_cannot_be_approved_by_a_r
     assert.equal(f.registry.readiness(recipe).approved, false, 'Legacy missing-profile grants remain historical and cannot qualify current activation');
     const summary = f.store.snapshot().recipes[0]!;
     await assert.rejects(f.port.patch(recipe.recipeId, boundPatch(f.registry, recipe.recipeId, { active: true }), { key: 'legacy', expectedRevision: summary.revision }));
+  } finally { f.store.close(); }
+});
+
+for (const key of ['&forbidden id', '!!str id']) test(`rejects_forbidden_mapping_key_syntax_in_import: ${key}`, async () => {
+  const f = setup();
+  try {
+    const source = readFileSync(new URL('../../recipes/starter/focused-feature.yaml', import.meta.url), 'utf8');
+    const yaml = source.replace(/^id:/m, `${key}:`);
+    // These keys resolve to the same otherwise valid contract; syntax policy must reject them.
+    assert.equal(parse(yaml).id, parse(source).id);
+    const validated = await f.port.validate({ yaml, repositoryIds: ['repo'] }, { key: 'key-syntax-validation' });
+    assert.equal(validated.valid, false);
+    assert.match(validated.errors.join(' '), /tags and anchors are forbidden/);
+    const profile = f.registry.validate(f.input).executionProfileHash!;
+    const recipeHash = `sha256:${createHash('sha256').update(yaml).digest('hex')}`;
+    const input = { yaml, repositoryIds: ['repo'], validation: { recipeHash, payloadHash: recipePayloadHash({yaml, repositoryIds:['repo']}), executionProfileHash: profile } };
+    await assert.rejects(f.port.create(input, { key: 'direct-key-syntax-create' }), (error: unknown) => error instanceof DefinitiveNoEffect && error.status === 400 && /tags and anchors are forbidden/.test(error.error.message));
+    assert.equal(f.store.snapshot().recipes.length, 0);
+    assert.equal(f.store.getAdmissionState().grants.length, 0);
+  } finally { f.store.close(); }
+});
+
+test('authored_E1_starter_manual_input_shape_applies_server_defaults_and_inherits_single_tag', async () => {
+  const f = setup();
+  try {
+    const contract = parse(readFileSync(new URL('../../recipes/starter/focused-feature.yaml', import.meta.url), 'utf8')) as RecipeContract;
+    const tag = f.store.snapshot().tags.find(item => item.displayName === 'Features')!;
+    contract.variables.sf.recipeId = 'owned-authored-starter'; contract.variables.sf.tagId = tag.id;
+    const rev = await f.port.create(boundRecipe(f.registry, { yaml: JSON.stringify(contract), inputDefaults: {}, repositoryIds: ['repo'] }), { key: 'authored-inactive' });
+    const summary = f.store.snapshot().recipes[0]!;
+    await f.port.patch(rev.recipeId, boundPatch(f.registry, rev.recipeId, { active: true, approval: {recipeHash: rev.hash, payloadHash: recipePayloadHash(rev), repositoryIds: ['repo'], capabilities: rev.contract.variables.sf.required} }), {key:'authored-approval',expectedRevision:summary.revision});
+    // Exact production AddTask shape: omitted optional values do not replace schema defaults with blanks.
+    const request = {title:'Use authored starter',description:'Keep server-defined scope and context defaults',recipeId:rev.recipeId,repositoryIds:['repo'],finishPolicy:'pr' as const,inputs:{}};
+    const [task] = f.store.createManualTasks(request, 'authored-manual');
+    assert.equal(task!.tagId, tag.id); assert.equal(task!.recipeRevision, rev.revision);
+    assert.match(task!.goal, /the explicitly requested area/); assert.equal(task!.context, '');
+    assert.deepEqual(request.inputs, {});
   } finally { f.store.close(); }
 });

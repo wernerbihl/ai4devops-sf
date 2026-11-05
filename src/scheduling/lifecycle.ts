@@ -48,7 +48,7 @@ export interface Lifecycle {
   checkBudgets(): Promise<void>;
   /** Account and persist deadline stop intent synchronously; physical stop jobs never own this lane. */
   observeBudgets(): void;
-  dispatchPending(onSelected?: (actionId: string) => void): Promise<{ kind: 'started'; attemptId: string } | null>;
+  dispatchPending(dispatchKey?: string): Promise<{ kind: 'started'; attemptId: string } | null>;
   reconnect(): Promise<void>;
   waitForCI(attemptId: string): Promise<void>;
   /** Trusted C8 handoff: quiesce but retain writer lease for protected metadata operations. */
@@ -123,7 +123,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     ensure(stopped ? !!attempt.native && await deps.workflow.snapshot(attempt) === 'present' : await reconcile(attempt), 'identity_missing', 'Reconnect original native and workflow history');
     return state.token;
   }
-  async function runAction(action: OutboxAction): Promise<Attempt | null> {
+  async function runAction(action: OutboxAction, dispatchKey?: string): Promise<Attempt | null> {
     if (!lifecycleActionKinds.has(action.kind) || action.completedAt) return null;
     const sourceId = String(action.payload.attemptId);
     let binding = store.getLifecycleActionBinding(action.id);
@@ -169,7 +169,11 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       accepted = true; store.settleLifecycleEffect(r.attempt.id, binding.fence, effectToken, 'accepted');
       assertEffect(r.attempt.id, binding.fence, effectToken);
       const accrued = account(r.attempt.id, false);
-      store.finishLifecycleAction(action.id, r.attempt.id, binding.fence, accrued.state!, accrued.activeDurationMs!, effectToken);
+      // Only this invocation's proven send completion can become its dispatch result.
+      // Selection or a later invocation completing the same queued action proves nothing here.
+      store.finishLifecycleAction(action.id, r.attempt.id, binding.fence, accrued.state!, accrued.activeDurationMs!, effectToken, dispatchKey ? {
+        key: 'dispatch:outcome:' + dispatchKey, kind: 'dispatch.outcome', payload: { result: { kind: 'started', attemptId: r.attempt.id } },
+      } : undefined);
     } catch (error) {
       if (!accepted) store.settleLifecycleEffect(r.attempt.id, binding.fence, effectToken, 'unknown');
       throw error;
@@ -177,9 +181,11 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     await checkBudgets();
     return record(r.attempt.id).reservation.attempt;
   }
-  async function dispatchPending(onSelected?: (actionId: string) => void): Promise<{ kind: 'started'; attemptId: string } | null> {
+  async function dispatchPending(dispatchKey?: string): Promise<{ kind: 'started'; attemptId: string } | null> {
+    let selection = 0;
     for (const action of store.pendingActions().filter(a => lifecycleActionKinds.has(a.kind))) {
-      try { onSelected?.(action.id); const attempt = await runAction(action); if (attempt) return { kind: 'started', attemptId: attempt.id }; }
+      if (dispatchKey) store.enqueueAction({ key: `dispatch:continuation:${dispatchKey}:${selection++}`, kind: 'dispatch.continuation', payload: { actionId: action.id } });
+      try { const attempt = await runAction(action, dispatchKey); if (attempt) return { kind: 'started', attemptId: attempt.id }; }
       catch (error) { if (!(error instanceof StoreError)) throw error; }
     }
     return null;
@@ -329,7 +335,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     }),
     checkBudgets: () => operation(checkBudgets),
     observeBudgets,
-    dispatchPending: onSelected => operation(() => dispatchPending(onSelected)),
+    dispatchPending: dispatchKey => operation(() => dispatchPending(dispatchKey)),
     reconnect: () => operation(async () => {
       for (const r of store.getReservations()) {
         if (r.status === 'pending' && !r.attempt.retryOfAttemptId && r.externalIdentity) store.confirmStart(r.id, r.externalIdentity);

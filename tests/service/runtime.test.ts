@@ -83,7 +83,7 @@ test('zero existing native runtimes can be provisionable without minting profile
  }finally{f.close()}
 });
 
-test('runtime observes retained deadlines before stalled initial native recovery and keeps admission disabled', async () => {
+for(const boundary of ['native-recovery','engine-adoption'])test(`runtime observes retained deadlines before stalled initial ${boundary} and keeps admission disabled`, async () => {
  const {openStore}=await import('../../src/storage/store.ts');
  const {recipeMaterializer}=await import('../../src/recipes/materialize.ts');
  const {RecipeRegistry,recipePayloadHash}=await import('../../src/recipes/registry.ts');
@@ -121,7 +121,7 @@ test('runtime observes retained deadlines before stalled initial native recovery
   mkdirSync(join(f.directory,'vault'),{mode:0o700});
   for(const name of ['broker-signing','private-control'])writeFileSync(join(f.directory,'vault',name),Buffer.alloc(32,7),{mode:0o600});
   writeFileSync(join(f.directory,'runtime.json'),JSON.stringify({schemaVersion:1,installationId:'fixture',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[{ref:'provider',providerId:'copilot',resource:'https://api.github.com',expiresAt:'2099-01-01T00:00:00Z',scopes:[]}],native:[{kind:'vscode-isolated-worker-v2',nativeImage:'native@sha256:'+'a'.repeat(64),workerImage:'worker@sha256:'+'b'.repeat(64),entrypoint:'/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js',entrypointSha256:'c'.repeat(64),hostCommit:'e576c7bbeb39772a1d1ebe472545def0d93e6d8b',pristineDirectory:'/workspaces/task',emptyHome:'/opt/software-factory/empty-home',credentialRef:'provider',proxy:{image:'proxy@sha256:'+'d'.repeat(64),entrypoint:'/opt/sf/proxy.cjs',entrypointSha256:'e'.repeat(64),allowedAuthorities:['api.githubcopilot.com:443']}}]}),{mode:0o600});
-  const pending=startRuntime({id:'fixture',root:f.directory,docker:{async command(args){if(args[0]==='network'&&args[1]==='inspect'&&args[2]===owner+'-internal'){entered();await stalled;}throw Error('Fixture has no provisioned images')}},secrets:{async loadOrCreate(){throw Error('unused')}}});
+  const pending=startRuntime({id:'fixture',root:f.directory,docker:{async command(args){if((boundary==='native-recovery'&&args[0]==='network'&&args[1]==='inspect'&&args[2]===owner+'-internal')||(boundary==='engine-adoption'&&args[0]==='image'&&args[1]==='inspect')){entered();await stalled;}throw Error('Fixture has no provisioned images')}},secrets:{async loadOrCreate(){return{username:'fixture',password:'nonsecret-fixture-password-000000000',encryptionKey:Buffer.alloc(32,11).toString('base64')}}}});
   await Promise.race([recoveryEntered,new Promise((_,reject)=>setTimeout(()=>reject(Error('recovery did not reach external inspection')),2000))]);
   let stopped=false;
   for(let i=0;i<20;i++){

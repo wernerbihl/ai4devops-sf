@@ -111,10 +111,10 @@ export async function startRuntime(installation: Installation) {
       }
     }
     const workflowStart=(r:Reservation):WorkflowStart=>({idempotencyKey:`runtime:start:${r.id}`,attemptId:r.attempt.id,recipe:store.getRecipeRevision(r.task.spec.recipeId,r.task.spec.recipeRevision)!,inputs:{},scopeId:r.id,fence:r.lease.fence});
-    const scheduler=createScheduler({store,clock:systemClock,materialize:recipeMaterializer,continuations:onSelected=>lifecycle.dispatchPending(onSelected),
+    const scheduler=createScheduler({store,clock:systemClock,materialize:recipeMaterializer,continuations:dispatchKey=>lifecycle.dispatchPending(dispatchKey),
       async readiness(task){if(stopping||!engine)return{ready:false,code:'engine_unavailable',recovery:engineReason};const reasons=await fleet.provisionability(task);if(reasons.length)return{ready:false,code:'native_unavailable',recovery:reasons.join('; ')};preparingTasks.set(task.id,task);try{const value=await workspace.prepareWorkspace(task);return{ready:true,baseSha:value.baseSha,workspacePath:value.path,profileId:isolatedProfileId}}finally{preparingTasks.delete(task.id)}},
       async start(reservation){ensure(engine&&!stopping,'runtime_stopping','Engine unavailable');const action=store.enqueueAction({key:`runtime:start:${reservation.id}`,kind:'runtime.start',payload:{reservationId:reservation.id}});const workflow=await engine.ensureExecution(workflowStart(reservation));store.confirmStart(reservation.id,{workflow});store.completeAction(action.id);return{kind:'started',identity:{workflow}}}});
-    try {const handle=await ensureKestra(installation);const client=new KestraClient({...handle,authority:createKestraAuthority({broker,store})});engine=client;cleanup.push(()=>client.close());const bridge=await startPrivateBrokerBridge({installation,kestra:handle,broker:await startWorkerBroker({broker}),...(installation.docker instanceof ProcessDocker?{streaming:new ProcessStreamingDocker(installation.docker.executable)}:{})});cleanup.push(()=>bridge.close());engineReason='';} catch {engine=undefined;engineReason='Pinned private Kestra deployment/transport is unavailable; inspect owned installation assets and bind support';}
+
     async function recoverNativeWrites(){
       for(const r of store.getReservations().filter(r=>r.lease.active)){
         const write=store.broker.write(r.attempt.id,r.lease.fence);if(!write||write.state==='done')continue;
@@ -134,7 +134,7 @@ export async function startRuntime(installation: Installation) {
         }catch{ /* Unknown original effects retain the writer fence. */ }
       }
     }
-    const services:ReconcileRuntime={store,...(engine?{engine}:{}),lifecycle,closeout,broker,workflowStart,recoverNativeWrites};
+    const services:ReconcileRuntime={store,lifecycle,closeout,broker,workflowStart,recoverNativeWrites};
     let recovering = true;
     let lastReport = { confirmed: [] as string[], completed: [] as string[], retained: [] as string[] };
     const health=async():Promise<Health>=>({schemaVersion:1,ready:!stopping&&!recovering&&!!engine&&config.native.length>0&&store.snapshot().recipes.some(r=>r.ready),reasons:[...(stopping?['Runtime is stopping']:[]),...(recovering?['Initial recovery is pending']:[]),...(engineReason?[engineReason]:[]),...(!config.native.length?['No pinned isolated native/worker/proxy template is provisioned']:[]),...(!store.snapshot().recipes.some(r=>r.ready)?['No approved provisionable recipe is ready']:[])],version:'0.1.0'});
@@ -177,6 +177,8 @@ export async function startRuntime(installation: Installation) {
     // No dispatch/continuation admission is enabled until that initial recovery completes.
     coordinator.start({admission:false});
     await coordinator.check();
+    try {const handle=await ensureKestra(installation);const client=new KestraClient({...handle,authority:createKestraAuthority({broker,store})});engine=client;cleanup.push(()=>client.close());const bridge=await startPrivateBrokerBridge({installation,kestra:handle,broker:await startWorkerBroker({broker}),...(installation.docker instanceof ProcessDocker?{streaming:new ProcessStreamingDocker(installation.docker.executable)}:{})});cleanup.push(()=>bridge.close());engineReason='';} catch {engine=undefined;engineReason='Pinned private Kestra deployment/transport is unavailable; inspect owned installation assets and bind support';}
+    if(engine)services.engine=engine;
     await refreshReadiness();
     lastReport=await reconcileInstallation(services);
     recovering=false;

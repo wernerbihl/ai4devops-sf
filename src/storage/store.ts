@@ -195,7 +195,12 @@ export class FactoryStore {
     this.db.transaction(() => this.admission.rememberExternal(id, identity));
     this.db.transaction(() => this.admission.confirm(id, identity));
   }
-  releaseUnstarted(id: string): void { this.db.transaction(() => this.admission.releaseUnstarted(id)); }
+  releaseUnstarted(id: string, dispatchOutcome?: ActionInput): void {
+    this.db.transaction(() => {
+      this.admission.releaseUnstarted(id);
+      if (dispatchOutcome) this.outbox.complete(this.outbox.enqueue(dispatchOutcome).id);
+    });
+  }
   releaseAdmissionLease(id: string, fence: number): void { this.db.transaction(() => this.admission.releaseLease(id, fence)); }
   markAdmissionAttention(taskId: string, expectedRevision: number, code: string, recovery: string): void {
     this.db.transaction(() => this.admission.attention(taskId, expectedRevision, code, recovery));
@@ -213,7 +218,12 @@ export class FactoryStore {
   settleLifecycleEffect(attemptId: string, fence: number, token: string, phase: 'unknown' | 'accepted'): void { this.db.transaction(() => this.lifecycle.settleEffect(attemptId, fence, token, phase)); }
   bindLifecycleAction(actionId: string, attemptId: string, fence: number): void { this.db.transaction(() => this.lifecycle.bindAction(actionId, attemptId, fence)); }
   getLifecycleActionBinding(actionId: string) { return this.lifecycle.actionBinding(actionId); }
-  finishLifecycleAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number, effectToken: string): void { this.db.transaction(() => this.lifecycle.finishAction(actionId, attemptId, fence, state, activeDurationMs, effectToken)); }
+  finishLifecycleAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number, effectToken: string, dispatchOutcome?: ActionInput): void {
+    this.db.transaction(() => {
+      this.lifecycle.finishAction(actionId, attemptId, fence, state, activeDurationMs, effectToken);
+      if (dispatchOutcome) this.outbox.complete(this.outbox.enqueue(dispatchOutcome).id);
+    });
+  }
   enqueueAction(input: ActionInput) { return this.db.transaction(() => this.outbox.enqueue(input)); }
   getActionByKey(key: string) { return this.outbox.byKey(key); }
   getAction(id: string) { return this.outbox.find(id); }

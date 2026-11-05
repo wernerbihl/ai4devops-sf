@@ -45,6 +45,20 @@ test('known scheduler no-op survives loss before the adapter receives its promis
  }finally{f.close()}
 });
 
+test('known not-started outcome is atomic with reservation release before controller loss',async()=>{
+ const {createDispatchApi}=await import('../../src/service/dispatch-api.ts');const f=createFixture();
+ try{
+  const recipe=f.store.snapshot().recipes[0]!;f.store.setRecipeReadiness(recipe.id,recipe.currentRevision,{hash:f.recipe.hash,ready:true,reasons:[]},recipe.revision);
+  const release=f.store.releaseUnstarted.bind(f.store);
+  f.store.releaseUnstarted=(...args)=>{release(...args);throw Error('controller lost immediately after release commit')};
+  const scheduler=createScheduler({store:f.store,clock:f.clock,materialize:materializeFixture,readiness:async()=>({ready:true,baseSha:'base',workspacePath:'/fixture',profileId:'profile'}),start:async()=>({kind:'not_started',code:'owner_rejected',recovery:'Restore owner'})});
+  await assert.rejects(createDispatchApi(f.store,scheduler).scheduler.dispatch('manual','not-started'));
+  assert.equal(f.store.getReservations()[0]!.status,'released');f.reopen();
+  const restored=createDispatchApi(f.store,{async dispatch(){throw Error('never redispatch')}});
+  assert.deepEqual(await restored.reconcile({key:'not-started',method:'POST',path:'/v1/dispatch'}),{state:'complete',body:{admitted:false,reason:'owner_rejected'}});
+ }finally{f.close()}
+});
+
 test('unknown original dispatch stays pending after a different key starts another repository',async()=>{
  const {createDispatchApi}=await import('../../src/service/dispatch-api.ts');const f=createFixture();
  try{
@@ -73,12 +87,30 @@ test('reconstructed dispatch reads its exact completed continuation without anot
   f.store.patchSettings({paused:true},f.store.getSettings().revision);
   await x.lifecycle.resumeInput(input.id,{},'answer');
   f.store.patchSettings({paused:false},f.store.getSettings().revision);
-  const scheduler=createScheduler({store:f.store,clock:f.clock,materialize:materializeFixture,continuations:async onSelected=>{await x.lifecycle.dispatchPending(onSelected);throw Error('controller lost after original continuation completed')},readiness:async()=>{throw Error('no new allocation')},start:async()=>{throw Error('no new start')}});
+  const scheduler=createScheduler({store:f.store,clock:f.clock,materialize:materializeFixture,continuations:async dispatchKey=>{await x.lifecycle.dispatchPending(dispatchKey);throw Error('controller lost after original continuation completed')},readiness:async()=>{throw Error('no new allocation')},start:async()=>{throw Error('no new start')}});
   await assert.rejects(createDispatchApi(f.store,scheduler).scheduler.dispatch('manual','continue-original'));
   assert.equal(x.sent.length,1);f.reopen();
   const restored=createDispatchApi(f.store,{async dispatch(){throw Error('never replay continuation')}});
   const snapshot=f.store.snapshot();
   assert.deepEqual(await restored.reconcile({key:'continue-original',method:'POST',path:'/v1/dispatch'}),{state:'complete',body:{admitted:true,attemptId:attempt.id,taskId:attempt.taskId}});
   assert.equal(x.sent.length,1);assert.deepEqual(f.store.snapshot(),snapshot,'reconciliation is read-only');
+ }finally{f.close()}
+});
+
+test('rejected continuation selection cannot claim a later separately admitted completion',async()=>{
+ const {fakeRuntime}=await import('../helpers/fake-ports.ts');const {createDispatchApi}=await import('../../src/service/dispatch-api.ts');
+ const x=fakeRuntime();const {fixture:f}=x;
+ try{
+  await x.scheduler.dispatch('manual');const attempt=f.store.snapshot().attempts[0]!;
+  await x.lifecycle.applyOwnerEvent(attempt.id,{type:'input',identity:x.native,at:f.clock.wallNow().toISOString(),input:{id:'question',prompt:'Continue?',schema:{type:'object'}}});
+  const input=f.store.snapshot().attention.find(a=>a.nativeInputId==='question')!;
+  f.store.patchSettings({paused:true},f.store.getSettings().revision);await x.lifecycle.resumeInput(input.id,{},'answer');
+  const scheduler=createScheduler({store:f.store,clock:f.clock,materialize:materializeFixture,continuations:async dispatchKey=>{
+   assert.equal(await x.lifecycle.dispatchPending(dispatchKey),null);throw Error('controller lost after rejected candidate, before next outcome');
+  },readiness:async()=>{throw Error('no allocation')},start:async()=>{throw Error('no start')}});
+  await assert.rejects(createDispatchApi(f.store,scheduler).scheduler.dispatch('manual','rejected-original'));
+  f.store.patchSettings({paused:false},f.store.getSettings().revision);assert.equal((await x.lifecycle.dispatchPending())?.kind,'started');assert.equal(x.sent.length,1);
+  f.reopen();const restored=createDispatchApi(f.store,{async dispatch(){throw Error('no replay')}});
+  assert.deepEqual(await restored.reconcile({key:'rejected-original',method:'POST',path:'/v1/dispatch'}),{state:'pending'},'later admission belongs only to its actual invocation');
  }finally{f.close()}
 });

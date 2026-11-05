@@ -20,7 +20,7 @@ export interface SchedulerDeps {
   readiness(task: TaskSpec): Promise<PreparedStart | UnavailableStart>;
   /** This port must return started only after proving the external execution exists, never on an accepted request alone. */
   /** Explicit user continuations run before new task admission and are not a new daily/weighted start. */
-  continuations?(onSelected?: (actionId: string) => void): Promise<{ kind: 'started'; attemptId: string } | null>;
+  continuations?(dispatchKey?: string): Promise<{ kind: 'started'; attemptId: string } | null>;
   start(reservation: Reservation): Promise<StartOutcome>;
 }
 export type DispatchResult = { kind: 'started'; attemptId: string }
@@ -89,8 +89,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         }
         return result;
       };
-      let selection = 0; let continuationIndex = 0;
-      const continuation = await deps.continuations?.(requestKey ? actionId => { deps.store.enqueueAction({key:`dispatch:continuation:${requestKey}:${continuationIndex++}`,kind:'dispatch.continuation',payload:{actionId}}); } : undefined);
+      let selection = 0;
+      const continuation = await deps.continuations?.(requestKey);
       if (continuation) return finish(continuation);
       const excluded = new Set<string>();
       for (;;) {
@@ -125,7 +125,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         try { outcome = await deps.start(structuredClone(reservation)); }
         catch { return noop('launch_unknown', 'Reconcile the reserved external execution before retrying', reservation.id); }
         if (outcome.kind === 'not_started') {
-          deps.store.releaseUnstarted(reservation.id); return finish(noop(outcome.code, outcome.recovery));
+          const result = noop(outcome.code, outcome.recovery);
+          deps.store.releaseUnstarted(reservation.id, requestKey ? {
+            key: 'dispatch:outcome:' + requestKey, kind: 'dispatch.outcome', payload: { result },
+          } : undefined);
+          return finish(result);
         }
         if (outcome.kind === 'unknown') return noop(outcome.code, outcome.recovery, reservation.id);
         try { deps.store.confirmStart(reservation.id, outcome.identity); }

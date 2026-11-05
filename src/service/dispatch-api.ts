@@ -18,13 +18,8 @@ export function createDispatchApi(store: FactoryStore, scheduler: Scheduler) {
       }
       return;
     }
-    for (let index = 0; ; index++) {
-      const selected = store.getActionByKey(`dispatch:continuation:${key}:${index}`);
-      if (!selected) break;
-      const action = store.getAction(String(selected.payload.actionId));
-      const bound = action && store.getLifecycleActionBinding(action.id);
-      if (action?.completedAt && bound) return { kind: 'started', attemptId: bound.attemptId };
-    }
+    // Continuation candidate journals are audit only. Only this dispatch invocation's
+    // atomic completion receipt above proves that it admitted a continuation.
   }
   const apiScheduler: Scheduler = {
     async dispatch(trigger, key) {

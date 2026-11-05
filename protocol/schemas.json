@@ -4748,6 +4748,57 @@
         "nextTagIds"
       ]
     },
+    "RepositoryCatalogEntry": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "githubId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "owner": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "defaultBranch": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "githubId",
+        "owner",
+        "name",
+        "url"
+      ]
+    },
+    "RepositorySelectionRequest": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "githubId": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "githubId"
+      ]
+    },
     "TagCreate": {
       "additionalProperties": false,
       "type": "object",

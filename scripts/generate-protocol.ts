@@ -44,6 +44,8 @@ route('get', '/v1/events', 'FactoryEvent', { events: true });
 route('get', '/v1/settings', 'Settings');
 route('patch', '/v1/settings', 'Settings', { body: 'SettingsPatch', versioned: true });
 route('get', '/v1/repositories', array('Repository'));
+route('get', '/v1/repository-catalog', array('RepositoryCatalogEntry'));
+route('post', '/v1/repository-selections', 'Repository', { body: 'RepositorySelectionRequest' });
 route('patch', '/v1/repositories/{id}', 'Repository', { body: 'RepositoryPatch', versioned: true });
 route('patch', '/v1/repositories/{id}/weights', 'Repository', { body: 'WeightsPatch', versioned: true });
 route('get', '/v1/repositories/{id}/rotation-preview', 'RotationPreview');

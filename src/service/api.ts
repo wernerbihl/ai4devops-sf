@@ -51,6 +51,7 @@ export interface PendingRequest { key: string; method: string; path: string }
 export type Reconciliation = { state: 'pending' } | { state: 'complete'; body: unknown }
   | { state: 'failed'; status: ApiFailureStatus; error: ApiError }; // proven definitive no-effect refusal only
 export interface ApiDeps {
+  catalog?: { list(): Promise<import('../github/auth.ts').RepositoryCatalogEntry[]>; select(githubId: string, key: string): Promise<import('../contracts/domain.ts').Repository>; allows?(id: string): boolean };
   maintenanceGate?: MaintenanceGate;
   store: FactoryStore; scheduler: Scheduler; session: SessionPolicy;
   lifecycle?: Pick<Lifecycle, 'requestTakeover' | 'returnControl' | 'resumeInput'>;

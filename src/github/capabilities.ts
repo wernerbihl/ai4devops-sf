@@ -91,7 +91,8 @@ export function repositoryFacts(
   const data = jsonObject(result.data);
   if (
     typeof data.full_name !== 'string' ||
-    data.full_name.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase()
+    data.full_name.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase() ||
+    (repository.id.startsWith('github:') && (!Number.isSafeInteger(data.id) || String(data.id) !== repository.id.slice(7)))
   )
     throw new GitHubFailure('denied', 'GitHub repository identity changed; review the repository allowlist');
   const permissions = jsonObject(data.permissions);

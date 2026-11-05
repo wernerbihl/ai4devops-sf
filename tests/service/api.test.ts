@@ -474,3 +474,32 @@ test('public_readiness_is_session_scoped_sanitized_and_does_not_qualify_or_dispa
     assert.equal((await fetch(api.url + '/readiness', { headers: { origin, cookie: session.cookie } })).status, 404);
   } finally { await api.close(); f.fixture.close(); }
 });
+
+test('repository_catalog_and_explicit_selection_require_authenticated_session_and_csrf', async () => {
+  const fixture = createFixture(); const ports = fakePorts(fixture.store);
+  let selected = 0;
+  const catalog = { async list() { return [{ githubId: '123', owner: 'octo', name: 'project', url: 'https://github.com/octo/project.git', defaultBranch: 'main' }]; },
+    async select(id: string) { selected++; assert.equal(id, '123'); return fixture.store.createRepository({ id: 'github:123', name: 'octo/project', url: 'https://github.com/octo/project.git' }); } };
+  const api = await startApi({ ...ports.deps, catalog });
+  try {
+    const session = api.sessions.provision(origin);
+    const headers = { origin, cookie: session.cookie, 'x-sf-csrf': session.csrfToken, 'content-type': 'application/json', 'idempotency-key': 'select' };
+    assert.equal((await fetch(api.url + '/v1/repository-catalog', { headers })).status, 200);
+    assert.equal((await fetch(api.url + '/v1/repository-selections', { method: 'POST', headers: { ...headers, 'x-sf-csrf': '' }, body: JSON.stringify({ githubId: '123' }) })).status, 403);
+    assert.equal(selected, 0);
+    const response = await fetch(api.url + '/v1/repository-selections', { method: 'POST', headers, body: JSON.stringify({ githubId: '123' }) });
+    assert.equal(response.status, 200); assert.equal((await response.json()).active, false);
+  } finally { await api.close(); fixture.close(); }
+});
+
+test('catalog_only_repository_cannot_be_activated_until_explicitly_selected', async () => {
+  const fixture = createFixture(); const ports = fakePorts(fixture.store);
+  const catalog = { async list() { return []; }, async select() { throw Error('unused'); }, allows() { return false; } };
+  const api = await startApi({ ...ports.deps, catalog });
+  try {
+    const session = api.sessions.provision(origin);
+    const headers = { origin, cookie:session.cookie, 'x-sf-csrf':session.csrfToken, 'content-type':'application/json', 'idempotency-key':'activate-unselected', 'if-match':'1' };
+    const response = await fetch(api.url + '/v1/repositories/repo-1', { method:'PATCH', headers, body:JSON.stringify({active:true}) });
+    assert.equal(response.status, 403); assert.equal(fixture.store.getRepository('repo-1')!.active, false);
+  } finally { await api.close(); fixture.close(); }
+});

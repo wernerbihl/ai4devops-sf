@@ -26,6 +26,7 @@ export type { ActionInput, OutboxAction } from './outbox.ts';
 export type { MaterializationContext, RecipeMaterializer, Submission } from './tasks.ts';
 export interface OpenStoreOptions { clock?: Clock; materialize?: RecipeMaterializer }
 export interface RepositoryCreate { id: string; name: string; url: string; active?: boolean; weights?: Record<string, number> }
+export interface RepositorySelection { githubId: string; accountId: string; login: string; owner: string; name: string; url: string; baseRef: string }
 
 /** Trusted backend storage. Never pass this object or its admin methods to a worker/browser. */
 export class FactoryStore {
@@ -109,6 +110,34 @@ export class FactoryStore {
     });
   }
   getRepository(id: string): Repository | undefined { return this.db.read('repositories', id); }
+  repositorySelections(): RepositorySelection[] {
+    return this.db.sql.prepare('SELECT payload FROM repository_selections ORDER BY rowid').all().map(row => JSON.parse(String(row.payload)) as RepositorySelection);
+  }
+  repositorySelectionReceipt(key: string): { method: 'POST'; path: '/v1/repository-selections'; body: { githubId: string }; repository: Repository } | undefined {
+    const row = this.db.sql.prepare('SELECT payload FROM repository_selection_receipts WHERE request_key = ?').get(key);
+    return row ? JSON.parse(String(row.payload)) : undefined;
+  }
+  selectRepository(selection: RepositorySelection, key?: string): Repository {
+    return this.db.transaction(() => {
+      const { githubId, accountId, login, owner, name, url, baseRef } = selection;
+      ensure(/^\d+$/.test(githubId) && /^\d+$/.test(accountId) && /^[a-z\d][a-z\d-]{0,38}$/i.test(login) && /^[a-z\d][a-z\d-]{0,38}$/i.test(owner) && /^[a-z\d_.-]{1,100}$/i.test(name) && name !== '.' && name !== '..' && url === `https://github.com/${owner}/${name}.git` && /^refs\/heads\/[\w./-]+$/.test(baseRef) && !baseRef.includes('..'), 'repository_identity', 'A verified GitHub repository and safe default branch are required');
+      const id = `github:${githubId}`;
+      const previous = this.repositorySelections().find(item => item.githubId === githubId || item.url.toLowerCase() === url.toLowerCase());
+      if (previous) {
+        ensure(JSON.stringify(previous) === JSON.stringify(selection), 'repository_identity', 'Repository identity or selected account changed');
+        const repository = this.getRepository(id)!;
+        if (key) this.db.sql.prepare('INSERT INTO repository_selection_receipts(request_key, payload) VALUES (?, ?)').run(key, JSON.stringify({ method: 'POST', path: '/v1/repository-selections', body: { githubId }, repository }));
+        return repository;
+      }
+      const existing = this.getRepository(id);
+      ensure(!existing || !existing.active && existing.name === `${owner}/${name}` && existing.url === url, 'repository_identity', 'Repository identity conflicts with an existing repository');
+      ensure(!this.snapshot().repositories.some(item => item.id !== id && item.url.toLowerCase() === url.toLowerCase()), 'repository_identity', 'Repository URL conflicts with an existing repository');
+      const repository = existing ?? this.createRepository({ id, name: `${owner}/${name}`, url });
+      this.db.sql.prepare('INSERT INTO repository_selections(repository_id, payload) VALUES (?, ?)').run(id, JSON.stringify(selection));
+      if (key) this.db.sql.prepare('INSERT INTO repository_selection_receipts(request_key, payload) VALUES (?, ?)').run(key, JSON.stringify({ method: 'POST', path: '/v1/repository-selections', body: { githubId }, repository }));
+      return repository;
+    });
+  }
   patchRepository(id: string, patch: RepositoryPatch, expectedRevision: number): Repository {
     validateContract('RepositoryPatch', patch);
     return this.db.transaction(() => {

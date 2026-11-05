@@ -199,7 +199,7 @@ test('uses SQLite WAL foreign keys and immutable history with exclusive optimist
     second.close();
     const db = new DatabaseSync(f.path);
     assert.equal(db.prepare('PRAGMA journal_mode').get()!.journal_mode, 'wal');
-    assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 6);
+    assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 7);
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     assert.throws(() => db.prepare("UPDATE task_revisions SET payload = '{}' WHERE task_id = ?").run(f.task.id), /immutable/i);
     assert.throws(() => db.prepare("DELETE FROM recipe_revisions WHERE recipe_id = ?").run('recipe-1'), /immutable/i);
@@ -299,4 +299,36 @@ test('manual_submission_to_inactive_repository_does_not_enable_autonomous_work',
     assert.equal(f.store.getRepository('repo-1')!.active, false);
     assert.equal(f.store.getTask(task.id)!.status, 'queued');
   } finally { f.close(); }
+});
+
+test('persists_explicit_repository_selection_atomically_and_rejects_repointing', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'sf-selection-'));
+  const path = join(directory, 'factory.sqlite');
+  let store = openStore(path);
+  const selection = { githubId: '123', accountId: '9', login: 'operator', owner: 'octo', name: 'project', url: 'https://github.com/octo/project.git', baseRef: 'refs/heads/main' };
+  try {
+    const repository = store.selectRepository(selection, 'selection-key');
+    assert.deepEqual(store.repositorySelectionReceipt('selection-key'), { method: 'POST', path: '/v1/repository-selections', body: { githubId: '123' }, repository });
+    assert.equal(repository.id, 'github:123');
+    assert.equal(repository.active, false);
+    assert.throws(() => store.selectRepository({ ...selection, accountId: '10' }));
+    assert.throws(() => store.selectRepository({ ...selection, url: 'https://github.com/octo/other.git', name: 'other' }));
+    store.close(); store = openStore(path);
+    assert.deepEqual(store.repositorySelections(), [selection]);
+    assert.deepEqual(store.repositorySelectionReceipt('selection-key'), { method: 'POST', path: '/v1/repository-selections', body: { githubId: '123' }, repository });
+    assert.equal(store.repositorySelectionReceipt('other-key'), undefined);
+    assert.equal(store.getRepository('github:123')!.active, false);
+    assert.equal(store.getRepository('github:456'), undefined);
+  } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('explicit_selection_can_adopt_only_matching_inactive_catalog_row', () => {
+  const store = openStore(':memory:');
+  const selection = { githubId:'123', accountId:'9', login:'operator', owner:'octo', name:'project', url:'https://github.com/octo/project.git', baseRef:'refs/heads/main' };
+  try {
+    store.createRepository({ id:'github:123', name:'octo/project', url:selection.url });
+    const selected = store.selectRepository(selection, 'adopt');
+    assert.equal(selected.active, false); assert.equal(store.repositorySelections().length, 1);
+    assert.equal(store.repositorySelectionReceipt('adopt')?.repository.id, selected.id);
+  } finally { store.close(); }
 });

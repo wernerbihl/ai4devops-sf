@@ -219,6 +219,8 @@ const SettingsPatch = object({
 const RepositoryPatch = object({ active: T.Optional(T.Boolean()), defaultOwnerId: T.Optional(T.Union([text(), T.Null()])) });
 const WeightsPatch = object({ weights: T.Record(T.String(), T.Integer({ minimum: 0, maximum: 100 })) });
 const RotationPreview = object({ repositoryId: text(), tagIds: strings(), nextTagIds: T.Array(text()), reason: optionalText() });
+const RepositoryCatalogEntry = object({ githubId: text(), owner: text(), name: text(), url: text(), defaultBranch: optionalText() });
+const RepositorySelectionRequest = object({ githubId: text() });
 const TagCreate = object({ displayName: text() });
 const TagPatch = object({ displayName: optionalText(), reassignToTagId: optionalText() });
 const TagArchive = object({ reassignToTagId: text() });
@@ -248,7 +250,7 @@ export const schemas = {
   TaskRecord, WorkflowIdentity, WorkflowStart, WorkflowSnapshot, Attempt, AttentionRequest, ActorScope,
   FindingInput, Grant, ProbeOptions, ProbeEvidence, VerifiedProbeEvidence, ProfileSpec, ProfileEvidence, OwnerEvent, OwnerRpc, OwnerRpcResponse,
   Tag, Repository, RecipeSummary, AuthState, Health, FactorySnapshot, FactoryEvent, Artifact, WorkerRequest, WorkerResponse, WorkerTransport,
-  SettingsPatch, Settings, RepositoryPatch, WeightsPatch, RotationPreview, TagCreate, TagPatch, TagArchive,
+  SettingsPatch, Settings, RepositoryPatch, WeightsPatch, RotationPreview, RepositoryCatalogEntry, RepositorySelectionRequest, TagCreate, TagPatch, TagArchive,
   TaskPatch, RecipeCreate, RecipeValidation, RecipePatch, DispatchResult, AttentionResponse, NativeOpenResult,
   DeviceFlow, Empty, Acknowledgement,
 } as const;

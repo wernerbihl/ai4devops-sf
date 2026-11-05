@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +21,7 @@ import { createScheduler } from '../scheduling/admission.ts';
 import { createLifecycle } from '../scheduling/lifecycle.ts';
 import type { Lifecycle } from '../scheduling/lifecycle.ts';
 import { createGitHubBackend } from '../github/auth.ts';
+import { createRepositoryPolicy } from './repository-policy.ts';
 import { createWorkspaceManager } from '../workspaces/manager.ts';
 import { createCloseout } from '../github/closeout.ts';
 import { OwnerRegistry } from '../owners/registry.ts';
@@ -52,7 +53,7 @@ import { reconcileInstallation } from './reconcile.ts';
 import type { ReconcileRuntime } from './reconcile.ts';
 import type { Health, NativeInput, NativeIdentity, TaskSpec, WorkflowStart } from '../contracts/domain.ts';
 import type { Reservation } from '../scheduling/admission-types.ts';
-import { hasCapabilityGrants } from '../scheduling/eligibility.ts';
+import { createRepositoryOperationAuthorizer } from './repository-authorization.ts';
 export type { Installation } from '../kestra/deployment.ts';
 const promptFor=(start: import('../contracts/domain.ts').NativeStart)=>({text:`Work on this admitted task in the isolated tool workspace /workspaces/task. The native host CWD is pristine; use only sf_read_file, sf_write_file and sf_terminal for repository work. Submit an explicit TaskResult through sf_factory_operation result.submit with attemptId ${start.attemptId}; never treat turn idle as task completion.\n${JSON.stringify({title:start.task.title,goal:start.task.goal,description:start.task.description,acceptanceCriteria:start.task.acceptanceCriteria,context:start.task.context})}`});
 export async function startRuntime(installation: Installation, bootstrap:{loadConfig?:typeof loadRuntimeConfigAsync;readSecret?:typeof readVaultSecretAsync;pair?:(directory:string,id:string)=>ReturnType<typeof createOwnerPairing>;listen?:typeof listenBbOwner}={}) {
@@ -100,23 +101,11 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
     const bb=createBbOwner({...bbChannel,readiness:async()=>({ownerId:'bb',ready:false,reasons:['BB SDK 0.6.104 Send-now bypasses mandatory dispatch admission; execution unsupported before allocation. Use the verified VS Code owner.'],supportedProviders:['copilot','codex'],verifiedProfileIds:[],providers:['copilot','codex'].map(providerId=>({providerId:providerId as 'copilot'|'codex',ready:false,reasons:['No non-bypass dispatch enforcement'],verifiedProfileIds:[]})),version:'0.6.104'})});
     const owners=new OwnerRegistry([['vscode',fleet.owner],['bb',bb]]);
     const preparingTasks=new Map<string,TaskSpec>();
-    const backend=createGitHubBackend({storageDirectory:join(installation.root,'auth'),repositories:config.repositories,...(config.selectedIdentity?{selectedIdentity:config.selectedIdentity}:{}),
-      async authorizeOperation(repositoryId,operation,key){
-        if(!config.repositories.some(r=>r.id===repositoryId&&r.operations.includes(operation)))return false;
-        const state=store.getAdmissionState();
-        const candidates=[...preparingTasks.values(),...state.tasks.map(t=>t.spec)].filter(t=>t.repositoryId===repositoryId);
-        const target=key?.startsWith('workspace-')?candidates.find(t=>key.endsWith(':'+createHash('sha256').update(t.id).digest('hex'))):undefined;
-        const current=(task:TaskSpec)=>!state.settings.paused&&state.repositories.some(r=>r.id===repositoryId&&r.controlMode==='factory'&&(task.source==='manual'||r.active))
-          &&state.recipes.some(r=>r.id===task.recipeId&&r.active)&&state.recipeReadiness.some(r=>r.recipeId===task.recipeId&&r.recipeRevision===task.recipeRevision&&r.ready)
-          &&hasCapabilityGrants(task,state.grants,systemClock);
-        if(operation==='read'&&target)return current(target);
-        const task=state.tasks.find(t=>t.spec.repositoryId===repositoryId&&t.attemptIds.some(id=>{const r=store.getLifecycle(id);return r.reservation.lease.active||r.state.closeout?.phase==='monitoring'}));
-        // Closed read-only API adapter paths can reconcile issued closeout facts after revocation.
-        if(operation==='read')return !!task&&(current(task.spec)||task.attemptIds.some(id=>!!store.getActionByKey('closeout:'+id+':metadata')));
-        if(!task||!current(task.spec))return false;
-        return operation==='contents_write'?task.spec.finishPolicy!=='result':operation==='pull_requests_write'?task.spec.finishPolicy!=='result':task.spec.finishPolicy==='merge_ci'||task.spec.finishPolicy==='merge_bypass';
-      }});
-    const workspace=createWorkspaceManager({factoryRoot:installation.root,gitAuth:backend.git,resolveRepository:async id=>{const repo=store.getRepository(id);const allowed=config.repositories.find(r=>r.id===id);return repo&&allowed?{id,url:repo.url,baseRef:allowed.baseRef}:undefined},
+    const backendOptions: import('../github/auth.ts').GitHubBackendOptions={storageDirectory:join(installation.root,'auth'),repositories:config.repositories,...(config.selectedIdentity?{selectedIdentity:config.selectedIdentity}:{}),
+      authorizeOperation:createRepositoryOperationAuthorizer(store,config.repositories,preparingTasks,systemClock)};
+    const backend=createGitHubBackend(backendOptions);
+    const repositoryPolicy=createRepositoryPolicy(store,config,backend,backendOptions);
+    const workspace=createWorkspaceManager({factoryRoot:installation.root,gitAuth:backend.git,resolveRepository:async id=>repositoryPolicy.resolve(id),
       metadataBoundary:{async assertProtected(){for(const r of store.getReservations().filter(r=>r.lease.active&&r.attempt.native)){const member=await fleet.member(fleet.startFor(r.attempt));const c=await installation.docker.command(['container','inspect',member.worker.config.containerId]);const actual=JSON.parse(c)[0];ensure(actual.Mounts.every((m:any)=>!protectedPaths.some(p=>m.Source===p||p.startsWith(m.Source+'/')||m.Source.startsWith(p+'/'))),'metadata_exposed','Worker mount intersects protected factory metadata')}}}});
     const prepared=(attempt:import('../contracts/domain.ts').Attempt)=>({ready:true as const,baseSha:attempt.baseSha,workspacePath:attempt.workspacePath,profileId:attempt.profileId});
     const retainedWorkspace=async(attempt:import('../contracts/domain.ts').Attempt)=>workspace.withTrustedMetadata(async scope=>{const current=await scope.readWorkspace(store.getTask(attempt.taskId)!.spec.repositoryId,attempt.taskId);return current.path===attempt.workspacePath&&current.baseSha===attempt.baseSha&&(await scope.revalidateWorkspace(current,attempt.baseSha)).kind==='ready'});
@@ -241,7 +230,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       }
       return items;
     }
-    const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,readiness:()=>owners.list(requiredEmpty),secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
+    const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,readiness:()=>owners.list(requiredEmpty),catalog:repositoryPolicy,secrets:()=>backend.secrets(),reconcileRequest:async request=>{if(request.method==='POST'&&request.path==='/v1/repository-selections'){const receipt=repositoryPolicy.reconcile(request.key);return receipt?{state:'complete',body:receipt}:{state:'pending'}}const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
     let maintenanceJob:{kind:'maintenance'|'backup'|'cleanup'|'activation'|'prepare';promise:Promise<unknown>}|undefined;
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();
@@ -383,7 +372,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       }
       if(method==='POST'&&path==='/reconcile')return reconcileInstallation(services);
       if(method==='POST'&&path==='/retry'){ensure(typeof input.attemptId==='string','retry_id','Attempt required');return lifecycle.retryTransient(input.attemptId,{transient:true,reason:'Explicit trusted retry'})}
-      if(method==='POST'&&path==='/refresh'){const next=await loadRuntimeConfigAsync(installation.root,installation.id);ensure(canonical(next.selectedIdentity)===canonical(config.selectedIdentity)&&canonical(next.native)===canonical(config.native)&&canonical(next.allowedOrigins)===canonical(config.allowedOrigins),'runtime_reconfigure','Immutable user/native/origin changes require a new explicit installation');ensure(config.repositories.every(old=>{const replacement=next.repositories.find(r=>r.id===old.id);return !replacement||replacement.owner===old.owner&&replacement.name===old.name}),'repository_identity','Repository identities cannot be repointed');config.repositories.splice(0,config.repositories.length,...next.repositories);config.providerCredentials.splice(0,config.providerCredentials.length,...next.providerCredentials);const catalog=await backend.listRepositories();for(const item of catalog){const existing=store.snapshot().repositories.find(r=>r.id==='github:'+item.githubId||r.url===item.url);if(!existing)store.createRepository({id:config.repositories.find(r=>r.owner===item.owner&&r.name===item.name)?.id??'github:'+item.githubId,name:item.owner+'/'+item.name,url:item.url})}await refreshReadiness();return{repositories:store.snapshot().repositories}}
+      if(method==='POST'&&path==='/refresh'){const next=await loadRuntimeConfigAsync(installation.root,installation.id);ensure(canonical(next.selectedIdentity)===canonical(config.selectedIdentity)&&canonical(next.native)===canonical(config.native)&&canonical(next.allowedOrigins)===canonical(config.allowedOrigins),'runtime_reconfigure','Immutable user/native/origin changes require a new explicit installation');ensure(config.repositories.every(old=>{const replacement=next.repositories.find(r=>r.id===old.id);return !replacement||replacement.owner===old.owner&&replacement.name===old.name}),'repository_identity','Repository identities cannot be repointed');config.repositories.splice(0,config.repositories.length,...next.repositories);repositoryPolicy.restore();config.providerCredentials.splice(0,config.providerCredentials.length,...next.providerCredentials);const catalog=await backend.listRepositories();for(const item of catalog){const existing=store.snapshot().repositories.find(r=>r.id==='github:'+item.githubId||r.url===item.url);if(!existing)store.createRepository({id:config.repositories.find(r=>r.owner===item.owner&&r.name===item.name)?.id??'github:'+item.githubId,name:item.owner+'/'+item.name,url:item.url})}await refreshReadiness();return{repositories:store.snapshot().repositories}}
       throw new Error('Unsupported private command');
       } finally { release(); }
     }});cleanup.push(()=>control.close());

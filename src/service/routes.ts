@@ -45,7 +45,9 @@ export function routes(deps: ApiDeps): Route[] {
     { method: 'GET', path: '/v1/settings', output: 'Settings', run: () => s.getSettings() },
     { method: 'PATCH', path: '/v1/settings', input: 'SettingsPatch', output: 'Settings', versioned: true, run: (b, _id, v) => s.patchSettings(validate('SettingsPatch', b), v!) },
     { method: 'GET', path: '/v1/repositories', output: 'Repository', array: true, run: () => s.snapshot().repositories },
-    { method: 'PATCH', path: '/v1/repositories/:id', input: 'RepositoryPatch', output: 'Repository', versioned: true, run: (b, id, v) => s.patchRepository(id, validate('RepositoryPatch', b), v!) },
+    { method: 'GET', path: '/v1/repository-catalog', output: 'RepositoryCatalogEntry', array: true, run: () => deps.catalog?.list() ?? unavailable('repository catalog') },
+    { method: 'POST', path: '/v1/repository-selections', input: 'RepositorySelectionRequest', output: 'Repository', external: true, check: () => { if (!deps.catalog) unavailable('repository catalog'); }, run: (b, _id, _v, key) => deps.catalog!.select(validate('RepositorySelectionRequest', b).githubId, key) },
+    { method: 'PATCH', path: '/v1/repositories/:id', input: 'RepositoryPatch', output: 'Repository', versioned: true, run: (b, id, v) => { const patch = validate('RepositoryPatch', b); if (patch.active && deps.catalog?.allows && !deps.catalog.allows(id)) throw new ApiFault(403, 'REPOSITORY_NOT_SELECTED', 'Select this repository explicitly from the GitHub catalog first'); return s.patchRepository(id, patch, v!); } },
     { method: 'PATCH', path: '/v1/repositories/:id/weights', input: 'WeightsPatch', output: 'Repository', versioned: true, run: (b, id, v) => s.patchWeights(id, validate('WeightsPatch', b), v!) },
     { method: 'GET', path: '/v1/repositories/:id/rotation-preview', output: 'RotationPreview', run: (_b, id) => {
       exists(s.getRepository(id)); const state = s.getAdmissionState(); const rotation = state.rotations[id]!;

@@ -191,7 +191,9 @@ export class VsCodeOwner implements NativeOwner {
         await this.ensureStarted();
         const root = await this.read<RootState>('ahp-root://');
         const nativeProvider = provider === 'copilot' ? 'copilotcli' : 'codex';
-        ensure(root.agents.find(a => a.provider === nativeProvider)?.protectedResources?.some(r => r.resource === credential.resource), 'owner_auth', 'Provider did not advertise this protected resource');
+        const advertised = root.agents.find(a => a.provider === nativeProvider)?.protectedResources?.find(r => r.resource === credential.resource);
+        ensure(advertised, 'owner_auth', 'Provider did not advertise this protected resource');
+        ensure(!credential.scopes || credential.scopes.every(scope => advertised.scopes_supported?.includes(scope)), 'owner_auth', 'Provider did not advertise the requested credential scopes');
         ensure(credential.token.length > 0 && (credential.expiresIn === undefined || Number.isInteger(credential.expiresIn) && credential.expiresIn > 0), 'owner_auth', 'Provider credential is invalid');
         try {
             await (await this.rpc()).request('authenticate', { channel: 'ahp-root://', ...credential });

@@ -1,0 +1,19 @@
+{
+  "name": "software-factory-auth",
+  "displayName": "Software Factory Authentication",
+  "publisher": "ai4devops",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.146.0"
+  },
+  "main": "./extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "files": [
+    "extension.cjs"
+  ]
+}

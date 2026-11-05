@@ -162,6 +162,7 @@ test('trusted provider authentication uses only advertised protected resource an
         assert.deepEqual((await f.owner.capabilities(f.start.task.required)).supportedProviders, []);
         assert.equal(typeof f.owner.authenticateProvider, 'function', 'managed native model authentication must use public AHP');
         await assert.rejects(f.owner.authenticateProvider('copilot', { resource: 'https://foreign.test', token: 'private' }), /resource/i);
+        await assert.rejects(f.owner.authenticateProvider('copilot', { resource: 'https://api.github.com', token: 'private', scopes: ['repo'] }), /scope/i);
         await f.owner.authenticateProvider('copilot', { resource: 'https://api.github.com', token: 'private', expiresIn: 60 });
         assert.deepEqual((await f.owner.capabilities(f.start.task.required)).supportedProviders, ['copilot']);
         assert.equal(f.host.methods.filter(m => m === 'authenticate').length, 1);

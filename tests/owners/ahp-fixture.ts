@@ -75,7 +75,7 @@ export function fakeHost(options: {
                         protocolVersion: '1.0.0', serverSeq: seq,
                         serverInfo: { name: 'fixture', version: '1' },
                         snapshots: [{ resource: 'ahp-root://', fromSeq: seq, state: rootState = {
-                                    agents: (options.providers ?? [options.provider ?? 'copilotcli']).map(provider => ({ provider, displayName: 'Fixture', description: 'fixture', protectedResources: [{ resource: 'https://api.github.com', authorization_servers: ['https://github.com'] }], models: options.noModels ? [] : [{ id: 'fixture-model', name: 'Fixture' }] })),
+                                    agents: (options.providers ?? [options.provider ?? 'copilotcli']).map(provider => ({ provider, displayName: 'Fixture', description: 'fixture', protectedResources: [{ resource: 'https://api.github.com', authorization_servers: ['https://github.com/login/oauth'], scopes_supported: ['read:user', 'user:email'] }], models: options.noModels ? [] : [{ id: 'fixture-model', name: 'Fixture' }] })),
                                     config: { schema: { type: 'object', properties: { modelCapabilityOverrides: { type: 'object' }, 'http.proxy': { type: 'string' }, 'http.noProxy': { type: 'array' }, systemProxyEnabled: { type: 'boolean' } } }, values: config },
                                     _meta: { hostBuild: { version: '1.145.0-insider', commit } },
                                 } }],

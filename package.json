@@ -16,7 +16,8 @@
     "probe:bb": "node scripts/probe-bb.ts",
     "probe:kestra": "node probes/kestra.ts",
     "probe:isolation": "node probes/isolation.ts",
-    "gates:check": "node scripts/check-gates.ts"
+    "gates:check": "node scripts/check-gates.ts",
+    "companion:package": "node scripts/package-companion.mjs"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@types/node": "24.10.0",
     "@types/ws": "8.18.1",
+    "@vscode/vsce": "4.1.0",
     "typescript": "5.9.3"
   }
 }

@@ -24,7 +24,8 @@ import { expectedImageBuild } from '../install/images.ts';
 import { proxyTopology } from './proxy-topology.ts';
 import { createProxyPlaceholder, finalizeProxyPolicy } from './proxy-policy.ts';
 import type { RuntimeConfig, IsolatedNativeTemplate } from './config.ts';
-import { readVaultSecret, readPrivateFile } from './config.ts';
+import { readPrivateFile } from './config.ts';
+import { loadCompanionCredential } from '../install/companion-auth.ts';
 import { navigationCommits, createNativeNavigation } from '../owners/navigation.ts';
 export const isolatedProfileId = 'vscode-copilot-isolated-worker-v2';
 const workerEnv = ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','LANG=C.UTF-8'];
@@ -52,7 +53,7 @@ export function createNativeFleet(options: { installation: Installation; config:
       ensure(template, 'native_unconfigured', 'No isolated native template is configured');
       ensure(template.proxy.entrypointSha256 === reviewedProxyHash() && template.proxy.allowedAuthorities.length > 0 && template.proxy.allowedAuthorities.every(a => curatedModelAuthorities.has(a)), 'native_proxy', 'Reviewed model proxy source and curated authorities are required');
       const credential = config.providerCredentials.find(c => c.ref === template.credentialRef);
-      ensure(credential && Date.parse(credential.expiresAt) > Date.now() + 30_000 && readVaultSecret(installation.root, credential.ref).length > 0, 'native_auth', 'Current provider credential is unavailable');
+      ensure(credential && (credential.expiresAt === undefined || Date.parse(credential.expiresAt) > Date.now() + 30_000) && loadCompanionCredential(installation.root,credential).token.length > 0, 'native_auth', 'Current provider credential is unavailable');
       ensure((navigationCommits as readonly string[]).includes(template.hostCommit), 'native_version', 'Native host commit unsupported');
       for (const [role,image] of [['native',template.nativeImage],['worker',template.workerImage],['proxy',template.proxy.image]] as const) {
         const actual = JSON.parse(await docker.command(['image','inspect',image]))[0];
@@ -174,7 +175,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     const protectedPaths = [...options.protectedPaths,markerPath,join(parent,'owner.sqlite'),launcher.controlIntentPath,launcher.pauseReceiptPath,policyPath,join(parent,'navigation.json')];
     boundary = createIsolatedNativeBoundary({owner,gate,worker,launcher,docker,modelProxy:proxyControl,image:t.nativeImage,networks:[internal.Id],protectedPaths});
     verify = createProfileVerifier({profiles:[{id:isolatedProfileId,ownerId:'vscode',providerId:'copilot',image:t.nativeImage,networks:[internal.Id],protectedPaths,boundary,mountTargets:targets,nativeState,nativeStateOwnership:{installationId:installation.id,root:stateRoot}}]});
-    const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const expiresIn=Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:readVaultSecret(installation.root,ref.ref).toString(),expiresIn,scopes:ref.scopes})};
+    const authenticate = async()=>{const ref = config.providerCredentials.find(r=>r.ref===t.credentialRef)!;const expiresIn=ref.expiresAt===undefined?undefined:Math.floor((Date.parse(ref.expiresAt)-Date.now())/1000);ensure(expiresIn===undefined||expiresIn>0,'native_auth','Provider credential expired');await owner.authenticateProvider('copilot',{resource:ref.resource,token:loadCompanionCredential(installation.root,ref).token,...(expiresIn===undefined?{}:{expiresIn}),scopes:ref.scopes})};
     return {owner,worker,gate,launcher,boundary,verify,authenticate};
   }
   type Member = Awaited<ReturnType<typeof compose>>;

@@ -6,3 +6,7 @@ cpSync(new URL('../runtime/kestra/', import.meta.url), new URL('../dist/runtime/
 cpSync(new URL('../release/images.json', import.meta.url), new URL('../dist/runtime/kestra/images.json', import.meta.url));
 
 cpSync(new URL('../runtime/model-proxy/', import.meta.url), new URL('../dist/runtime/model-proxy/', import.meta.url), { recursive: true });
+cpSync(new URL('../runtime/vscode-companion/', import.meta.url), new URL('../dist/runtime/vscode-companion/', import.meta.url), { recursive: true });
+
+const { verifyCompanionPackage } = await import('../dist/install/companion-package.js');
+verifyCompanionPackage();

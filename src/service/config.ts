@@ -6,7 +6,7 @@ import type { RepositoryAccess } from '../github/capabilities.ts';
 import { validateRepositories } from '../github/capabilities.ts';
 import type { SelectedIdentity } from '../github/store.ts';
 import { ensure } from '../storage/database.ts';
-export interface ProviderCredentialReference { ref: string; providerId: 'copilot'; resource: string; expiresAt: string; scopes: string[]; }
+export interface ProviderCredentialReference { ref: string; providerId: 'copilot'; resource: string; expiresAt?: string; scopes: string[]; }
 export interface IsolatedNativeTemplate {
   kind: 'vscode-isolated-worker-v2'; nativeImage: string; workerImage: string;
   entrypoint: string; entrypointSha256: string; hostCommit: string;
@@ -42,7 +42,7 @@ export function loadRuntimeConfig(root: string, installationId: string): Runtime
   for (const repo of value.repositories) { keys(repo, ['id','owner','name','operations','baseRef']); ensure(/^refs\/heads\/[\w./-]+$/.test(repo.baseRef) && !repo.baseRef.includes('..'), 'runtime_config', 'Explicit safe repository base ref required'); }
   for (const ref of value.providerCredentials) {
     keys(ref, ['ref','providerId','resource','expiresAt','scopes']);
-    ensure(/^[a-zA-Z0-9_-]{1,100}$/.test(ref.ref) && ref.providerId === 'copilot' && new URL(ref.resource).protocol === 'https:' && Number.isFinite(Date.parse(ref.expiresAt)) && Array.isArray(ref.scopes) && ref.scopes.every(s => typeof s === 'string'), 'runtime_config', 'Invalid provider credential reference');
+    ensure(/^[a-zA-Z0-9_-]{1,100}$/.test(ref.ref) && ref.providerId === 'copilot' && new URL(ref.resource).protocol === 'https:' && (ref.expiresAt === undefined || typeof ref.expiresAt === 'string' && Number.isFinite(Date.parse(ref.expiresAt))) && Array.isArray(ref.scopes) && ref.scopes.every(s => typeof s === 'string'), 'runtime_config', 'Invalid provider credential reference');
   }
   for (const native of value.native) {
     keys(native, ['kind','nativeImage','workerImage','entrypoint','entrypointSha256','hostCommit','pristineDirectory','emptyHome','credentialRef','proxy']);

@@ -20,3 +20,14 @@ test('private runtime configuration refuses secret material and permissive files
     assert.throws(() => m.loadRuntimeConfig(root, 'fixture'), /unknown|secret|config/i);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('provider references can omit an unknown expiry without inventing one', async () => {
+  const {loadRuntimeConfig}=await import('../../src/service/config.ts');
+  const root=mkdtempSync(join(tmpdir(),'sf-config-expiry-'));const path=join(root,'runtime.json');
+  const ref={ref:'copilot',providerId:'copilot',resource:'https://api.github.com',scopes:['read:user']};
+  const config={schemaVersion:1,installationId:'fixture',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[ref],native:[]};
+  try {
+    writeFileSync(path,JSON.stringify(config),{mode:0o600});assert.deepEqual(loadRuntimeConfig(root,'fixture').providerCredentials,[ref]);
+    writeFileSync(path,JSON.stringify({...config,providerCredentials:[{...ref,expiresAt:'invalid'}]}));assert.throws(()=>loadRuntimeConfig(root,'fixture'));
+  } finally {rmSync(root,{recursive:true});}
+});

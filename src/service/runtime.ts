@@ -38,6 +38,7 @@ import { inspectRecordedOwnerReceipt } from '../owners/maintenance-receipt.ts';
 import { stopUninstallNativeResources } from './uninstall-native.ts';
 import { backupInstallationState, verifyInstallationBackup } from '../install/backup.ts';
 import { requireCleanH2Close } from '../kestra/maintenance.ts';
+import { removeInventoriedResources, type InventoriedResource } from '../install/owned-removal.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
 import { createDispatchApi } from './dispatch-api.ts';
 import { acquireInstallationSingletonAsync } from './singleton.ts';
@@ -229,9 +230,10 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
           }
         }
       }
+      return items;
     }
     const api=await startApi({store,maintenanceGate,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
-    let maintenanceJob:{kind:'maintenance'|'backup';promise:Promise<unknown>}|undefined;
+    let maintenanceJob:{kind:'maintenance'|'backup'|'cleanup';promise:Promise<unknown>}|undefined;
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();
       if(method==='GET'&&path==='/readiness')return{health:await health(),owners:await owners.list(requiredEmpty),reconciliation:lastReport};
@@ -262,11 +264,11 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         try {
           await verifyMaintenanceNative('reconfigure');
           if(purpose==='uninstall')await stopUninstallNativeResources({installation,store,broker,config});
-          await verifyMaintenanceNative(purpose);
+          const nativeInventory=await verifyMaintenanceNative(purpose);
           const engineResources=await inspectOwnedKestra(installation,store);
           const relay={id:installation.id,networkId:engineResources.networkId,docker:installation.docker,store};
           await inspectOwnedBrokerRelay(relay);
-          const mounted=await inspectProtectedMounts(installation.root,engineResources.containerId,installation.docker);
+          const mounted=await inspectProtectedMounts(installation.root,engineResources.containerId,installation.docker,nativeInventory.flatMap(item=>item.containers));
           if(mounted.length)return {state:'admission_closed',blocked:mounted.map(identity=>({kind:'effect',identity}))};
           relayBridge?.close();relayBridge=undefined;
           await stopOwnedBrokerRelay(relay);
@@ -275,12 +277,33 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
           blocked=await inspectMaintenanceBlockers(installation.root,store);
           await verifyMaintenanceNative(purpose);
           ensure((await inspectOwnedBrokerRelay(relay)).stopped,'runtime_maintenance','Broker relay stop not proven');
-          ensure((await inspectProtectedMounts(installation.root,engineResources.containerId,installation.docker)).length===0,'runtime_maintenance','An unowned protected mount appeared');
+          ensure((await inspectProtectedMounts(installation.root,engineResources.containerId,installation.docker,nativeInventory.flatMap(item=>item.containers))).length===0,'runtime_maintenance','An unowned protected mount appeared');
           if(blocked.length)return {state:'admission_closed',blocked};
           return {state:'engine_stopped',blocked:[]};
         } catch {return {state:'admission_closed',blocked:[{kind:'effect',identity:'native-or-engine-unverified'}]}}
         })();maintenanceJob={kind:'maintenance',promise:job};
         try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
+      }
+      if(method==='POST'&&path==='/cleanup'){
+        ensure(!stopping&&Object.keys(input).length===0&&maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='uninstall','runtime_maintenance','Original uninstall intent required');
+        const drain=store.getActionByKey('maintenance:drained:'+maintenanceIntent.id);ensure(drain?.kind==='maintenance.drained'&&drain.completedAt&&drain.payload.maintenanceIntentId===maintenanceIntent.id&&drain.payload.purpose==='uninstall','runtime_maintenance','Original admission and relay drain is unconfirmed');
+        if(maintenanceJob){ensure(maintenanceJob.kind==='cleanup','runtime_maintenance','Another maintenance operation is in progress');return maintenanceJob.promise}
+        const cleanupKey='maintenance:cleanup:'+maintenanceIntent.id;const previous=store.getActionByKey(cleanupKey);const previousResult=store.getActionByKey(cleanupKey+':result');
+        const job=(async()=>{
+          if(previous){ensure(previous.completedAt&&previousResult?.kind==='maintenance.cleanup_result'&&previousResult.completedAt&&previousResult.payload.intentId===previous.id&&Array.isArray(previousResult.payload.removed)&&previousResult.payload.removed.every((x:unknown)=>typeof x==='string'),'runtime_maintenance','Original cleanup outcome requires recovery');return {state:'resources_removed',removed:previousResult.payload.removed,blocked:[]}}
+          ensure(!(await inspectMaintenanceBlockers(installation.root,store)).length,'runtime_maintenance','Unresolved writers retain the installation');
+          const natives=await verifyMaintenanceNative('uninstall');const engine=await inspectOwnedKestra(installation,store);ensure(await areOwnedKestraStopped(installation,store),'runtime_maintenance','Original engine remains active');
+          const relay=await inspectOwnedBrokerRelay({id:installation.id,networkId:engine.networkId,docker:installation.docker,store});ensure(relay.stopped,'runtime_maintenance','Original relay remains active');
+          ensure((await inspectProtectedMounts(installation.root,engine.containerId,installation.docker,natives.flatMap(i=>i.containers))).length===0,'runtime_maintenance','Unowned protected mount exists');
+          const resources:InventoriedResource[]=[];
+          for(const item of natives)for(const c of item.containers){ensure(c.stopped&&c.startedAt,'runtime_maintenance','Original native generation remains active');resources.push({kind:'container',id:c.id,fingerprint:c.fingerprint,startedAt:c.startedAt})}
+          for(const id of [relay.containerId,engine.transportContainerId,engine.containerId]){const values=JSON.parse(await installation.docker.command(['container','inspect',id]));const c=values?.[0];ensure(values?.length===1&&c?.Id===id&&c.State?.Running===false&&c.State.Paused===false&&c.State.Pid===0&&c.State.Status==='exited'&&typeof c.State.StartedAt==='string','runtime_maintenance','Owned container generation changed');resources.push({kind:'container',id,fingerprint:fingerprint({id:c.Id,image:c.Image,config:c.Config,host:c.HostConfig,mounts:c.Mounts}),startedAt:c.State.StartedAt})}
+          for(const item of natives)for(const network of item.networks)resources.push({kind:'network',...network});
+          const values=JSON.parse(await installation.docker.command(['network','inspect',engine.networkId]));const n=values?.[0];ensure(values?.length===1&&n?.Id===engine.networkId,'runtime_maintenance','Owned engine network changed');resources.push({kind:'network',id:n.Id,fingerprint:fingerprint({id:n.Id,name:n.Name,internal:n.Internal,driver:n.Driver,labels:n.Labels,options:n.Options??{}})});
+          ensure(canonical(await inspectOwnedKestra(installation,store))===canonical(engine)&&(await inspectOwnedBrokerRelay({id:installation.id,networkId:engine.networkId,docker:installation.docker,store})).containerId===relay.containerId,'runtime_maintenance','Owned engine inventory changed');
+          const action=store.enqueueAction({key:cleanupKey,kind:'maintenance.cleanup',payload:{maintenanceIntentId:maintenanceIntent!.id,resources}});
+          const removed=await removeInventoriedResources({id:installation.id,docker:installation.docker,store,resources});const result=store.enqueueAction({key:cleanupKey+':result',kind:'maintenance.cleanup_result',payload:{intentId:action.id,removed}});store.completeAction(result.id);store.completeAction(action.id);return {state:'resources_removed',removed,blocked:[]};
+        })();maintenanceJob={kind:'cleanup',promise:job};try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
       }
       if(method==='POST'&&path==='/backup'){
         ensure(!stopping&&Object.keys(input).length===0&&maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='reconfigure','runtime_maintenance','Original reconfiguration intent required');
@@ -290,9 +313,9 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         const prior=store.getActionByKey(key);const priorResult=store.getActionByKey(resultKey);
         const verify=async(ignoreAction?:string)=>{
           const blocked=(await inspectMaintenanceBlockers(installation.root,store)).filter(value=>value.kind!=='action'||value.identity!==ignoreAction);ensure(!blocked.length,'runtime_maintenance','Unresolved writers retain the installation');
-          await verifyMaintenanceNative('reconfigure');const resources=await inspectOwnedKestra(installation,store);ensure(await areOwnedKestraStopped(installation,store),'runtime_maintenance','Original engine remains active');
+          const nativeInventory=await verifyMaintenanceNative('reconfigure');const resources=await inspectOwnedKestra(installation,store);ensure(await areOwnedKestraStopped(installation,store),'runtime_maintenance','Original engine remains active');
           const relay=await inspectOwnedBrokerRelay({id:installation.id,networkId:resources.networkId,docker:installation.docker,store});ensure(relay.stopped,'runtime_maintenance','Original broker remains active');
-          ensure((await inspectProtectedMounts(installation.root,resources.containerId,installation.docker)).length===0,'runtime_maintenance','An unowned protected mount exists');
+          ensure((await inspectProtectedMounts(installation.root,resources.containerId,installation.docker,nativeInventory.flatMap(item=>item.containers))).length===0,'runtime_maintenance','An unowned protected mount exists');
         };
         const job=(async()=>{if(prior){ensure(prior.completedAt&&priorResult?.completedAt&&priorResult.payload.intentId===prior.id&&typeof priorResult.payload.directory==='string','runtime_maintenance','Original backup outcome requires recovery');await verify();const closeReceipt=await requireCleanH2Close(installation,store);await verifyInstallationBackup({id:installation.id,root:installation.root,directory:priorResult.payload.directory,store,closeReceiptId:closeReceipt.id});return {state:'complete',directory:priorResult.payload.directory}}await verify();const closeReceipt=await requireCleanH2Close(installation,store);const action=store.enqueueAction({key,kind:'maintenance.backup',payload:{maintenanceIntentId:intentId}});const saved=await backupInstallationState({id:installation.id,root:installation.root,store,docker:installation.docker,imageId:String(closeReceipt.payload.imageId),closeReceiptId:closeReceipt.id});await verify(action.id);ensure((await requireCleanH2Close(installation,store)).id===closeReceipt.id,'runtime_maintenance','H2 close generation changed');await verifyInstallationBackup({id:installation.id,root:installation.root,directory:saved.directory,store,closeReceiptId:closeReceipt.id});const receipt=store.enqueueAction({key:resultKey,kind:'maintenance.backup_result',payload:{intentId:action.id,directory:saved.directory}});store.completeAction(receipt.id);store.completeAction(action.id);return {state:'complete',directory:saved.directory}})();maintenanceJob={kind:'backup',promise:job};
         try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}

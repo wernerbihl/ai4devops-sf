@@ -68,8 +68,8 @@ export function routes(deps: ApiDeps): Route[] {
     { method: 'POST', path: '/v1/recipes/:id/revisions', input: 'RecipeCreate', output: 'RecipeRevision', versioned: true, external: true, check: (id, v) => { recipes(); revision(s.snapshot().recipes.find(r => r.id === id), v); }, run: (b, id, v, key) => { revision(s.snapshot().recipes.find(r => r.id === id), v); return recipes().revise(id, validate('RecipeCreate', b), ctx(key, v)); } },
     { method: 'GET', path: '/v1/recipes/:id', output: 'RecipeRevision', run: (_b, id) => exists(s.getRecipe(id)) },
     { method: 'PATCH', path: '/v1/recipes/:id', input: 'RecipePatch', output: 'RecipeSummary', versioned: true, external: true, check: (id, v) => { recipes(); revision(s.snapshot().recipes.find(r => r.id === id), v); }, run: (b, id, v, key) => recipes().patch(id, validate('RecipePatch', b), ctx(key, v)) },
-    { method: 'POST', path: '/v1/dispatch', input: 'Empty', output: 'DispatchResult', external: true, run: async () => {
-      const r = await deps.scheduler.dispatch('manual');
+    { method: 'POST', path: '/v1/dispatch', input: 'Empty', output: 'DispatchResult', external: true, run: async (_b, _id, _v, key) => {
+      const r = await deps.scheduler.dispatch('manual', key);
       if (r.kind === 'noop') return { admitted: false, reason: r.code };
       const attempt = exists(s.snapshot().attempts.find(a => a.id === r.attemptId)); return { admitted: true, attemptId: attempt.id, taskId: attempt.taskId };
     } },

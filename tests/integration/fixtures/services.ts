@@ -1,15 +1,24 @@
 import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
 import {WebSocketServer} from 'ws';
 import {parse} from 'yaml';
 import {fakeHost} from '../../owners/ahp-fixture.ts';
 import {decodeWorkerRequest,encodeWorkerResponse} from '../../../src/contracts/worker-transport.ts';
-const mode=process.argv[2];const host=mode==='native'?fakeHost():undefined;
+const mode=process.argv[2];const host=mode==='native'?fakeHost(process.argv[3]==='drop-create'?{dropCreate:true,onCreateAccepted(sessionId,chatId){process.send?.({phase:'native-create',identity:{ownerId:'vscode',providerId:'copilot',sessionId,chatId}})}}:{}):undefined;
 let flow:any;let execution:any;let starts=0;let resumes=0;let native:any;
 const server=createServer(async(req,res)=>{try{
   let raw='';for await(const chunk of req)raw+=chunk;const input=raw?JSON.parse(raw):{};
   let output:any;
   if(req.url==='/stats')output=mode==='native'?{creates:host!.creates,sessions:[...host!.sessions.keys()]}:{starts,resumes,executionId:execution?.id};
-  else if(req.url==='/tool'){await host!.tool(input.chatId,'sf_factory_operation',input.input);output={ok:true};}
+  else if(req.url==='/background'){
+    spawn(process.execPath,['-e',`setInterval(()=>require('node:fs').appendFileSync(process.argv[1],'x'),10)`,input.path],{stdio:'ignore',env:{PATH:process.env.PATH}});output={ok:true};
+  }
+  else if(req.url==='/tool'){await host!.tool(input.chatId,input.name??'sf_factory_operation',input.input,input.callId);output={ok:true};}
+  else if(req.url==='/tool-result'){
+    const chat=host!.chats.get(input.chatId)!;
+    const part=chat.activeTurn?.responseParts.find(p=>p.kind==='toolCall'&&p.toolCall.toolCallId===input.callId);
+    output=part?.kind==='toolCall'?part.toolCall:{status:'missing'};
+  }
   else if(req.url==='/park'){native=input.identity;execution.state.current='PAUSED';execution.taskRunList=[{id:'native-1',taskId:'native_start',state:{current:'SUCCESS'}},{id:'pause-1',taskId:'await_result',state:{current:'PAUSED'}}];output={ok:true};}
   else if(req.url==='/engine'){
     const q=input;const url=new URL('http://fixture'+q.path);

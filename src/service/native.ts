@@ -14,7 +14,7 @@ import { createFactoryToolGate } from '../owners/tools.ts';
 import { createVsCodeOwner } from '../owners/vscode.ts';
 import { createManagedVsCodeLauncher } from '../owners/managed.ts';
 import { createIsolatedNativeBoundary, isolatedToolAllowlist } from '../owners/isolated.ts';
-import { IsolatedToolWorker, isolatedToolDefinitions } from '../owners/worker.ts';
+import { IsolatedToolWorker, createIsolatedClientTools } from '../owners/worker.ts';
 import { createProfileVerifier } from '../isolation/verify.ts';
 import { NATIVE_STATE_TARGET, type NativeStateMount } from '../isolation/native-state.ts';
 import { resolveNativeMounts } from '../isolation/mounts.ts';
@@ -126,7 +126,7 @@ export function createNativeFleet(options: { installation: Installation; config:
     };
     const owner = createVsCodeOwner({journalPath:join(parent,'owner.sqlite'),launcher,compatibility:{protocol:'1.0.0',commits:[t.hostCommit]},workspaceUri:async()=>pathToFileURL('/workspaces/task').href,
       navigation:{get connectionAuthority(){return navigation().connectionAuthority},async launch(uri){await createNativeNavigation(navigation().cliPath).launch(uri)}},
-      tools:{definitions:[...gate.definitions,...isolatedToolDefinitions],invoke:(identity,callId,name,input)=>name==='sf_factory_operation'?gate.invoke(identity,callId,name,input):worker.invoke(identity,callId,name,input)},
+      tools:createIsolatedClientTools(gate,worker),
       requireVerifiedProfile:start=>verify.requireVerifiedProfile(start),readinessStarts:async()=>[gate.currentStart()]});
     owner.subscribe(event=>{for(const listener of listeners)listener(event)});
     const protectedPaths = [...options.protectedPaths,markerPath,join(parent,'owner.sqlite'),launcher.controlIntentPath,launcher.pauseReceiptPath,policyPath,join(parent,'navigation.json')];

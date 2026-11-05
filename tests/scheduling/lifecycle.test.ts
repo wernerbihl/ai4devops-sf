@@ -54,6 +54,40 @@ async function fixture(deferIdentity = false) {
 }
 const input = { id: 'native-request', prompt: 'Choose a name', schema: { type: 'object', properties: { name: { type: 'string', minLength: 1 } }, required: ['name'], additionalProperties: false } };
 
+test('deadline observation persists later attempt stops while an earlier physical stop never settles', async () => {
+  const x = await fixture(); const { f } = x;
+  let release!: () => void;
+  const stalled = new Promise<void>(resolve => { release = resolve; });
+  const calls = new Map<string, number>();
+  try {
+    const settings = f.store.getSettings();
+    f.store.patchSettings({ limits: { ...settings.config.limits, concurrency: 2, activeMinutes: 1 } }, settings.revision);
+    x.clock.advance(30000);
+    f.store.createManualTasks({ ...f.request, repositoryIds: ['repo-2'] }, 'second-repository');
+    assert.equal((await x.scheduler.dispatch('manual')).kind, 'started');
+    const second = f.store.snapshot().attempts.find(a => a.id !== x.attempt.id)!;
+    const deps = x.deps();
+    const lifecycle = createLifecycle({ ...deps, owner: identity => ({ ...deps.owner(identity), async quiesce(actual) {
+      calls.set(actual.sessionId, (calls.get(actual.sessionId) ?? 0) + 1);
+      if (actual.sessionId === x.native.sessionId) await stalled;
+      return 'unknown';
+    } }) });
+    x.clock.advance(30000);
+    lifecycle.observeBudgets();
+    await Promise.resolve();
+    assert.equal(f.store.getLifecycle(x.attempt.id).state.stopRequested, true);
+    assert.equal(f.store.getLifecycle(second.id).state.stopRequested, false);
+    x.clock.advance(30000);
+    lifecycle.observeBudgets(); lifecycle.observeBudgets();
+    await Promise.resolve();
+    assert.equal(f.store.getLifecycle(second.id).state.stopRequested, true, 'later deadline must persist without awaiting the earlier stop');
+    assert.equal(f.store.getLifecycle(second.id).reservation.attempt.activeDurationMs, 60000);
+    assert.equal(calls.get(x.native.sessionId), 1, 'one physical stop job per attempt');
+    assert.equal(calls.get(second.native!.sessionId), 1);
+    assert.equal(f.store.getAdmissionState().activeLeases.length, 2, 'unknown writers retain both fences');
+  } finally { release(); await new Promise(resolve => setImmediate(resolve)); f.close(); }
+});
+
 test('expired_lease_does_not_admit_a_second_native_writer', async () => {
   const x = await fixture(); const { f } = x;
   try {

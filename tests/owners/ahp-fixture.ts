@@ -9,6 +9,7 @@ export function fakeHost(options: {
     noModels?: boolean;
     inputQuestions?: ChatInputRequest['questions'];
     dropCreate?: boolean;
+    onCreateAccepted?(sessionId: string, chatId: string): void;
     hideCatalog?: boolean;
     provisional?: boolean;
     normalizeWindows?: boolean;
@@ -106,6 +107,7 @@ export function fakeHost(options: {
                         activeClients: [], chats: [{ resource: chat, title: 'probe', modifiedAt: now, status: 1 }], defaultChat: chat,
                         workingDirectories: options.wrongWorkspace ? ['file:///other'] : options.normalizeWindows ? ['file:///c%3A/probe'] : p.workingDirectories });
                     chats.set(chat, { resource: chat, title: 'probe', status: 1, modifiedAt: now, turns: [] });
+                    options.onCreateAccepted?.(p.channel, chat);
                     if (options.dropCreate && creates === 1)
                         continue;
                     result = null;
@@ -198,10 +200,10 @@ export function fakeHost(options: {
         })();
         return client;
     }
-    async function tool(channel: string, name: string, input: object) {
+    async function tool(channel: string, name: string, input: object, callId = 'actual-call') {
         const state = chats.get(channel)!;
         const turnId = state.activeTurn!.id;
-        for (const action of [{ type: 'chat/toolCallStart', turnId, toolCallId: 'actual-call', toolName: name, displayName: name, contributor: { kind: 'client', clientId: 'software-factory' } }, { type: 'chat/toolCallReady', turnId, toolCallId: 'actual-call', invocationMessage: 'Factory operation', toolInput: JSON.stringify(input), confirmed: 'not-needed' }] as StateAction[]) {
+        for (const action of [{ type: 'chat/toolCallStart', turnId, toolCallId: callId, toolName: name, displayName: name, contributor: { kind: 'client', clientId: 'software-factory' } }, { type: 'chat/toolCallReady', turnId, toolCallId: callId, invocationMessage: 'Factory operation', toolInput: JSON.stringify(input), confirmed: 'not-needed' }] as StateAction[]) {
             chats.set(channel, chatReducer(chats.get(channel)!, action as Parameters<typeof chatReducer>[1]));
             for (const emit of emitters)
                 await emit(channel, action);

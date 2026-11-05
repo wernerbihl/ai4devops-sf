@@ -82,3 +82,55 @@ test('zero existing native runtimes can be provisionable without minting profile
   await fleet.close();
  }finally{f.close()}
 });
+
+test('runtime observes retained deadlines before stalled initial native recovery and keeps admission disabled', async () => {
+ const {openStore}=await import('../../src/storage/store.ts');
+ const {recipeMaterializer}=await import('../../src/recipes/materialize.ts');
+ const {RecipeRegistry,recipePayloadHash}=await import('../../src/recipes/registry.ts');
+ const {parse}=await import('yaml');
+ const {createScheduler}=await import('../../src/scheduling/admission.ts');
+ const {createAttemptBroker}=await import('../../src/broker/operations.ts');
+ const {fingerprint,systemClock}=await import('../../src/storage/database.ts');
+ const {writeFileSync,mkdirSync,readFileSync}=await import('node:fs');
+ const {startRuntime}=await import('../../src/service/runtime.ts');
+ const directory=mkdtempSync(join(tmpdir(),'sf-recovery-deadline-'));
+ const store=openStore(join(directory,'factory.sqlite'),{materialize:recipeMaterializer});
+ const f={directory,store,clock:systemClock,close(){store.close();rmSync(directory,{recursive:true,force:true})}};
+ let runtime:Awaited<ReturnType<typeof startRuntime>>|undefined;
+ let release!:()=>void;let entered!:()=>void;
+ const stalled=new Promise<void>(resolve=>{release=resolve});
+ const recoveryEntered=new Promise<void>(resolve=>{entered=resolve});
+ try {
+  for(const id of ['repo-1','repo-2'])store.createRepository({id,name:id,url:'https://github.com/fixture/'+id+'.git'});
+  const source=parse(readFileSync(new URL('../../recipes/starter/focused-feature.yaml',import.meta.url),'utf8'));
+  source.variables.sf.tagId=store.snapshot().tags[0]!.id;source.variables.sf.required.allowedFinishPolicies=['result'];source.variables.sf.defaultFinishPolicy='result';
+  const registry=new RecipeRegistry(store,{resolveReference:()=>true,executionReadiness:()=>[]});
+  const recipe=registry.createCommand({yaml:JSON.stringify(source),repositoryIds:['repo-1','repo-2']},{key:'recipe'});
+  registry.patchCommand(recipe.recipeId,{active:true,approval:{recipeHash:recipe.hash,payloadHash:recipePayloadHash(recipe),repositoryIds:['repo-1','repo-2'],capabilities:recipe.contract.variables.sf.required}},{key:'approve',expectedRevision:store.snapshot().recipes[0]!.revision});
+  store.createManualTasks({recipeId:recipe.recipeId,repositoryIds:['repo-1','repo-2'],title:'Retained',description:'Restart deadline fixture'},'tasks');
+  const settings=store.getSettings();store.patchSettings({limits:{...settings.config.limits,concurrency:2}},settings.revision);
+  const scheduler=createScheduler({store,clock:systemClock,materialize:recipeMaterializer,readiness:async()=>({ready:true,baseSha:'base',workspacePath:directory,profileId:'profile'}),start:async()=>({kind:'started',identity:{workflow:{executionId:'retained',namespace:'sf',flowId:'flow',revision:'1'}}})});
+  await scheduler.dispatch('manual');await scheduler.dispatch('manual');
+  const reservations=f.store.getReservations();assert.equal(reservations.length,2);
+  const broker=createAttemptBroker({store:f.store,clock:f.clock,signingKey:Buffer.alloc(32,7)});
+  const r=reservations[0]!;const start=broker.nativeStart(r.attempt.id,'retained-start');
+  f.store.broker.claim({attemptId:r.attempt.id,fence:r.lease.fence,key:'retained-start',payload:{operation:'native.start',payload:start,idempotencyKey:'retained-start'}});
+  const owner='rt-'+fingerprint({installation:'fixture',task:start.task.id}).slice(0,24);
+  const parent=join(f.directory,'native-state',owner);mkdirSync(join(parent,'data'),{recursive:true,mode:0o700});
+  writeFileSync(join(parent,'owner.json'),JSON.stringify({schemaVersion:1,installationId:'fixture',runtimeOwnerId:owner,taskId:start.task.id,source:join(parent,'data')}),{mode:0o600});
+  mkdirSync(join(f.directory,'vault'),{mode:0o700});
+  for(const name of ['broker-signing','private-control'])writeFileSync(join(f.directory,'vault',name),Buffer.alloc(32,7),{mode:0o600});
+  writeFileSync(join(f.directory,'runtime.json'),JSON.stringify({schemaVersion:1,installationId:'fixture',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[{ref:'provider',providerId:'copilot',resource:'https://api.github.com',expiresAt:'2099-01-01T00:00:00Z',scopes:[]}],native:[{kind:'vscode-isolated-worker-v2',nativeImage:'native@sha256:'+'a'.repeat(64),workerImage:'worker@sha256:'+'b'.repeat(64),entrypoint:'/opt/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js',entrypointSha256:'c'.repeat(64),hostCommit:'e576c7bbeb39772a1d1ebe472545def0d93e6d8b',pristineDirectory:'/workspaces/task',emptyHome:'/opt/software-factory/empty-home',credentialRef:'provider',proxy:{image:'proxy@sha256:'+'d'.repeat(64),entrypoint:'/opt/sf/proxy.cjs',entrypointSha256:'e'.repeat(64),allowedAuthorities:['api.githubcopilot.com:443']}}]}),{mode:0o600});
+  const pending=startRuntime({id:'fixture',root:f.directory,docker:{async command(args){if(args[0]==='network'&&args[1]==='inspect'&&args[2]===owner+'-internal'){entered();await stalled;}throw Error('Fixture has no provisioned images')}},secrets:{async loadOrCreate(){throw Error('unused')}}});
+  await Promise.race([recoveryEntered,new Promise((_,reject)=>setTimeout(()=>reject(Error('recovery did not reach external inspection')),2000))]);
+  let stopped=false;
+  for(let i=0;i<20;i++){
+   if(reservations.every(r=>f.store.getLifecycle(r.attempt.id).state.stopRequested)){stopped=true;break}
+   await new Promise(resolve=>setTimeout(resolve,30));
+  }
+  release();runtime=await pending;
+  assert.equal(stopped,true,'retained active epochs must be accounted and stopped while initial recovery is still blocked');
+  assert.equal(f.store.getReservations().length,2,'startup recovery never admits new work');
+  assert.equal(f.store.getAdmissionState().activeLeases.length,2,'unknown physical writers retain their original fences');
+ } finally {release();await runtime?.stop();f.close()}
+});

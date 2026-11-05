@@ -20,12 +20,12 @@ export interface SchedulerDeps {
   readiness(task: TaskSpec): Promise<PreparedStart | UnavailableStart>;
   /** This port must return started only after proving the external execution exists, never on an accepted request alone. */
   /** Explicit user continuations run before new task admission and are not a new daily/weighted start. */
-  continuations?(): Promise<{ kind: 'started'; attemptId: string } | null>;
+  continuations?(onSelected?: (actionId: string) => void): Promise<{ kind: 'started'; attemptId: string } | null>;
   start(reservation: Reservation): Promise<StartOutcome>;
 }
 export type DispatchResult = { kind: 'started'; attemptId: string }
   | { kind: 'noop'; code: string; recovery: string; reservationId?: string };
-export interface Scheduler { dispatch(trigger: 'takt' | 'manual' | 'resume' | 'lease_released'): Promise<DispatchResult> }
+export interface Scheduler { dispatch(trigger: 'takt' | 'manual' | 'resume' | 'lease_released', requestKey?: string): Promise<DispatchResult> }
 interface Selection { task: TaskSpec; record?: TaskRecord; repository: Repository; candidate: Omit<AdmissionCandidate, 'prepared'> }
 const noop = (code: string, recovery: string, reservationId?: string): DispatchResult => ({ kind: 'noop', code, recovery, ...(reservationId ? { reservationId } : {}) });
 
@@ -81,21 +81,30 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     return null;
   }
   return {
-    async dispatch(_trigger): Promise<DispatchResult> {
-      const continuation = await deps.continuations?.();
-      if (continuation) return continuation;
+    async dispatch(_trigger, requestKey): Promise<DispatchResult> {
+      const finish = (result: DispatchResult): DispatchResult => {
+        if (requestKey && !(result.kind === 'noop' && result.reservationId)) {
+          const receipt = deps.store.enqueueAction({ key: 'dispatch:outcome:' + requestKey, kind: 'dispatch.outcome', payload: { result } });
+          deps.store.completeAction(receipt.id);
+        }
+        return result;
+      };
+      let selection = 0; let continuationIndex = 0;
+      const continuation = await deps.continuations?.(requestKey ? actionId => { deps.store.enqueueAction({key:`dispatch:continuation:${requestKey}:${continuationIndex++}`,kind:'dispatch.continuation',payload:{actionId}}); } : undefined);
+      if (continuation) return finish(continuation);
       const excluded = new Set<string>();
       for (;;) {
         const state = deps.store.getAdmissionState();
-        if (state.settings.paused) return noop('paused', 'Resume the factory');
-        if (state.activeLeases.length >= state.settings.config.limits.concurrency) return noop('capacity', 'Wait for an active lease to be released');
-        if (!quotaAvailable(state.quota, state.settings.config.limits.startsPerDay)) return noop('day_limit', 'Wait for the next local calendar day');
+        if (state.settings.paused) return finish(noop('paused', 'Resume the factory'));
+        if (state.activeLeases.length >= state.settings.config.limits.concurrency) return finish(noop('capacity', 'Wait for an active lease to be released'));
+        if (!quotaAvailable(state.quota, state.settings.config.limits.startsPerDay)) return finish(noop('day_limit', 'Wait for the next local calendar day'));
         const selected = choose(state, excluded);
-        if (!selected) return noop('no_eligible_work', 'Activate a repository or resolve recipe, owner and capability readiness');
+        if (!selected) return finish(noop('no_eligible_work', 'Activate a repository or resolve recipe, owner and capability readiness'));
         const key = selected.record ? selected.task.id : `fresh:${selected.repository.id}:${selected.task.recipeId}`;
         // Capture the calendar day before readiness; reserve rejects a midnight crossing.
         const dayKey = deps.clock.localDayKey(deps.clock.wallNow());
         let prepared: PreparedStart | UnavailableStart;
+        if (requestKey) deps.store.enqueueAction({key:`dispatch:selection:${requestKey}:${selection++}`,kind:'dispatch.selection',payload:{taskId:selected.task.id,recipeRevision:selected.task.recipeRevision,repositoryId:selected.repository.id,taskRevision:selected.record?.revision??null,stateToken:state.token}});
         try { prepared = await deps.readiness(structuredClone(selected.task)); }
         catch { prepared = { ready: false, code: 'owner_unavailable', recovery: 'Reconnect the assigned owner and verify its isolation profile' }; }
         if (!prepared.ready) {
@@ -107,21 +116,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           continue;
         }
         let reservation: Reservation;
-        try { reservation = deps.store.reserveStart({ ...selected.candidate, prepared }, dayKey); }
+        try { reservation = deps.store.reserveStart({ ...selected.candidate, prepared }, dayKey, requestKey); }
         catch (error) {
-          if (error instanceof StoreError) return noop(error.code, error.message);
+          if (error instanceof StoreError) return finish(noop(error.code, error.message));
           throw error;
         }
         let outcome: StartOutcome;
         try { outcome = await deps.start(structuredClone(reservation)); }
         catch { return noop('launch_unknown', 'Reconcile the reserved external execution before retrying', reservation.id); }
         if (outcome.kind === 'not_started') {
-          deps.store.releaseUnstarted(reservation.id); return noop(outcome.code, outcome.recovery);
+          deps.store.releaseUnstarted(reservation.id); return finish(noop(outcome.code, outcome.recovery));
         }
         if (outcome.kind === 'unknown') return noop(outcome.code, outcome.recovery, reservation.id);
         try { deps.store.confirmStart(reservation.id, outcome.identity); }
         catch (error) { return noop(error instanceof StoreError ? error.code : 'confirmation_unknown', 'Reconcile the proven external start and retained reservation', reservation.id); }
-        return { kind: 'started', attemptId: reservation.attempt.id };
+        return finish({ kind: 'started', attemptId: reservation.attempt.id });
       }
     },
   };

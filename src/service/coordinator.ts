@@ -15,6 +15,7 @@ export function createCoordinator(options: CoordinatorOptions) {
   let stopped = true; let dispatching = false; let controlling = false; let reconciling = false;
   let takt: NodeJS.Timeout | undefined; let control: NodeJS.Timeout | undefined;
   let scheduledTaktMs: number | undefined;
+  let admission = false;
   function refreshTakt() {
     if (stopped) return;
     try {
@@ -28,7 +29,7 @@ export function createCoordinator(options: CoordinatorOptions) {
     } catch { options.onFailure?.('control'); }
   }
   async function dispatch(trigger: 'takt' | 'manual' | 'resume' | 'lease_released') {
-    if (stopped || dispatching) return;
+    if (stopped || !admission || dispatching) return;
     dispatching = true;
     try { await options.dispatch(trigger); } catch { options.onFailure?.('dispatch'); } finally { dispatching = false; }
   }
@@ -44,13 +45,15 @@ export function createCoordinator(options: CoordinatorOptions) {
   }
   return {
     dispatch, check, reconcile,
-    start() {
+    start(initial: { admission?: boolean } = {}) {
       if (!stopped) return;
       stopped = false;
+      admission = initial.admission !== false;
       refreshTakt();
       control = setInterval(() => { refreshTakt(); void check(); void reconcile(); }, options.controlMs);
       void dispatch('resume');
     },
+    enableAdmission() { if (stopped || admission) return; admission = true; void dispatch('resume'); },
     stop() { stopped = true; clearInterval(takt); clearInterval(control); scheduledTaktMs = undefined; },
   };
 }

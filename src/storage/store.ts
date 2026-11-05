@@ -183,7 +183,13 @@ export class FactoryStore {
   getRotationState(repositoryId: string) { return this.db.transaction(() => this.admission.rotation(repositoryId)); }
   getQuotaState() { return this.db.transaction(() => this.admission.quota()); }
   getReservations(): Reservation[] { return this.db.transaction(() => this.admission.reservations()); }
-  reserveStart(candidate: AdmissionCandidate, dayKey: string) { return this.db.transaction(() => this.admission.reserve(candidate, dayKey)); }
+  reserveStart(candidate: AdmissionCandidate, dayKey: string, dispatchKey?: string) {
+    return this.db.transaction(() => {
+      const reservation = this.admission.reserve(candidate, dayKey);
+      if (dispatchKey) this.outbox.enqueue({key:'dispatch:reservation:'+dispatchKey,kind:'dispatch.reservation',payload:{reservationId:reservation.id,taskId:reservation.task.spec.id,attemptId:reservation.attempt.id}});
+      return reservation;
+    });
+  }
   confirmStart(id: string, identity: ExternalStartIdentity): void {
     // Persist immutable proof first, so accounting can resume after an interrupted confirmation.
     this.db.transaction(() => this.admission.rememberExternal(id, identity));
@@ -210,6 +216,7 @@ export class FactoryStore {
   finishLifecycleAction(actionId: string, attemptId: string, fence: number, state: LifecycleState, activeDurationMs: number, effectToken: string): void { this.db.transaction(() => this.lifecycle.finishAction(actionId, attemptId, fence, state, activeDurationMs, effectToken)); }
   enqueueAction(input: ActionInput) { return this.db.transaction(() => this.outbox.enqueue(input)); }
   getActionByKey(key: string) { return this.outbox.byKey(key); }
+  getAction(id: string) { return this.outbox.find(id); }
   /** Atomic intent-before-effect claim. Existing intents never authorize another blind external write. */
   claimAction(input: ActionInput) { return this.db.transaction(() => { const fresh = !this.outbox.byKey(input.key); return { action: this.outbox.enqueue(input), fresh }; }); }
   saveCloseout(attemptId: string, result: import('../contracts/domain.ts').TaskResult | undefined, outcome: import('../contracts/domain.ts').CloseoutResult, release: boolean) { return this.db.transaction(() => this.lifecycle.closeout(attemptId, result, outcome, release)); }

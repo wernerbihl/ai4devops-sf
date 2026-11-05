@@ -27,6 +27,7 @@ import { createOwnerPairing, listenBbOwner, createBbNavigationAuthority } from '
 import { startApi } from './api.ts';
 import { createCoordinator } from './coordinator.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
+import { createDispatchApi } from './dispatch-api.ts';
 import { acquireInstallationSingleton } from './singleton.ts';
 import { startPrivateControl } from './control.ts';
 import { loadRuntimeConfig, readVaultSecret } from './config.ts';
@@ -110,7 +111,7 @@ export async function startRuntime(installation: Installation) {
       }
     }
     const workflowStart=(r:Reservation):WorkflowStart=>({idempotencyKey:`runtime:start:${r.id}`,attemptId:r.attempt.id,recipe:store.getRecipeRevision(r.task.spec.recipeId,r.task.spec.recipeRevision)!,inputs:{},scopeId:r.id,fence:r.lease.fence});
-    const scheduler=createScheduler({store,clock:systemClock,materialize:recipeMaterializer,continuations:()=>lifecycle.dispatchPending(),
+    const scheduler=createScheduler({store,clock:systemClock,materialize:recipeMaterializer,continuations:onSelected=>lifecycle.dispatchPending(onSelected),
       async readiness(task){if(stopping||!engine)return{ready:false,code:'engine_unavailable',recovery:engineReason};const reasons=await fleet.provisionability(task);if(reasons.length)return{ready:false,code:'native_unavailable',recovery:reasons.join('; ')};preparingTasks.set(task.id,task);try{const value=await workspace.prepareWorkspace(task);return{ready:true,baseSha:value.baseSha,workspacePath:value.path,profileId:isolatedProfileId}}finally{preparingTasks.delete(task.id)}},
       async start(reservation){ensure(engine&&!stopping,'runtime_stopping','Engine unavailable');const action=store.enqueueAction({key:`runtime:start:${reservation.id}`,kind:'runtime.start',payload:{reservationId:reservation.id}});const workflow=await engine.ensureExecution(workflowStart(reservation));store.confirmStart(reservation.id,{workflow});store.completeAction(action.id);return{kind:'started',identity:{workflow}}}});
     try {const handle=await ensureKestra(installation);const client=new KestraClient({...handle,authority:createKestraAuthority({broker,store})});engine=client;cleanup.push(()=>client.close());const bridge=await startPrivateBrokerBridge({installation,kestra:handle,broker:await startWorkerBroker({broker}),...(installation.docker instanceof ProcessDocker?{streaming:new ProcessStreamingDocker(installation.docker.executable)}:{})});cleanup.push(()=>bridge.close());engineReason='';} catch {engine=undefined;engineReason='Pinned private Kestra deployment/transport is unavailable; inspect owned installation assets and bind support';}
@@ -134,13 +135,54 @@ export async function startRuntime(installation: Installation) {
       }
     }
     const services:ReconcileRuntime={store,...(engine?{engine}:{}),lifecycle,closeout,broker,workflowStart,recoverNativeWrites};
-    await refreshReadiness();
-    let lastReport=await reconcileInstallation(services);
-    const health=async():Promise<Health>=>({schemaVersion:1,ready:!stopping&&!!engine&&config.native.length>0&&store.snapshot().recipes.some(r=>r.ready),reasons:[...(stopping?['Runtime is stopping']:[]),...(engineReason?[engineReason]:[]),...(!config.native.length?['No pinned isolated native/worker/proxy template is provisioned']:[]),...(!store.snapshot().recipes.some(r=>r.ready)?['No approved provisionable recipe is ready']:[])],version:'0.1.0'});
+    let recovering = true;
+    let lastReport = { confirmed: [] as string[], completed: [] as string[], retained: [] as string[] };
+    const health=async():Promise<Health>=>({schemaVersion:1,ready:!stopping&&!recovering&&!!engine&&config.native.length>0&&store.snapshot().recipes.some(r=>r.ready),reasons:[...(stopping?['Runtime is stopping']:[]),...(recovering?['Initial recovery is pending']:[]),...(engineReason?[engineReason]:[]),...(!config.native.length?['No pinned isolated native/worker/proxy template is provisioned']:[]),...(!store.snapshot().recipes.some(r=>r.ready)?['No approved provisionable recipe is ready']:[])],version:'0.1.0'});
     let priorLeases=store.getAdmissionState().activeLeases.length;
-    const coordinator=createCoordinator({taktMs:()=>store.getSettings().config.taktSeconds*1000,controlMs:250,dispatch:trigger=>scheduler.dispatch(trigger),control:async()=>{try{await lifecycle.checkBudgets()}finally{for(const r of store.getReservations().filter(r=>r.lease.active&&!r.attempt.native&&store.getLifecycle(r.attempt.id).state.stopRequested)){try{const m=await fleet.member(fleet.startFor(r.attempt));m.gate.suspend();await Promise.all([m.launcher.stop?.(),m.worker.pause()])}catch{}}}},async reconcile(){for(const r of store.getReservations().filter(r=>r.lease.active&&r.attempt.native&&store.broker.write(r.attempt.id,r.lease.fence)?.state==='done')){try{await owners.get(r.attempt.native!.ownerId).snapshot(r.attempt.native!)}catch{}}lastReport=await reconcileInstallation(services);const leases=store.getAdmissionState().activeLeases.length;if(leases<priorLeases)void coordinator.dispatch('lease_released');priorLeases=leases}});cleanup.push(()=>coordinator.stop());
+    const unboundStops = new Map<string, Promise<void>>();
+    const coordinator=createCoordinator({
+      taktMs:()=>store.getSettings().config.taktSeconds*1000, controlMs:250,
+      dispatch:trigger=>scheduler.dispatch(trigger),
+      async control() {
+        lifecycle.observeBudgets();
+        // Construction/physical stop of a native set without a bound identity may itself hang.
+        // Each attempt owns its job; neither it nor another attempt owns accounting observation.
+        for (const r of store.getReservations().filter(r=>r.lease.active&&!r.attempt.native&&store.getLifecycle(r.attempt.id).state.stopRequested)) {
+          if (unboundStops.has(r.attempt.id)) continue;
+          const job=(async()=>{
+            try {
+              const m=await fleet.member(fleet.startFor(r.attempt));
+              const current=store.getLifecycle(r.attempt.id);
+              if(!current.reservation.lease.active||current.reservation.lease.fence!==r.lease.fence||!current.state.stopRequested)return;
+              m.gate.suspend();
+              await Promise.all([m.launcher.stop?.(),m.worker.pause()]);
+            } catch { /* Unknown writers retain their stop intent and fence. */ }
+          })().finally(()=>{unboundStops.delete(r.attempt.id)});
+          unboundStops.set(r.attempt.id,job);
+        }
+      },
+      async reconcile() {
+        if(recovering)return;
+        for(const r of store.getReservations().filter(r=>r.lease.active&&r.attempt.native&&store.broker.write(r.attempt.id,r.lease.fence)?.state==='done')) {
+          try {await owners.get(r.attempt.native!.ownerId).snapshot(r.attempt.native!)} catch {}
+        }
+        lastReport=await reconcileInstallation(services);
+        const leases=store.getAdmissionState().activeLeases.length;
+        if(leases<priorLeases)void coordinator.dispatch('lease_released');
+        priorLeases=leases;
+      }
+    });
+    cleanup.push(()=>coordinator.stop());
+    // Retained writers need conservative deadline observation even while initial recovery waits.
+    // No dispatch/continuation admission is enabled until that initial recovery completes.
+    coordinator.start({admission:false});
+    await coordinator.check();
+    await refreshReadiness();
+    lastReport=await reconcileInstallation(services);
+    recovering=false;
     const lifecycleApi=createLifecycleApi(store,lifecycle);
-    const api=await startApi({store,scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,secrets:()=>backend.secrets(),reconcileRequest:async request=>{const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
+    const dispatchApi=createDispatchApi(store,scheduler);
+    const api=await startApi({store,scheduler:dispatchApi.scheduler,lifecycle:lifecycleApi.lifecycle,session:{allowedOrigins:config.allowedOrigins},auth:backend.authApi,recipes:new C5RecipePort(registry),owner:lifecycleApi.owner,health,secrets:()=>backend.secrets(),reconcileRequest:async request=>{const dispatchResult=await dispatchApi.reconcile(request);if(dispatchResult.state!=='pending')return dispatchResult;const lifecycleResult=await lifecycleApi.reconcile(request);if(lifecycleResult.state!=='pending')return lifecycleResult;const result=registry.reconcile(request);return result.state==='pending'?backend.reconcileRequest(request):result},listen:{host:'127.0.0.1',port:config.apiPort??0}});cleanup.push(()=>api.close());
     const control=await startPrivateControl({root:installation.root,key:controlKey,async handle(method,path,input){
       if(method==='GET'&&path==='/health')return health();
       if(method==='GET'&&path==='/readiness')return{health:await health(),owners:await owners.list(requiredEmpty),reconciliation:lastReport};
@@ -151,7 +193,7 @@ export async function startRuntime(installation: Installation) {
       if(method==='POST'&&path==='/refresh'){const next=loadRuntimeConfig(installation.root,installation.id);ensure(canonical(next.selectedIdentity)===canonical(config.selectedIdentity)&&canonical(next.native)===canonical(config.native)&&canonical(next.allowedOrigins)===canonical(config.allowedOrigins),'runtime_reconfigure','Immutable user/native/origin changes require a new explicit installation');ensure(config.repositories.every(old=>{const replacement=next.repositories.find(r=>r.id===old.id);return !replacement||replacement.owner===old.owner&&replacement.name===old.name}),'repository_identity','Repository identities cannot be repointed');config.repositories.splice(0,config.repositories.length,...next.repositories);config.providerCredentials.splice(0,config.providerCredentials.length,...next.providerCredentials);const catalog=await backend.listRepositories();for(const item of catalog){const existing=store.snapshot().repositories.find(r=>r.id==='github:'+item.githubId||r.url===item.url);if(!existing)store.createRepository({id:config.repositories.find(r=>r.owner===item.owner&&r.name===item.name)?.id??'github:'+item.githubId,name:item.owner+'/'+item.name,url:item.url})}await refreshReadiness();return{repositories:store.snapshot().repositories}}
       throw new Error('Unsupported private command');
     }});cleanup.push(()=>control.close());
-    coordinator.start();
+    coordinator.enableAdmission();
     return {store,api,controlUrl:control.url,scheduler,lifecycle,broker,owners,health,reconcile:()=>reconcileInstallation(services),async stop(){if(stopping)return;stopping=true;coordinator.stop();unsubscribe();for(const r of store.getReservations().filter(r=>r.lease.active&&r.attempt.native)){try{await owners.get(r.attempt.native!.ownerId).quiesce(r.attempt.native!)}catch{}}for(const close of cleanup.reverse()){try{await close()}catch{}}}};
   } catch(error){for(const close of cleanup.reverse()){try{await close()}catch{}}throw error}
 }

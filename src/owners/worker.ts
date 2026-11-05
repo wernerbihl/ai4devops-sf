@@ -4,6 +4,7 @@ import type { NativeIdentity, NativeStart } from '../contracts/domain.ts';
 import type { DockerPort } from '../kestra/deployment.ts';
 import type { FactoryStore } from '../storage/store.ts';
 import type { FactoryToolGate } from './tools.ts';
+import type { NativeClientTools } from './vscode.ts';
 import { canonical, ensure, fingerprint, systemClock } from '../storage/database.ts';
 import { resolveNativeMounts, type NativeMountTarget } from '../isolation/mounts.ts';
 
@@ -24,6 +25,15 @@ export const isolatedToolDefinitions: ToolDefinition[] = [
   { name: 'sf_write_file', description: 'Write a UTF-8 file in an approved writable task root, at most 128 KiB.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } },
   { name: 'sf_terminal', description: 'Run a command in the isolated task worktree. No networking, credentials or native control access. Bounded to 60 seconds and 128 KiB output.', inputSchema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
 ];
+/** Trusted AHP context supplies identity/callId; model input never supplies execution authority. */
+export function createIsolatedClientTools(gate: FactoryToolGate, worker: IsolatedToolWorker): NativeClientTools {
+  return {
+    definitions: [...gate.definitions, ...isolatedToolDefinitions],
+    invoke: (identity, callId, name, input) => name === 'sf_factory_operation'
+      ? gate.invoke(identity, callId, name, input)
+      : worker.invoke(identity, callId, name, input),
+  };
+}
 export interface WorkerConfiguration { containerId: string; image: string; runtimeOwnerId: string; nativeContainerId: string; mountTargets: NativeMountTarget[]; }
 export class IsolatedToolWorker {
   readonly config: WorkerConfiguration;

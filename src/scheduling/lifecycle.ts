@@ -46,7 +46,9 @@ export interface Lifecycle {
   resumeInput(requestId: string, value: unknown, key: string): Promise<void>;
   retryTransient(attemptId: string, failure: TransientFailure): Promise<Attempt | null>;
   checkBudgets(): Promise<void>;
-  dispatchPending(): Promise<{ kind: 'started'; attemptId: string } | null>;
+  /** Account and persist deadline stop intent synchronously; physical stop jobs never own this lane. */
+  observeBudgets(): void;
+  dispatchPending(onSelected?: (actionId: string) => void): Promise<{ kind: 'started'; attemptId: string } | null>;
   reconnect(): Promise<void>;
   waitForCI(attemptId: string): Promise<void>;
   /** Trusted C8 handoff: quiesce but retain writer lease for protected metadata operations. */
@@ -58,6 +60,7 @@ export interface Lifecycle {
 /** Trusted source controller. HTTP/worker callers receive none of its persistence capabilities. */
 export function createLifecycle(deps: LifecycleDeps): Lifecycle {
   const { store, clock } = deps; const epoch = store.getLifecycleEpoch();
+  const budgetStops = new Map<string, Promise<void>>();
   // SQLite transitions coordinate effects; external promises never own a controller-wide lane.
   const operation = <T>(fn: () => Promise<T>): Promise<T> => fn();
   const record = (id: string) => store.getLifecycle(id);
@@ -174,9 +177,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     await checkBudgets();
     return record(r.attempt.id).reservation.attempt;
   }
-  async function dispatchPending(): Promise<{ kind: 'started'; attemptId: string } | null> {
+  async function dispatchPending(onSelected?: (actionId: string) => void): Promise<{ kind: 'started'; attemptId: string } | null> {
     for (const action of store.pendingActions().filter(a => lifecycleActionKinds.has(a.kind))) {
-      try { const attempt = await runAction(action); if (attempt) return { kind: 'started', attemptId: attempt.id }; }
+      try { onSelected?.(action.id); const attempt = await runAction(action); if (attempt) return { kind: 'started', attemptId: attempt.id }; }
       catch (error) { if (!(error instanceof StoreError)) throw error; }
     }
     return null;
@@ -325,7 +328,8 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
       try { return await runAction(action); } catch (error) { if (!(error instanceof StoreError)) throw error; return null; }
     }),
     checkBudgets: () => operation(checkBudgets),
-    dispatchPending: () => operation(dispatchPending),
+    observeBudgets,
+    dispatchPending: onSelected => operation(() => dispatchPending(onSelected)),
     reconnect: () => operation(async () => {
       for (const r of store.getReservations()) {
         if (r.status === 'pending' && !r.attempt.retryOfAttemptId && r.externalIdentity) store.confirmStart(r.id, r.externalIdentity);
@@ -363,11 +367,22 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
     const accrued = account(id, !record(id).state.active);
     store.updateLifecycle(id, r.lease.fence, accrued);
     if (accrued.activeDurationMs! < budget()) return false;
-    try { await pause(id, 'needs_attention', { kind: 'blocked', prompt: 'Active execution time limit reached', recovery: 'Inspect the stopped native execution and reconcile unresolved action keys' }); }
-    catch (error) {
-      if (!(error instanceof StoreError) || !['effect_unresolved', 'unconfirmed_start', 'quiescence_unknown', 'stale_fence'].includes(error.code)) throw error;
+    let stopping = budgetStops.get(id);
+    if (!stopping) {
+      // pause persists its immutable intent and closes admission before its first external await.
+      stopping = pause(id, 'needs_attention', { kind: 'blocked', prompt: 'Active execution time limit reached', recovery: 'Inspect the stopped native execution and reconcile unresolved action keys' }).catch(error => {
+        if (!(error instanceof StoreError) || !['effect_unresolved', 'unconfirmed_start', 'quiescence_unknown', 'stale_fence', 'identity_missing'].includes(error.code)) throw error;
+      }).finally(() => { budgetStops.delete(id); });
+      budgetStops.set(id, stopping);
     }
+    await stopping;
     return true;
+  }
+  function observeBudgets(): void {
+    for (const r of store.getReservations().filter(r => r.lease.active && (r.status === 'confirmed' || !!r.attempt.retryOfAttemptId))) {
+      // enforceBudget performs accounting and stop-intent persistence before awaiting a per-attempt job.
+      void enforceBudget(r.attempt.id).catch(() => { /* Persisted stop intent/fence survives failed physical proof. */ });
+    }
   }
   async function checkBudgets(): Promise<void> {
     await Promise.all(store.getReservations().filter(r => r.lease.active && (r.status === 'confirmed' || !!r.attempt.retryOfAttemptId)).map(r => enforceBudget(r.attempt.id)));

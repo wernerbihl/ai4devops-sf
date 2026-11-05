@@ -34,6 +34,7 @@ export class IsolatedToolWorker {
   private human: { start: NativeStart; identity: NativeIdentity; enabled: boolean; assertCurrent(): void } | undefined;
   admitHuman(start: NativeStart, identity: NativeIdentity, assertCurrent: () => void, enabled = true) { assertCurrent(); ensure(this.gate.isSuspended(), 'worker_human', 'Factory gate must be suspended'); this.human = { start, identity, assertCurrent, enabled }; }
   enableHuman() { ensure(this.human, 'worker_human', 'Human admission is missing'); this.human.assertCurrent(); this.human.enabled = true; }
+  closeAdmission() { this.gate.suspend(); this.human = undefined; }
   private docker: DockerPort; private store: FactoryStore; private gate: FactoryToolGate;
   constructor(options: { config: WorkerConfiguration; docker: DockerPort; store: FactoryStore; gate: FactoryToolGate }) { this.config = options.config; this.docker = options.docker; this.store = options.store; this.gate = options.gate; }
   private async container() {
@@ -131,7 +132,7 @@ export class IsolatedToolWorker {
   }
   /** Physically stop this exact worker only when no earlier worker effect may still accept. */
   async stopForMaintenance(): Promise<void> {
-    this.gate.suspend(); this.human = undefined;
+    this.closeAdmission();
     const unsettled = () => this.store.pendingActions().some(action => ['worker.execute','worker.pause','worker.resume','worker.maintenance_stop'].includes(action.kind));
     ensure(!unsettled(), 'worker_unknown', 'An unresolved worker effect retains exclusion');
     const before = await this.container();

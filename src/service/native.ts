@@ -213,6 +213,8 @@ export function createNativeFleet(options: { installation: Installation; config:
     subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener)},
   };
   return { owner:fleetOwner,provisionability,templateReadiness,startFor,member,
+    /** Fence human tools and drain existing desktop relays; does not claim physical stop. */
+    async closeHumanAdmissions(){await Promise.all([...members.values()].map(async pending=>{const m=await pending;m.worker.closeAdmission();await m.closeDesktop()}))},
     async prepare(start:NativeStart) {ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted');ensure(store.getLifecycle(start.attemptId).reservation.status==='confirmed','native_unconfirmed','Confirm actual engine execution before native provisioning');const m=await member(start,true);await m.closeDesktop();m.assertNoHumanEffect();ensure(!store.getLifecycle(start.attemptId).state.stopRequested,'native_interrupted','Native attempt was interrupted during provisioning');await m.boundary.prepare(start,start.idempotencyKey,m.authenticate);return m.verify.requireVerifiedProfile(start)},
     async reconcile(start:NativeStart){return (await member(start)).owner.reconcile(start)},
     async close(){for(const promise of members.values()){try{const m=await promise;await m.closeDesktop();await m.owner.close()}catch{}}members.clear()},

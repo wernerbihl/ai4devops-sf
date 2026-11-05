@@ -85,3 +85,9 @@ test('unacknowledged worker stop retains its intent and is never retried as proo
   await assert.rejects(worker.stopForMaintenance());await assert.rejects(worker.stopForMaintenance());assert.equal(kills,1);assert.ok(f.store.pendingActions().some(a=>a.kind==='worker.maintenance_stop'));
  }finally{f.close()}
 });
+test('maintenance closes human tool admission before awaiting external quiescence',async()=>{
+ const f=await workerFixture();try{
+  f.store.updateLifecycle(f.r.attempt.id,f.r.lease.fence,{status:'needs_attention',release:'waiting',human:true});f.store.setRepositoryControl('repo','human',f.store.getRepository('repo')!.revision);f.gate.suspend();f.worker.admitHuman(f.start,f.identity,()=>{});
+  f.worker.closeAdmission();await assert.rejects(f.worker.invoke(f.identity,'closed-human','sf_read_file',{path:f.file}));assert.equal(f.executions,0);
+ }finally{f.close()}
+});

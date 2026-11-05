@@ -142,7 +142,7 @@ export function createManagedVsCodeLauncher(options: ManagedVsCodeOptions): Mana
         const before = await stoppedContainer();
         if (before.State?.Running) {
             await durableWrite(controlIntentPath, { schemaVersion: 1, mode: 'stop', containerId: options.containerId }, true);
-            await docker.command(['container', 'stop', '--time', '10', options.containerId]);
+            await docker.command(before.State.Paused ? ['container', 'kill', '--signal', 'KILL', options.containerId] : ['container', 'stop', '--time', '10', options.containerId]);
         }
         const after = await stoppedContainer();
         ensure(after.State?.Running === false && after.State.Paused === false && after.State.Pid === 0 && after.State.Status === 'exited', 'owner_quiescence', 'All native container processes are not proven stopped');

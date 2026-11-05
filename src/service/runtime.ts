@@ -206,7 +206,11 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
       if(method==='POST'&&path==='/maintenance'){
         if(!maintenance){store.enqueueAction({key:'maintenance:'+randomUUID(),kind:'maintenance.intent',payload:{installationId:installation.id}});maintenance=true;}
         const draining=maintenanceGate.close();
-        await Promise.all([draining,coordinator.closeAdmission()]);
+        // Begin relay closure without waiting for another in-flight dispatch; then
+        // repeat after the drain to cover a member whose provisioning was already admitted.
+        const relays=fleet.closeHumanAdmissions();
+        await Promise.all([draining,coordinator.closeAdmission(),relays]);
+        await fleet.closeHumanAdmissions();
         return {state:'admission_closed',blocked:store.getReservations().filter(r=>r.lease.active).map(r=>r.attempt.id)};
       }
       const release=maintenanceGate.enter();

@@ -2,6 +2,7 @@ import { join, resolve } from 'node:path';
 import { readPrivateFileAsync } from '../service/config.ts';
 import { canonical, ensure, fingerprint } from '../storage/database.ts';
 import type { DockerPort } from './deployment.ts';
+import type { FactoryStore } from '../storage/store.ts';
 
 interface EngineInstallation { id:string; root:string; docker:DockerPort }
 export interface OwnedKestraInspection { installationId:string; owner:string; networkId:string; containerId:string; transportContainerId:string }
@@ -28,14 +29,22 @@ export async function inspectOwnedKestra(installation:EngineInstallation):Promis
   return inspection;
 }
 /** Call only after controller admission and external workflow effects are fenced. Unknown stop outcomes throw. */
-export async function stopOwnedKestra(installation:EngineInstallation,prior:OwnedKestraInspection):Promise<void> {
+export async function stopOwnedKestra(installation:EngineInstallation,prior:OwnedKestraInspection,store:FactoryStore):Promise<void> {
+  ensure(!store.pendingActions().some(action=>action.kind==='kestra.maintenance_stop'), 'engine_stop', 'An earlier engine stop is unresolved');
   const now=await inspectOwnedKestra(installation);
   ensure(canonical(now)===canonical(prior),'engine_owner','Owned engine identity changed before stop');
   for(const id of [now.transportContainerId,now.containerId]) {
     const values=JSON.parse(await installation.docker.command(['container','inspect',id]));const state=values?.[0]?.State;
     ensure(values?.length===1&&values[0].Id===id&&state&&state.Paused===false,'engine_stop','Engine state unavailable');
-    if(state.Running===true)await installation.docker.command(['container','stop','--time','10',id]);
+    let action:ReturnType<FactoryStore['enqueueAction']> | undefined;
+    if(state.Running===true){
+      ensure(typeof state.StartedAt==='string'&&state.StartedAt.length>0,'engine_stop','Engine process generation unavailable');
+      action=store.enqueueAction({key:'kestra:maintenance-stop:'+id+':'+state.StartedAt,kind:'kestra.maintenance_stop',payload:{containerId:id,startedAt:state.StartedAt}});
+      ensure(!action.completedAt,'engine_stop','Previously stopped engine restarted; retain for recovery');
+      await installation.docker.command(['container','stop','--time','10',id]);
+    }
     const after=JSON.parse(await installation.docker.command(['container','inspect',id]));const stopped=after?.[0]?.State;
     ensure(after?.length===1&&after[0].Id===id&&stopped?.Running===false&&stopped.Paused===false&&stopped.Pid===0&&stopped.Status==='exited','engine_stop','Engine stop not proven');
+    if(action)store.completeAction(action.id);
   }
 }

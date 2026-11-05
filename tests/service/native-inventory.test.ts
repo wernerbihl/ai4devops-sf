@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,statSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fingerprint} from '../../src/storage/database.ts';
+import {inspectNativeInventory} from '../../src/service/native-inventory.ts';
+
+test('inventory inspects stopped historical native resources without creating or starting them',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'sf-native-inventory-'));const id='fixture',taskId='task';const owner='rt-'+fingerprint({installation:id,task:taskId}).slice(0,24);const parent=join(root,'native-state',owner),data=join(parent,'data');mkdirSync(data,{recursive:true,mode:0o700});
+ writeFileSync(join(parent,'proxy.json'),'{}',{mode:0o600});
+ writeFileSync(join(parent,'owner.json'),JSON.stringify({schemaVersion:1,installationId:id,runtimeOwnerId:owner,taskId,source:data}),{mode:0o600});
+ const workspace=join(root,'workspace');mkdirSync(workspace,{mode:0o700});const images=['native','worker','proxy'].map(x=>x+'@sha256:'+'a'.repeat(64));const roles=['native','worker','proxy'];const calls:string[][]=[];
+ const objects=Object.fromEntries(roles.map((role,i)=>[owner+'-'+role,{Id:String(i+1).repeat(64),Name:'/'+owner+'-'+role,Image:'image-'+role,Config:{Image:images[i],Labels:{'sf.installation':id,'sf.runtime-owner':owner}},HostConfig:{RestartPolicy:{Name:'no'},AutoRemove:false},State:{Running:false,Paused:false,Pid:0,Status:'exited'},Mounts:role==='native'?[{Type:'bind',Source:data,Destination:'/var/lib/software-factory/native-state',RW:true}]:role==='worker'?[{Type:'bind',Source:workspace,Destination:'/workspaces/task',RW:true}]:[{Type:'bind',Source:join(parent,'proxy.json'),Destination:'/etc/software-factory/proxy.json',RW:false}]}]));
+ const networks=Object.fromEntries(['internal','model-egress'].map((role,i)=>[owner+'-'+role,{Id:(i?'e':'d').repeat(64),Name:owner+'-'+role,Internal:role==='internal',Driver:'bridge',Labels:{'sf.installation':id}}]));
+ const actions=roles.map((role,i)=>({kind:'runtime.container',completedAt:'done',payload:{name:owner+'-'+role,image:images[i],owner}}));
+ const stat=statSync(join(parent,'proxy.json')); const policy={kind:'runtime.proxy-policy',completedAt:'done',payload:{path:join(parent,'proxy.json'),dev:stat.dev,ino:stat.ino}};
+ const store={getReservations:()=>[{task:{spec:{required:{paths:[{root:'.',mode:'write'}]}}},attempt:{id:'historical',taskId,workspacePath:workspace,native:{ownerId:'vscode',providerId:'copilot',sessionId:'original'}}}],getActionByKey:(key:string)=>key==='runtime:proxy-policy:'+owner?policy:actions.find(a=>'runtime:container:'+a.payload.name===key),pendingActions:()=>[]};
+ const docker={async command(args:string[]){calls.push(args);if(args[0]==='network'&&args[1]==='ls')return Object.values(networks).map(n=>n.Id).join('\n');if(args[0]==='network'&&args[1]==='inspect')return JSON.stringify([networks[args[2] as keyof typeof networks]]);if(args[0]==='container'&&args[1]==='ls')return Object.values(objects).map(o=>o.Id).join('\n');if(args[0]==='container'&&args[1]==='inspect')return JSON.stringify([objects[args[2] as keyof typeof objects]]);if(args[0]==='image'&&args[1]==='inspect'){const index=images.indexOf(args[2]!);return JSON.stringify([{Id:'image-'+roles[index],RepoDigests:[args[2]]}])}throw Error('unexpected command')}};
+ try {const result=await inspectNativeInventory({id,root,docker,store:store as never,images:{native:images[0]!,worker:images[1]!,proxy:images[2]!}});assert.equal(result.length,1);assert.equal(result[0]!.taskId,taskId);assert.equal(result[0]!.containers.every(c=>c.stopped),true);assert.ok(calls.every(c=>['inspect','ls'].includes(c[1]!)));writeFileSync(join(parent,'control-start.json'),'{}',{mode:0o600});assert.ok((await inspectNativeInventory({id,root,docker,store:store as never,images:{native:images[0]!,worker:images[1]!,proxy:images[2]!}}))[0]!.pending.includes('native-control:'+owner));objects[owner+'-worker']!.Config.Labels['sf.installation']='other';await assert.rejects(inspectNativeInventory({id,root,docker,store:store as never,images:{native:images[0]!,worker:images[1]!,proxy:images[2]!}}));} finally {rmSync(root,{recursive:true,force:true})}
+});

@@ -13,7 +13,9 @@ test('installed runtime copies Node and only production dependencies without a s
   assert.equal(existsSync(join(target,'node_modules','@vscode','vsce')),false);
   assert.equal(existsSync(join(target,'package-lock.json')),true);
   assert.equal(existsSync(installation.node),true);assert.equal(existsSync(installation.serviceEntry),true);
-  const result=spawnSync(installation.node,['--input-type=module','-e',`import(${JSON.stringify('file://'+join(target,'dist/service/config.js'))}).then(()=>process.stdout.write('ready'))`],{cwd:root,encoding:'utf8',env:{PATH:'/usr/bin:/bin',HOME:root}});
+  assert.equal(existsSync(join(target,'dist/runtime/dashboard/factory-ui.js')),true);
+  assert.equal(existsSync(join(target,'dist/runtime/dashboard/provenance.json')),true);
+  const result=spawnSync(installation.node,['--input-type=module','-e',`import(${JSON.stringify('file://'+join(target,'dist/install/dashboard-host.js'))}).then(module=>{const backend=module.createDashboardBackend({async pair(){throw Error('No fixture credentials')}});backend.close();process.stdout.write('ready')})`],{cwd:root,encoding:'utf8',env:{PATH:'/usr/bin:/bin',HOME:root}});
   assert.equal(result.status,0,result.stderr);assert.equal(result.stdout,'ready');
   await assert.rejects(copyRuntime({sourceRoot:resolve('.'),target}),/exist/i);
  } finally {rmSync(root,{recursive:true});}

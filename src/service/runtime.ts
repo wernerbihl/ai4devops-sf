@@ -244,6 +244,13 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         if(maintenanceJob){ensure(maintenanceJob.kind==='maintenance','runtime_maintenance','Another maintenance operation is in progress');return maintenanceJob.promise}
         const purpose=input.purpose;
         const job=(async()=>{
+        if(purpose==='uninstall'){
+          const key='maintenance:cleanup:'+maintenanceIntent!.id;const prior=store.getActionByKey(key),result=store.getActionByKey(key+':result');
+          if(prior?.completedAt&&result?.kind==='maintenance.cleanup_result'&&result.completedAt&&result.payload.intentId===prior.id&&Array.isArray(result.payload.removed)){
+            const blocked=await inspectMaintenanceBlockers(installation.root,store);if(blocked.length)return {state:'admission_closed',blocked};
+            return {state:'engine_stopped',blocked:[]};
+          }
+        }
         const draining=maintenanceGate.close();
         const stopActive=()=>Promise.allSettled(store.getReservations().filter(r=>r.lease.active).map(r=>lifecycle.stopForMaintenance(r.attempt.id)));
         // Begin relay closure without waiting for another in-flight dispatch; then
@@ -283,6 +290,14 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         } catch {return {state:'admission_closed',blocked:[{kind:'effect',identity:'native-or-engine-unverified'}]}}
         })();maintenanceJob={kind:'maintenance',promise:job};
         try{return await job}finally{if(maintenanceJob?.promise===job)maintenanceJob=undefined}
+      }
+      if(method==='GET'&&path==='/cleanup-status'){
+        ensure(maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='uninstall','runtime_maintenance','Original uninstall intent required');
+        const action=store.getActionByKey('maintenance:cleanup:'+maintenanceIntent.id);ensure(action?.kind==='maintenance.cleanup'&&Array.isArray(action.payload.resources),'runtime_maintenance','Cleanup inventory is unavailable');
+        const removed:string[]=[],blocked:{kind:string;identity:string}[]=[];
+        for(const resource of action.payload.resources as InventoriedResource[]){ensure(resource&&['container','network'].includes(resource.kind)&&/^[a-f0-9]{64}$/.test(resource.id),'runtime_maintenance','Invalid cleanup inventory');const removal=store.getActionByKey('maintenance:remove:'+resource.kind+':'+resource.id);const identity=resource.kind+':'+resource.id;if(removal?.kind==='maintenance.remove'&&removal.completedAt)removed.push(identity);else blocked.push({kind:removal?'effect':'retained',identity})}
+        if(!action.completedAt)blocked.push({kind:'effect',identity:'cleanup-outcome-unconfirmed'});
+        return {removed,blocked};
       }
       if(method==='POST'&&path==='/cleanup'){
         ensure(!stopping&&Object.keys(input).length===0&&maintenanceIntent?.payload.installationId===installation.id&&maintenanceIntent.payload.purpose==='uninstall','runtime_maintenance','Original uninstall intent required');

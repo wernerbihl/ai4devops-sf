@@ -33,7 +33,9 @@ export async function runCli(argv:string[],io:CliIo,deps:{locate?:typeof import(
       if(result.state==='pending'){io.err(`Dispatch ${result.key} remains pending; run next again to check the same request.\n`);return 1}
       io.out(JSON.stringify(result.body)+'\n');return 0;
     }
-    const uninstall=deps.uninstall??(await import('../install/uninstall.ts')).uninstallInstallation;await uninstall(installation);
-    io.err(`Uninstall cleanup is pending; the service remains active and owned data remains at ${installation.root}. Safe cleanup must finish before removal.\n`);return 1;
+    const uninstall=deps.uninstall??(await import('../install/uninstall.ts')).uninstallInstallation;const report=await uninstall(installation);
+    if(report.removed.length)io.out(`Removed owned resources:\n${report.removed.join('\n')}\n`);
+    if(report.blocked.length){io.err(`Cleanup remains blocked or retained:\n${report.blocked.map(item=>item.kind+': '+item.identity).join('\n')}\n`);return 1}
+    io.out('Uninstall complete.\n');return 0;
   } catch(error){io.err((error instanceof Error?error.message:'Factory command failed')+'\n');return 1}
 }

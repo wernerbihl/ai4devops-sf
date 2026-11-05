@@ -15,10 +15,10 @@ test('public help is side-effect free and uninstall reports retained cleanup as 
  const {runCli}=await import('../../src/cli/main.ts');const out:string[]=[];const err:string[]=[];let effects=0;
  const io={out:(s:string)=>out.push(s),err:(s:string)=>err.push(s),ask:async()=>''};
  const installation={schemaVersion:1 as const,id:'fixture',root:'/tmp/factory',node:'/tmp/factory/runtime/0.1.0/node',serviceEntry:'/tmp/factory/runtime/0.1.0/dist/service/main.js',version:'0.1.0'};
- const deps={locate:async()=>installation,uninstall:async()=>{effects++}};
+ const deps={locate:async()=>installation,uninstall:async()=>{effects++;return {removed:['container:'+ 'a'.repeat(64)],blocked:[{kind:'retained',identity:'/tmp/factory/unrecorded'}]}}};
  assert.equal(await runCli(['--help'],io,deps),0);assert.equal(effects,0);assert.match(out.join(''),/setup.*next.*uninstall/);
  assert.equal(await runCli(['daemon'],io,deps),2);
- assert.equal(await runCli(['uninstall'],io,deps),1);assert.equal(effects,1);assert.match(err.join(''),/retained|remain/i);
+ assert.equal(await runCli(['uninstall'],io,deps),1);assert.equal(effects,1);assert.match(err.join(''),/retained|remain/i);assert.match(out.join(''),/container:/);
 });
 
 test('old Node receives the minimum runtime diagnostic before importing backend modules',async t=>{

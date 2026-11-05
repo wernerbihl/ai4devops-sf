@@ -17,7 +17,7 @@ test('installation singleton rejects another controller and releases on close', 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('deadline lane continues while dispatch never acknowledges and drops missed ticks', async () => {
+test('deadline lane continues while dispatch never acknowledges and drops missed ticks', async t => {
   const module = await import('../../src/service/coordinator.ts').catch(() => undefined);
   assert.ok(module?.createCoordinator, 'independent runtime lanes are missing');
   let dispatches = 0; let controls = 0;
@@ -27,8 +27,9 @@ test('deadline lane continues while dispatch never acknowledges and drops missed
     control: async () => { controls++; },
     reconcile: async () => {},
   });
+  t.mock.timers.enable({ apis:['setInterval'] });
   coordinator.start();
-  await new Promise(resolve => setTimeout(resolve, 85));
+  for(let tick=0;tick<20;tick++){t.mock.timers.tick(5);await Promise.resolve();}
   coordinator.stop();
   assert.equal(dispatches, 1);
   assert.ok(controls >= 4, 'hung dispatch must not prevent active deadline/control checks');

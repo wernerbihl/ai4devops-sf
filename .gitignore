@@ -17,3 +17,6 @@ release/dashboard/*
 !release/dashboard/openapi.json
 !release/dashboard/standalone.js
 !release/dashboard/provenance.json
+
+# Local review tarballs, never credentials or developer caches.
+artifacts/

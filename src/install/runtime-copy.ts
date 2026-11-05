@@ -1,3 +1,4 @@
+import { verifyReleaseProvenance } from '../release/provenance.ts';
 import { createHash } from 'node:crypto';
 import { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -11,7 +12,7 @@ function versionSupported(value:string):boolean {
 /** Copies an already built package after confirmation; it never invokes npm or a sibling checkout. */
 export async function copyRuntime(input:{sourceRoot:string;target:string;installationVersion?:string}):Promise<RuntimeCopy> {
   if(!versionSupported(process.versions.node))throw new Error('Node.js >=24.22.2 required');
-  const source=realpathSync(input.sourceRoot);const target=resolve(input.target);const parent=dirname(target);const stat=lstatSync(parent);
+  const source=realpathSync(input.sourceRoot);verifyReleaseProvenance(source);const target=resolve(input.target);const parent=dirname(target);const stat=lstatSync(parent);
   if(input.target!==target||realpathSync(parent)!==parent||!stat.isDirectory()||(process.platform!=='win32'&&(stat.uid!==process.getuid!()||(stat.mode&0o077)!==0)))throw new Error('Private runtime parent directory required');
   if(process.platform==='win32')assertWindowsPrivateDirectory(parent);
   const pkg=JSON.parse(readFileSync(join(source,'package.json'),'utf8')) as {name:string;version:string;dependencies:Record<string,string>};
@@ -33,6 +34,9 @@ export async function copyRuntime(input:{sourceRoot:string;target:string;install
   }});
   copyTree(join(source,'dist'),join(target,'dist'),false);
   copyTree(join(source,'bin'),join(target,'bin'),false);
+  mkdirSync(join(target,'release'),{mode:0o700});
+  copyFileSync(join(source,'release/provenance.json'),join(target,'release/provenance.json'));
+  verifyReleaseProvenance(target);
   copyFileSync(join(source,'package-lock.json'),join(target,'package-lock.json'));
   for(const [name,entry] of packages){
     const segments=name.split('/');if(segments.some(part=>!part||part==='.'||part==='..')||entry.link)throw new Error('Unsupported production dependency path');

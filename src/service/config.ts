@@ -62,7 +62,7 @@ export function loadRuntimeConfig(root: string, installationId: string, preloade
       ensure(images.every(image => /^sha256:[a-f0-9]{64}$/.test(image)), 'owned_image', 'All locally built images require one owned build');
       const manifest = JSON.parse((preloaded?.manifest??readPrivateFile(join(root,'owned-images.json'))).toString()) as OwnedImageBuild;
       const expected = expectedImageBuild();
-      keys(manifest, ['schemaVersion','installationId','sourceFingerprint','baseImage','serverArchiveSha256','hostCommit','proxySha256','workerProgramSha256','builderSha256','images','nativeEntrypoint','nativeEntrypointSha256']);
+      keys(manifest, ['schemaVersion','installationId','sourceCommit','releaseDigest','sourceFingerprint','baseImage','serverArchiveSha256','hostCommit','proxySha256','workerProgramSha256','builderSha256','images','nativeEntrypoint','nativeEntrypointSha256']);
       ensure(manifest.images && Object.keys(manifest.images).length === 3 && Object.keys(manifest.images).every(k => ['native','worker','proxy'].includes(k)), 'owned_image', 'Invalid owned image roles');
       ensure(manifest && manifest.schemaVersion === 1 && manifest.installationId === installationId && Object.keys(expected).every(k => manifest[k as keyof typeof expected] === expected[k as keyof typeof expected])
         && manifest.images?.native === native.nativeImage && manifest.images?.worker === native.workerImage && manifest.images?.proxy === native.proxy.image

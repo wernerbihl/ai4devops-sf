@@ -1,3 +1,4 @@
+import { imageReleaseMatches } from '../release/provenance.ts';
 import { mkdirSync, existsSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { writeWindowsPrivateFileAsync } from '../platform/windows-private.ts';
@@ -92,7 +93,7 @@ export function createNativeFleet(options: { installation: Installation; config:
       ensure((navigationCommits as readonly string[]).includes(template.hostCommit), 'native_version', 'Native host commit unsupported');
       for (const [role,image] of [['native',template.nativeImage],['worker',template.workerImage],['proxy',template.proxy.image]] as const) {
         const actual = JSON.parse(await docker.command(['image','inspect',image]))[0];
-        ensure(imageMatches(image,actual) && actual.Os === 'linux' && actual.Architecture === 'amd64' && (!image.startsWith('sha256:') || actual.Config?.Labels?.['sf.installation'] === installation.id && actual.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && actual.Config?.Labels?.['sf.role'] === role), 'native_image', 'Pinned native/worker/proxy image is unavailable or its owned build does not match');
+        ensure(imageMatches(image,actual) && actual.Os === 'linux' && actual.Architecture === 'amd64' && (!image.startsWith('sha256:') || imageReleaseMatches(actual.Config?.Labels,expectedImageBuild()) && actual.Config?.Labels?.['sf.installation'] === installation.id && actual.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && actual.Config?.Labels?.['sf.role'] === role), 'native_image', 'Pinned native/worker/proxy image is unavailable or its owned build does not match');
       }
       availabilityReasons = [];
     } catch (error) { availabilityReasons = [error instanceof Error ? error.message : 'Native provisioning unavailable']; }
@@ -115,7 +116,7 @@ export function createNativeFleet(options: { installation: Installation; config:
   }
   async function container(input: { name: string; image: string; role: 'native' | 'worker' | 'proxy'; owner: string; network: string; mounts: { source: string; target: string; writable: boolean }[]; env: string[]; cwd: string; command: string[]; create: boolean; alias?: string }) {
     const image = JSON.parse(await docker.command(['image','inspect',input.image]))[0];
-    ensure(imageMatches(input.image,image) && (!input.image.startsWith('sha256:') || image.Config?.Labels?.['sf.installation'] === installation.id && image.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && image.Config?.Labels?.['sf.role'] === input.role) && !image.Config.Entrypoint?.length && canonical(image.Config.Env ?? []) === canonical(input.env), 'native_image', 'Pinned image must declare exact minimal environment and no implicit entrypoint');
+    ensure(imageMatches(input.image,image) && (!input.image.startsWith('sha256:') || imageReleaseMatches(image.Config?.Labels,expectedImageBuild()) && image.Config?.Labels?.['sf.installation'] === installation.id && image.Config?.Labels?.['sf.build'] === expectedImageBuild().sourceFingerprint && image.Config?.Labels?.['sf.role'] === input.role) && !image.Config.Entrypoint?.length && canonical(image.Config.Env ?? []) === canonical(input.env), 'native_image', 'Pinned image must declare exact minimal environment and no implicit entrypoint');
     const uid = process.platform==='win32'?1000:process.getuid!(); const gid = process.platform==='win32'?1000:process.getgid!(); ensure(uid > 0, 'native_user', 'Native runtimes require a nonroot installation');
     let c = await inspect('container',input.name);let createIntent:OutboxAction|undefined;let creation:OutboxAction|undefined;
     if (!c && input.create) {

@@ -9,7 +9,7 @@
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-runtime-assets.mjs",
+    "build": "node scripts/build.ts",
     "protocol:generate": "node scripts/generate-protocol.ts",
     "protocol:check": "node scripts/generate-protocol.ts --check",
     "probe:vscode": "node scripts/probe-vscode.ts",
@@ -18,7 +18,11 @@
     "probe:isolation": "node probes/isolation.ts",
     "gates:check": "node scripts/check-gates.ts",
     "companion:package": "node scripts/package-companion.mjs",
-    "pretest": "npm run build"
+    "pretest": "npm run build",
+    "package": "node scripts/package.ts",
+    "verify:package": "node scripts/verify-package.ts",
+    "verify:install": "node scripts/verify-install.ts",
+    "release:check": "node scripts/release-provenance.ts --check"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",
@@ -36,5 +40,20 @@
   },
   "bin": {
     "ai4devops-sf": "bin/ai4devops-sf.mjs"
-  }
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "package-lock.json",
+    "release/provenance.json",
+    "README.md"
+  ],
+  "bundleDependencies": [
+    "@microsoft/agent-host-protocol",
+    "@sinclair/typebox",
+    "ajv",
+    "ajv-formats",
+    "ws",
+    "yaml"
+  ]
 }

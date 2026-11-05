@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+import { verifyReleaseProvenance, imageReleaseMatches } from '../release/provenance.ts';
 import { createHash } from 'node:crypto';
 import { workerProgram } from '../owners/worker-program.ts';
 import { constants, copyFileSync, createReadStream, mkdtempSync, openSync, closeSync, fstatSync, lstatSync, fsyncSync, unlinkSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
@@ -42,11 +44,12 @@ export function expectedImageBuild() {
   const workerProgramSha256 = createHash('sha256').update(workerProgram).digest('hex');
   const builderSha256 = createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex');
   const sourceFingerprint = createHash('sha256').update(JSON.stringify({schemaVersion:1, recipes:buildRecipes(), baseImage:workerBase, hostCommit:nativeServerAsset.commit, serverArchiveSha256:nativeServerAsset.sha256, proxySha256,workerProgramSha256,builderSha256})).digest('hex');
-  return {sourceFingerprint,baseImage:workerBase,serverArchiveSha256:nativeServerAsset.sha256,hostCommit:nativeServerAsset.commit,proxySha256,workerProgramSha256,builderSha256};
+  const {sourceCommit,releaseDigest}=verifyReleaseProvenance(fileURLToPath(new URL('../../',import.meta.url)));
+  return {sourceCommit,releaseDigest,sourceFingerprint,baseImage:workerBase,serverArchiveSha256:nativeServerAsset.sha256,hostCommit:nativeServerAsset.commit,proxySha256,workerProgramSha256,builderSha256};
 }
 
 export interface OwnedImageBuild {
-  schemaVersion: 1; installationId: string; sourceFingerprint: string; baseImage: string;
+  schemaVersion: 1; installationId: string; sourceCommit: string; releaseDigest: string; sourceFingerprint: string; baseImage: string;
   serverArchiveSha256: string; hostCommit: string; proxySha256: string; workerProgramSha256: string; builderSha256: string;
   images: { native: string; worker: string; proxy: string };
   nativeEntrypoint: string; nativeEntrypointSha256: string;
@@ -99,7 +102,7 @@ export async function buildImages(input: { installationId: string; installationR
   const proxyBytes = readFileSync(proxySource);
   const proxySha256 = createHash('sha256').update(proxyBytes).digest('hex');
   const recipes = buildRecipes();
-  const { sourceFingerprint, workerProgramSha256, builderSha256, proxySha256: expectedProxySha256 } = expectedImageBuild();
+  const { sourceCommit, releaseDigest, sourceFingerprint, workerProgramSha256, builderSha256, proxySha256: expectedProxySha256 } = expectedImageBuild();
   if (proxySha256 !== expectedProxySha256) throw new Error('Proxy source changed during image planning');
   createImageBuildIntent(input.installationRoot,{installationId:input.installationId,sourceFingerprint});
   const context = mkdtempSync(join(tmpdir(),'sf-image-build-'));
@@ -115,18 +118,18 @@ export async function buildImages(input: { installationId: string; installationR
     if (!base?.RepoDigests?.includes(workerBase) || base.Os !== 'linux' || base.Architecture !== 'amd64') throw new Error('Pinned base image inspection failed');
     for (const role of ['native','worker','proxy'] as const) {
       const iidfile = join(context,`iid-${role}`);
-      await input.docker.command(['build','--pull=false','--network=none','--platform','linux/amd64','--label',`sf.installation=${input.installationId}`,'--label',`sf.build=${sourceFingerprint}`,'--label',`sf.role=${role}`,'--iidfile',iidfile,'-f',join(context,`Dockerfile.${role}`),context]);
+      await input.docker.command(['build','--pull=false','--network=none','--platform','linux/amd64','--label',`sf.installation=${input.installationId}`,'--label',`sf.source=${sourceCommit}`,'--label',`sf.release=${releaseDigest}`,'--label',`sf.build=${sourceFingerprint}`,'--label',`sf.role=${role}`,'--iidfile',iidfile,'-f',join(context,`Dockerfile.${role}`),context]);
       const id = readFileSync(iidfile,'utf8').trim();
       if (!/^sha256:[a-f0-9]{64}$/.test(id)) throw new Error('Docker did not return an immutable image ID');
       const image = JSON.parse(await input.docker.command(['image','inspect',id]))[0];
       const env = role === 'native' ? ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/opt/software-factory/empty-home','LANG=C.UTF-8','SF_CONTROL_SENTINEL=sf-nonsecret-control-sentinel'] : ['PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','LANG=C.UTF-8'];
-      if (image?.Id !== id || image.Os !== 'linux' || image.Architecture !== 'amd64' || image.Config?.Entrypoint?.length || JSON.stringify(image.Config?.Env) !== JSON.stringify(env) || image.Config?.Labels?.['sf.build'] !== sourceFingerprint || image.Config?.Labels?.['sf.role'] !== role || image.Config?.Labels?.['sf.installation'] !== input.installationId) throw new Error('Built image inspection failed');
+      if (!imageReleaseMatches(image?.Config?.Labels,{sourceCommit,releaseDigest}) || image?.Id !== id || image.Os !== 'linux' || image.Architecture !== 'amd64' || image.Config?.Entrypoint?.length || JSON.stringify(image.Config?.Env) !== JSON.stringify(env) || image.Config?.Labels?.['sf.build'] !== sourceFingerprint || image.Config?.Labels?.['sf.role'] !== role || image.Config?.Labels?.['sf.installation'] !== input.installationId) throw new Error('Built image inspection failed');
       images[role] = id;
     }
     const inspectScript = `const fs=require('node:fs'),c=require('node:crypto');const names=['/opt/software-factory/vscode/vscode-server-linux-x64/out/vs/platform/agentHost/node/agentHostServerMain.js','/opt/software-factory/vscode/out/vs/platform/agentHost/node/agentHostServerMain.js'].filter(p=>fs.existsSync(p));if(names.length!==1||fs.readdirSync('/workspaces/task').length||fs.readdirSync('/opt/software-factory/empty-home').length)process.exit(1);console.log(JSON.stringify({entrypoint:names[0],sha256:c.createHash('sha256').update(fs.readFileSync(names[0])).digest('hex')}));`;
     const inspected = JSON.parse(await input.docker.command(['run','--rm','--pull','never','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','32','--user',`${uid}:${gid}`,'--label',`sf.installation=${input.installationId}`,'--label','sf.component=image-verification','--entrypoint','node',images.native!,'-e',inspectScript]));
     if (typeof inspected.entrypoint !== 'string' || !inspected.entrypoint.startsWith('/opt/software-factory/vscode/') || !inspected.entrypoint.endsWith('/out/vs/platform/agentHost/node/agentHostServerMain.js') || !/^[a-f0-9]{64}$/.test(inspected.sha256)) throw new Error('Official native AgentHost entrypoint is unavailable');
-    const manifest: OwnedImageBuild = {schemaVersion:1,installationId:input.installationId,sourceFingerprint,baseImage:workerBase,serverArchiveSha256:nativeServerAsset.sha256,hostCommit:nativeServerAsset.commit,proxySha256,workerProgramSha256,builderSha256,images:images as OwnedImageBuild['images'],nativeEntrypoint:inspected.entrypoint,nativeEntrypointSha256:inspected.sha256};
+    const manifest: OwnedImageBuild = {schemaVersion:1,installationId:input.installationId,sourceCommit,releaseDigest,sourceFingerprint,baseImage:workerBase,serverArchiveSha256:nativeServerAsset.sha256,hostCommit:nativeServerAsset.commit,proxySha256,workerProgramSha256,builderSha256,images:images as OwnedImageBuild['images'],nativeEntrypoint:inspected.entrypoint,nativeEntrypointSha256:inspected.sha256};
     createPrivateRecord(input.installationRoot,'owned-images.json',manifest);
     return manifest;
   } finally { rmSync(context,{recursive:true,force:true}); }

@@ -231,6 +231,13 @@ export class FactoryStore {
   claimAction(input: ActionInput) { return this.db.transaction(() => { const fresh = !this.outbox.byKey(input.key); return { action: this.outbox.enqueue(input), fresh }; }); }
   saveCloseout(attemptId: string, result: import('../contracts/domain.ts').TaskResult | undefined, outcome: import('../contracts/domain.ts').CloseoutResult, release: boolean) { return this.db.transaction(() => this.lifecycle.closeout(attemptId, result, outcome, release)); }
   pendingActions() { return this.outbox.pending(); }
+  /** Read all unresolved external request identities, including historical fences. */
+  pendingExternalEffects(): {apiKeys:string[];nativeWrites:{attemptId:string;fence:number;key:string;state:'pending'|'unknown'}[]} {
+    return this.db.transaction(()=>({
+      apiKeys:this.db.sql.prepare("SELECT key FROM api_requests WHERE state='pending' ORDER BY key").all().map(row=>String(row.key)),
+      nativeWrites:this.db.sql.prepare("SELECT attempt_id,fence,key,state FROM broker_writes WHERE state IN ('pending','unknown') ORDER BY attempt_id,fence").all().map(row=>({attemptId:String(row.attempt_id),fence:Number(row.fence),key:String(row.key),state:row.state as 'pending'|'unknown'})),
+    }));
+  }
   completeAction(id: string): void { this.db.transaction(() => this.outbox.complete(id)); }
   /** Trusted service only: the callback must be synchronous, returning a sanitized public DTO. */
   runApiMutation(key: string, input: unknown, mutate: () => ApiRequestResult) {

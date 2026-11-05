@@ -28,6 +28,7 @@ import { createOwnerPairing, listenBbOwner, createBbNavigationAuthority } from '
 import { startApi } from './api.ts';
 import { createCoordinator } from './coordinator.ts';
 import { MaintenanceGate } from './maintenance-gate.ts';
+import { inspectMaintenanceBlockers } from './maintenance-blockers.ts';
 import { createLifecycleApi } from './lifecycle-api.ts';
 import { createDispatchApi } from './dispatch-api.ts';
 import { acquireInstallationSingletonAsync } from './singleton.ts';
@@ -216,7 +217,7 @@ export async function startRuntime(installation: Installation, bootstrap:{loadCo
         await Promise.all([draining,coordinator.closeAdmission(),relays,stopActive()]);
         await fleet.closeHumanAdmissions();
         await stopActive();
-        return {state:'admission_closed',blocked:store.getReservations().filter(r=>r.lease.active).map(r=>r.attempt.id)};
+        return {state:'admission_closed',blocked:await inspectMaintenanceBlockers(installation.root,store)};
       }
       const release=maintenanceGate.enter();
       try {

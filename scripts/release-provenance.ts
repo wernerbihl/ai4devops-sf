@@ -13,7 +13,7 @@ export function produceReleaseProvenance(root=process.cwd(), check=false) {
   if(!/^[a-f0-9]{40}$/.test(sourceCommit))throw Error('Committed release inputs required');
   const committed=git('ls-tree','-r','--name-only',sourceCommit).toString().trim().split('\n').filter(included).sort();
   if(files.join('\n')!==committed.join('\n'))throw Error('Release source inventory differs from commit');
-  const untracked=git('ls-files','--others','--exclude-standard','-z').toString().split('\0').filter(included);
+  const untracked=git('ls-files','--others','-z').toString().split('\0').filter(included);
   if(untracked.length)throw Error('Uncommitted release input: '+untracked[0]);
   const sourceFiles=Object.fromEntries(files.map(path=>{
     if(!lstatSync(join(root,path)).isFile())throw Error('Release source must be a regular file');

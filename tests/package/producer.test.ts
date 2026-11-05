@@ -10,6 +10,6 @@ test('release_producer_accepts_exact_committed_input_and_rejects_dirty_missing_o
   const manifest=produceReleaseProvenance(root);assert.equal(manifest.sourceCommit,git('rev-parse','HEAD').toString().trim());assert.ok(manifest.artifacts['dist/main.js']);produceReleaseProvenance(root,true);
   writeFileSync(join(root,'src/main.ts'),'changed');assert.throws(()=>produceReleaseProvenance(root),/exact release input/);
   writeFileSync(join(root,'src/main.ts'),'source');writeFileSync(join(root,'src/extra.ts'),'untracked');assert.throws(()=>produceReleaseProvenance(root),/Uncommitted release input/);
-  rmSync(join(root,'src/extra.ts'));rmSync(join(root,'src/main.ts'));assert.throws(()=>produceReleaseProvenance(root));
+  rmSync(join(root,'src/extra.ts'));writeFileSync(join(root,'.gitignore'),'src/ignored.ts\n');writeFileSync(join(root,'src/ignored.ts'),'ignored code still consumed by tsc');assert.throws(()=>produceReleaseProvenance(root),/Uncommitted release input/);rmSync(join(root,'src/ignored.ts'));rmSync(join(root,'src/main.ts'));assert.throws(()=>produceReleaseProvenance(root));
  }finally{rmSync(root,{recursive:true,force:true});}
 });

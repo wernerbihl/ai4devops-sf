@@ -4,14 +4,25 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { artifactFiles, sha256, verifyReleaseProvenance } from '../src/release/provenance.ts';
 const roots=['src/','runtime/','bin/','scripts/','protocol/','recipes/','release/dashboard/'];
-const names=['package.json','package-lock.json','tsconfig.json','tsconfig.build.json','release/images.json'];
+const names=['.gitattributes','package.json','package-lock.json','tsconfig.json','tsconfig.build.json','release/images.json'];
 export function produceReleaseProvenance(root=process.cwd(), check=false) {
   const git=(...args:string[])=>execFileSync('git',args,{cwd:root,maxBuffer:32*1024*1024});
   const included=(path:string)=>names.includes(path)||roots.some(prefix=>path.startsWith(prefix));
   const files=git('ls-files','-z').toString().split('\0').filter(included).sort();
-  const sourceCommit=git('log','-1','--format=%H','--',...files).toString().trim();
+  const sourceCommit=git('log','-1','--format=%H','--',...roots.map(path=>path.slice(0,-1)),...names).toString().trim();
   if(!/^[a-f0-9]{40}$/.test(sourceCommit))throw Error('Committed release inputs required');
-  const committed=git('ls-tree','-r','--name-only',sourceCommit).toString().trim().split('\n').filter(included).sort();
+  const index=git('ls-files','--stage','-z').toString().split('\0').filter(Boolean).flatMap(record=>{
+    const tab=record.indexOf('\t'),path=record.slice(tab+1);if(!included(path))return [];
+    const [mode,oid,stage]=record.slice(0,tab).split(' ');
+    if(stage!=='0')throw Error('Production input index has unresolved merge stages: '+path);
+    return [JSON.stringify([path,mode,oid])];
+  }).sort();
+  const tree=git('ls-tree','-r','-z',sourceCommit).toString().split('\0').filter(Boolean).flatMap(record=>{
+    const tab=record.indexOf('\t'),path=record.slice(tab+1);if(!included(path))return [];
+    const [mode,,oid]=record.slice(0,tab).split(' ');return [JSON.stringify([path,mode,oid])];
+  }).sort();
+  if(index.join('\n')!==tree.join('\n'))throw Error('Production input index differs from committed source');
+  const committed=git('ls-tree','-r','--name-only','-z',sourceCommit).toString().split('\0').filter(included).sort();
   if(files.join('\n')!==committed.join('\n'))throw Error('Release source inventory differs from commit');
   const untracked=git('ls-files','--others','-z').toString().split('\0').filter(included);
   if(untracked.length)throw Error('Uncommitted release input: '+untracked[0]);

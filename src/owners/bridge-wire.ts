@@ -39,15 +39,31 @@ export async function readOwnerPairing(path: string): Promise<Pairing> {
 }
 function protocol(socket: Socket, pairing: Pairing, server: boolean): Promise<OwnerPeer> {
   return new Promise((resolvePeer, reject) => {
-    let buffer = '', session = '', sent = 0, received = 0, closed = false, ready = false;
+    let buffer: Buffer = Buffer.alloc(0);
+    let session = '', sent = 0, received = 0, closed = false, ready = false;
+    const frameLimit = 1048576;
+    const utf8 = new TextDecoder('utf-8', { fatal: true });
     const nonce = randomBytes(32).toString('hex'); let clientNonce = '';
     const listeners = new Set<(value: unknown) => void>(), disconnects = new Set<() => void>();
     const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
     let handler: ((method: string, params: unknown) => Promise<unknown>) | undefined;
     const awaitingHandler: (() => void)[] = [];
     const timeout = setTimeout(() => socket.destroy(), 5000); timeout.unref();
-    function raw(value: unknown) { if (closed) throw fail(); const data = JSON.stringify(value); if (Buffer.byteLength(data) > 1048576) throw fail(); socket.write(data + '\n'); }
-    function frame(payload: unknown) { const body = { session, sequence: ++sent, payload }; raw({ ...body, signature: mac(pairing.secret, body) }); }
+    function encode(value: unknown) {
+      if (closed) throw fail();
+      const data = JSON.stringify(value);
+      if (Buffer.byteLength(data) > frameLimit) throw fail();
+      return data + '\n';
+    }
+    function raw(value: unknown) { socket.write(encode(value)); }
+    function frame(payload: unknown) {
+      const sequence = sent + 1;
+      const body = { session, sequence, payload };
+      // Validate serialization and the complete byte bound before consuming this sequence.
+      const data = encode({ ...body, signature: mac(pairing.secret, body) });
+      sent = sequence;
+      try { socket.write(data); } catch (error) { socket.destroy(); throw error; }
+    }
     const peer: OwnerPeer = {
       call(method, params) { return new Promise((res, rej) => { if (closed) { rej(fail()); return; } const id = randomBytes(16).toString('hex'); const timer = setTimeout(() => { pending.delete(id); rej(new Error('BB owner outcome unknown; reconcile original identity before retry')); }, 15000); pending.set(id, { resolve: res, reject: rej, timer }); try { frame({ kind: 'request', id, method, params }); } catch { clearTimeout(timer); pending.delete(id); rej(fail()); } }); },
       handle(fn) { handler = fn; for (const invoke of awaitingHandler.splice(0)) invoke(); }, publish(event) { frame({ kind: 'event', event }); },
@@ -58,12 +74,14 @@ function protocol(socket: Socket, pairing: Pairing, server: boolean): Promise<Ow
     socket.on('close', () => { closed = true; awaitingHandler.length = 0; clearTimeout(timeout); reject(fail()); for (const value of pending.values()) { clearTimeout(value.timer); value.reject(new Error('BB owner outcome unknown; reconnect and reconcile original identity')); } pending.clear(); for (const fn of disconnects) fn(); });
     socket.on('error', () => { socket.destroy(); });
     socket.on('data', chunk => {
-      buffer += String(chunk); if (Buffer.byteLength(buffer) > 1048576) { socket.destroy(); return; }
+      buffer = Buffer.concat([buffer, chunk]);
       let end: number;
-      while ((end = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+      while ((end = buffer.indexOf(0x0a)) >= 0) {
+        if (end > frameLimit) { socket.destroy(); return; }
+        const line = buffer.subarray(0, end); buffer = buffer.subarray(end + 1);
         try {
-          const value = JSON.parse(line);
+          // Decode only complete frames, so socket chunks may split any UTF-8 code point.
+          const value = JSON.parse(utf8.decode(line));
           if (!ready) {
             if (server) {
               if (session) {
@@ -92,11 +110,15 @@ function protocol(socket: Socket, pairing: Pairing, server: boolean): Promise<Ow
           if (p.kind === 'response') { const request = pending.get(p.id); if (!request) continue; clearTimeout(request.timer); pending.delete(p.id); p.ok ? request.resolve(p.value) : request.reject(new Error(typeof p.error === 'string' ? p.error : 'BB owner refused')); }
           else if (p.kind === 'event') { for (const fn of listeners) fn(p.event); }
           else if (p.kind === 'request' && typeof p.id === 'string' && typeof p.method === 'string') {
-            const invoke = () => { void Promise.resolve().then(() => { if (!handler || closed) throw fail(); return handler(p.method, p.params); }).then(value => { if (!closed) frame({ kind: 'response', id: p.id, ok: true, value: value ?? null }); }, () => { if (!closed) frame({ kind: 'response', id: p.id, ok: false, error: 'BB owner refused; admission, profile or original identity unavailable' }); }); };
+            const invoke = () => { void Promise.resolve().then(() => { if (!handler || closed) throw fail(); return handler(p.method, p.params); }).then(value => { if (!closed) frame({ kind: 'response', id: p.id, ok: true, value: value ?? null }); }, () => { if (!closed) frame({ kind: 'response', id: p.id, ok: false, error: 'BB owner refused; admission, profile or original identity unavailable' }); }).catch(() => {
+              // A handler may already have acted. Close: pending callers settle as unknown, never replay.
+              socket.destroy();
+            }); };
             if (handler) invoke(); else { if (awaitingHandler.length >= 16) throw fail(); awaitingHandler.push(invoke); }
           } else throw fail();
         } catch { socket.destroy(); return; }
       }
+      if (buffer.length > frameLimit) socket.destroy();
     });
     if (!server) { const hello = { kind: 'hello', version: 1, installationId: pairing.installationId, backendId: pairing.backendId, nonce }; raw({ ...hello, signature: mac(pairing.secret, hello) }); }
   });

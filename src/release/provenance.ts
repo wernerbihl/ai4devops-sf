@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 export interface ReleaseProvenance {
   schemaVersion: 1; version: string; sourceCommit: string;
@@ -8,15 +8,28 @@ export interface ReleaseProvenance {
 export const sha256 = (bytes: string | Buffer): string => createHash('sha256').update(bytes).digest('hex');
 export function artifactFiles(root: string): string[] {
   const files: string[] = [];
-  function walk(directory: string) {
+  function walk(directory: string, excludeNested = false) {
     for (const entry of readdirSync(join(root,directory),{withFileTypes:true})) {
+      if(excludeNested && entry.name==='node_modules')continue;
       const path=directory+'/'+entry.name;
       if (entry.isSymbolicLink()) throw Error('Release artifact symbolic link refused');
-      if (entry.isDirectory()) walk(path); else if(entry.isFile()) files.push(path);
+      if (entry.isDirectory()) walk(path,excludeNested); else if(entry.isFile()) files.push(path);
       else throw Error('Invalid release artifact');
     }
   }
-  walk('dist'); walk('bin'); return files.sort();
+  walk('dist'); walk('bin');
+  if(existsSync(join(root,'package-lock.json'))){
+    files.push('package-lock.json');
+    const lock=JSON.parse(readFileSync(join(root,'package-lock.json'),'utf8'));
+    for(const [path,entry] of Object.entries(lock.packages??{}) as [string,{dev?:boolean;optional?:boolean;link?:boolean}][]){
+      if(!path.startsWith('node_modules/')||entry.dev)continue;
+      if(!/^[\w@./-]+$/.test(path)||path.split('/').some(part=>!part||part==='.'||part==='..')||entry.link)throw Error('Invalid production dependency inventory');
+      if(!existsSync(join(root,path))&&entry.optional)continue;
+      if(lstatSync(join(root,path)).isSymbolicLink())throw Error('Release dependency symbolic link refused');
+      walk(path,true);
+    }
+  }
+  return files.sort();
 }
 /** Offline content verification. Trust comes from the reviewed release artifact, never runtime Git or a mutable stamp. */
 export function verifyReleaseProvenance(root: string): ReleaseProvenance {
@@ -25,7 +38,7 @@ export function verifyReleaseProvenance(root: string): ReleaseProvenance {
     || Object.keys(manifest).sort().join(',')!==['schemaVersion','version','sourceCommit','sourceFiles','artifacts','releaseDigest'].sort().join(',')) throw Error('Invalid release provenance schema');
   for (const inventory of [manifest.sourceFiles,manifest.artifacts]) {
     if (!inventory || Array.isArray(inventory) || !Object.keys(inventory).length) throw Error('Empty release inventory');
-    for (const [path,hash] of Object.entries(inventory)) if (!/^[\w./-]+$/.test(path) || path.split('/').some(part=>!part||part==='.'||part==='..') || !/^[a-f0-9]{64}$/.test(hash)) throw Error('Invalid release inventory');
+    for (const [path,hash] of Object.entries(inventory)) if (!/^[\w@./-]+$/.test(path) || path.split('/').some(part=>!part||part==='.'||part==='..') || !/^[a-f0-9]{64}$/.test(hash)) throw Error('Invalid release inventory');
   }
   const {releaseDigest,...core}=manifest;
   if (sha256(JSON.stringify(core))!==releaseDigest) throw Error('Release digest mismatch');

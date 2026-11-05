@@ -28,3 +28,12 @@ test('owned_image_label_verification_requires_commit_and_release_digest', async(
   assert.equal(module.imageReleaseMatches({'sf.source':expected.sourceCommit,'sf.release':expected.releaseDigest},expected),true);
   for(const labels of [{},{'sf.source':'c'.repeat(40),'sf.release':expected.releaseDigest},{'sf.source':expected.sourceCommit,'sf.release':'c'.repeat(64)}])assert.equal(module.imageReleaseMatches(labels,expected),false);
 });
+
+test('release_artifact_inventory_covers_production_dependency_bytes_and_lockfile',async()=>{
+ const module=await import('../../src/release/provenance.ts');const root=mkdtempSync(join(tmpdir(),'sf-dependency-hash-'));
+ try{
+  for(const dir of ['dist','bin','node_modules/runtime-dep'])mkdirSync(join(root,dir),{recursive:true});
+  writeFileSync(join(root,'dist/service.js'),'compiled');writeFileSync(join(root,'node_modules/runtime-dep/index.js'),'dependency');writeFileSync(join(root,'package-lock.json'),JSON.stringify({packages:{'node_modules/runtime-dep':{version:'1.0.0'},'node_modules/development-only':{version:'1.0.0',dev:true}}}));
+  assert.deepEqual(module.artifactFiles(root),['dist/service.js','node_modules/runtime-dep/index.js','package-lock.json']);
+ }finally{rmSync(root,{recursive:true,force:true});}
+});

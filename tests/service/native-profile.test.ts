@@ -72,3 +72,17 @@ test('real_fleet_profile_change_while_both_templates_are_provisionable_requires_
     assert.equal(store.getAdmissionState().grants.length, 2); assert.equal(inspections, 6, 'Only image inspection, no attempt resources');
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('actual_owned_image_inspection_refuses_wrong_release_labels_before_provisioning',async()=>{
+ const {mkdtempSync,mkdirSync,writeFileSync,rmSync}=await import('node:fs');const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {expectedImageBuild}=await import('../../src/install/images.ts');
+ const expected=expectedImageBuild();const root=mkdtempSync(join(tmpdir(),'sf-image-labels-'));const ids={native:'sha256:'+'a'.repeat(64),worker:'sha256:'+'b'.repeat(64),proxy:'sha256:'+'c'.repeat(64)};
+ let bad:Record<string,string>={};let inspections=0;
+ try{
+  mkdirSync(join(root,'vault'),{mode:0o700});writeFileSync(join(root,'vault/native-copilot'),'owned-nonsecret-fixture',{mode:0o600});writeFileSync(join(root,'native-copilot.json'),JSON.stringify({schemaVersion:1,ref:'native-copilot',resource:'https://api.github.com',scopes:['read:user','user:email'],account:{id:'fixture',label:'Fixture'}}),{mode:0o600});
+  const config:RuntimeConfig={schemaVersion:1,installationId:'test',allowedOrigins:['http://127.0.0.1:4000'],repositories:[],providerCredentials:[{ref:'native-copilot',providerId:'copilot',resource:'https://api.github.com',scopes:['read:user','user:email']}],native:[{...template,nativeImage:ids.native,workerImage:ids.worker,credentialRef:'native-copilot',proxy:{...template.proxy,image:ids.proxy,entrypointSha256:expected.proxySha256}}]};
+  const fleet=createNativeFleet({config,installation:{id:'test',root,docker:{async command(args){assert.deepEqual(args.slice(0,2),['image','inspect']);inspections++;const role=Object.entries(ids).find(([,id])=>id===args[2])![0];return JSON.stringify([{Id:args[2],Os:'linux',Architecture:'amd64',Config:{Labels:{'sf.installation':'test','sf.build':expected.sourceFingerprint,'sf.role':role,'sf.source':expected.sourceCommit,'sf.release':expected.releaseDigest,...bad}}}]);}},secrets:{} as never},store:{} as never,broker:{} as never,protectedPaths:[]});
+  assert.deepEqual(await fleet.templateReadiness(),[]);assert.equal(inspections,3);
+  for(const mutation of [{'sf.source':'f'.repeat(40)},{'sf.release':'f'.repeat(64)}]){bad=mutation;assert.match((await fleet.templateReadiness()).join(' '),/owned build/);}
+  bad={};assert.deepEqual(await fleet.templateReadiness(),[]);
+ }finally{rmSync(root,{recursive:true,force:true});}
+});

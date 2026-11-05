@@ -26241,7 +26241,7 @@ function R_(e, t) {
 	ba(te), E(), T(x), E(2), T(i), P((e, i, a, o, c, u) => {
 		z(s, e), z(l, i), z(d, a), z(p, o), z(h, c), z(g, u), z(b, t.approved ? "Current server validation reports an approval for this scope." : "Explicit approval is required. Imported recipes are untrusted."), Sa(te, n()), te.disabled = r();
 	}, [
-		() => t.repositoryIds.map((e) => t.snapshot.repositories.find((t) => t.id === e)?.name ?? e).join(", ") || "None assigned",
+		() => t.repositoryIds.map((e) => t.snapshot.repositories.find((t) => t.id === e)?.name ? `${t.snapshot.repositories.find((t) => t.id === e).name} (${e})` : e).join(", ") || "None assigned",
 		() => t.requested.paths.map((e) => `${e.root} (${e.mode})`).join(", ") || "None",
 		() => t.requested.tools.join(", ") || "None",
 		() => t.requested.networkDestinations.join(", ") || "None",
@@ -30809,31 +30809,35 @@ ci(["change"]);
 var rS = /* @__PURE__ */ I("<p>Interactive control is active. Return control before automatic work can continue.</p><!>", 1), iS = /* @__PURE__ */ I("<p> </p>"), aS = /* @__PURE__ */ I("<option> </option>"), oS = /* @__PURE__ */ I("<p class=\"action-error\" role=\"alert\"> </p>"), sS = /* @__PURE__ */ I("<details class=\"repository\"><summary class=\"repository-summary\"><span><strong> </strong><small> </small></span><span> </span></summary> <div class=\"repository-content\"><!> <!><!> <div class=\"repository-actions\"><!><!></div> <p class=\"sub\">Manual tasks can run while automatic work is inactive. Priorities are independent and do not need to total 100.</p> <label>Execution owner <select><option>Factory default</option><!></select></label> <!> <!></div></details>");
 function cS(e, t) {
 	ht(t, !0);
-	let { client: n, state: r } = dt(Rp), i = /* @__PURE__ */ O(wn([])), a = /* @__PURE__ */ O(""), o = /* @__PURE__ */ O(""), s = /* @__PURE__ */ O(!1), c = wn({}), l = /* @__PURE__ */ O(void 0), u = /* @__PURE__ */ D(() => F(l) && F(l).revision > t.repository.revision ? F(l) : t.repository);
-	async function d() {
+	let { client: n, state: r } = dt(Rp), i = /* @__PURE__ */ O(wn([])), a = /* @__PURE__ */ O(""), o = /* @__PURE__ */ O(""), s = /* @__PURE__ */ O(!1), c = wn({}), l = /* @__PURE__ */ O(void 0), u = /* @__PURE__ */ D(() => F(l) && F(l).revision > t.repository.revision ? F(l) : t.repository), d = 0;
+	async function f() {
+		let e = ++d;
+		k(i, [], !0), k(a, "Loading rotation preview…");
 		try {
-			let e = await n.request("get_v1_repositories_id_rotation_preview", { id: t.repository.id });
-			k(i, e.nextTagIds, !0), k(a, e.reason ?? "", !0);
+			let r = await n.request("get_v1_repositories_id_rotation_preview", { id: t.repository.id });
+			if (e !== d) return;
+			k(i, r.nextTagIds, !0), k(a, r.reason ?? "", !0);
 		} catch {
-			k(a, "Rotation preview is unavailable. Refresh the connection to try again.");
+			if (e !== d) return;
+			k(i, [], !0), k(a, "Rotation preview is unavailable. Refresh the connection to try again.");
 		}
 	}
-	function f(e) {
+	function p(e) {
 		return e instanceof ag ? e.detail.recovery : "The outcome may be unknown. Refresh the connection and check the current value before retrying.";
 	}
-	async function p(e, t, n) {
+	async function m(e, t, n) {
 		k(s, !0), k(o, ""), await r.runAction(e, async (e) => {
 			try {
-				k(l, await t(e), !0), n?.(), await d();
+				k(l, await t(e), !0), n?.(), await f();
 			} catch (e) {
-				throw k(o, f(e), !0), e instanceof ag && e.status === 409 && await r.connect(), e;
+				throw k(o, p(e), !0), e instanceof ag && e.status === 409 && await r.connect(), e;
 			}
 		}), k(s, !1);
 	}
-	async function m(e, t) {
+	async function h(e, t) {
 		c[e] = t;
 		let r = F(u).revision, i = F(u).id;
-		await p("Change priority", (a) => n.request("patch_v1_repositories_id_weights", {
+		await m("Change priority", (a) => n.request("patch_v1_repositories_id_weights", {
 			id: i,
 			revision: r,
 			key: a,
@@ -30842,9 +30846,9 @@ function cS(e, t) {
 			delete c[e];
 		});
 	}
-	async function h() {
+	async function g() {
 		let e = F(u).revision, t = F(u).id;
-		await p("Return repository control", async (i) => {
+		await m("Return repository control", async (i) => {
 			let a = await n.request("post_v1_repositories_id_return_control", {
 				id: t,
 				revision: e,
@@ -30854,29 +30858,29 @@ function cS(e, t) {
 			return await r.connect(), a;
 		});
 	}
-	async function g(e) {
+	async function _(e) {
 		let t = F(u).revision, r = F(u).id;
-		await p("Change execution owner", (i) => n.request("patch_v1_repositories_id", {
+		await m("Change execution owner", (i) => n.request("patch_v1_repositories_id", {
 			id: r,
 			revision: t,
 			key: i,
 			body: { defaultOwnerId: e || null }
 		}));
 	}
-	async function _() {
+	async function v() {
 		let e = F(u).revision, t = F(u).id, r = !F(u).active;
-		await p("Change automatic activation", (i) => n.request("patch_v1_repositories_id", {
+		await m("Change automatic activation", (i) => n.request("patch_v1_repositories_id", {
 			id: t,
 			revision: e,
 			key: i,
 			body: { active: r }
 		}));
 	}
-	var v = sS(), y = A(v), ee = A(y), b = A(ee), x = M(b, !0), te = M(N(b), !0);
+	var y = sS(), ee = A(y), b = A(ee), x = A(b), te = M(x, !0), S = M(N(x), !0);
+	T(b);
+	var ne = M(N(b));
 	T(ee);
-	var S = M(N(ee));
-	T(y);
-	var ne = N(y, 2), re = A(ne), ie = (e) => {
+	var re = N(ee, 2), ie = A(re), ae = (e) => {
 		var t = rS(), n = N(j(t));
 		{
 			let e = /* @__PURE__ */ D(() => !r.canMutate || F(s));
@@ -30885,7 +30889,7 @@ function cS(e, t) {
 				get disabled() {
 					return F(e);
 				},
-				onclick: h,
+				onclick: g,
 				children: (e, t) => {
 					E(), R(e, L("Return control"));
 				},
@@ -30894,32 +30898,32 @@ function cS(e, t) {
 		}
 		R(e, t);
 	};
-	B(re, (e) => {
-		F(u).controlMode === "human" && e(ie);
+	B(ie, (e) => {
+		F(u).controlMode === "human" && e(ae);
 	});
-	var ae = N(re, 2), oe = (e) => {
+	var oe = N(ie, 2), se = (e) => {
 		var t = iS(), n = M(t, !0);
 		P(() => z(n, F(u).reason)), R(e, t);
 	};
-	B(ae, (e) => {
-		F(u).reason && e(oe);
+	B(oe, (e) => {
+		F(u).reason && e(se);
 	});
-	var se = N(ae), ce = (e) => {
+	var ce = N(oe), le = (e) => {
 		var t = iS(), n = M(t, !0);
 		P(() => z(n, F(u).recovery)), R(e, t);
 	};
-	B(se, (e) => {
-		F(u).recovery && e(ce);
+	B(ce, (e) => {
+		F(u).recovery && e(le);
 	});
-	var le = N(se, 2), ue = A(le);
+	var ue = N(ce, 2), de = A(ue);
 	{
 		let e = /* @__PURE__ */ D(() => !r.canMutate || F(s));
-		W(ue, {
+		W(de, {
 			variant: "outline",
 			get disabled() {
 				return F(e);
 			},
-			onclick: _,
+			onclick: v,
 			children: (e, t) => {
 				E();
 				var n = L();
@@ -30928,30 +30932,30 @@ function cS(e, t) {
 			$$slots: { default: !0 }
 		});
 	}
-	W(N(ue), {
+	W(N(de), {
 		variant: "outline",
 		onclick: () => t.showTasks(t.repository.id),
 		children: (e, t) => {
 			E(), R(e, L("View tasks"));
 		},
 		$$slots: { default: !0 }
-	}), T(le);
-	var de = N(le, 4), fe = N(A(de)), C = A(fe);
-	C.value = C.__value = "", Ii(N(C), 17, () => r.data.readiness.filter((e) => e.supportedProviders.length), (e) => e.ownerId, (e, t) => {
+	}), T(ue);
+	var fe = N(ue, 4), C = N(A(fe)), pe = A(C);
+	pe.value = pe.__value = "", Ii(N(pe), 17, () => r.data.readiness.filter((e) => e.supportedProviders.length), (e) => e.ownerId, (e, t) => {
 		var n = aS(), r = M(n, !0), i = {};
 		P(() => {
 			z(r, F(t).ownerId), i !== (i = F(t).ownerId) && (n.value = (n.__value = i) ?? "");
 		}), R(e, n);
-	}), T(fe);
-	var pe;
-	sa(fe), T(de);
-	var me = N(de, 2);
+	}), T(C);
+	var me;
+	sa(C), T(fe);
+	var he = N(fe, 2);
 	{
 		let e = /* @__PURE__ */ D(() => ({
 			...F(u).weights,
 			...c
 		})), n = /* @__PURE__ */ D(() => !r.canMutate || F(s));
-		nS(me, {
+		nS(he, {
 			get repositoryId() {
 				return t.repository.id;
 			},
@@ -30970,20 +30974,20 @@ function cS(e, t) {
 			get disabled() {
 				return F(n);
 			},
-			onChange: m
+			onChange: h
 		});
 	}
-	var he = N(me, 2), ge = (e) => {
+	var ge = N(he, 2), _e = (e) => {
 		var t = oS(), n = M(t, !0);
 		P(() => z(n, F(o))), R(e, t);
 	};
-	B(he, (e) => {
-		F(o) && e(ge);
-	}), T(ne), T(v), P(() => {
-		z(x, t.repository.name), z(te, t.repository.url), z(S, `${F(u).active ? "Active" : "Inactive"}${F(u).controlMode === "human" ? " · Interactive control" : ""}`), Ca(fe, "aria-label", "Execution owner for " + t.repository.name), fe.disabled = !r.canMutate || F(s), pe !== (pe = F(u).defaultOwnerId ?? "") && (fe.value = (fe.__value = pe) ?? "", oa(fe, pe));
-	}), oi("toggle", v, (e) => {
-		e.currentTarget.open && d();
-	}), si("change", fe, (e) => g(e.currentTarget.value)), R(e, v), gt();
+	B(ge, (e) => {
+		F(o) && e(_e);
+	}), T(re), T(y), P(() => {
+		z(te, t.repository.name), z(S, t.repository.url), z(ne, `${F(u).active ? "Active" : "Inactive"}${F(u).controlMode === "human" ? " · Interactive control" : ""}`), Ca(C, "aria-label", "Execution owner for " + t.repository.name), C.disabled = !r.canMutate || F(s), me !== (me = F(u).defaultOwnerId ?? "") && (C.value = (C.__value = me) ?? "", oa(C, me));
+	}), oi("toggle", y, (e) => {
+		e.currentTarget.open && f();
+	}), si("change", C, (e) => _(e.currentTarget.value)), R(e, y), gt();
 }
 ci(["change"]);
 // src/lib/features/repositories/RepositoryList.svelte
